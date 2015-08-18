@@ -1,0 +1,13 @@
+flags: {}
+packages:
+- '.'
+- location:
+    git: git@github.com:int-index/Haskell-Morte-Library.git
+    commit: 3624d2db71f168f401382321fab9f71095787d1a
+- location:
+    git: git@github.com:int-index/source.git
+    commit: 2dc9dc03009a27fd5d8b1a179a4364ac30c09422
+  subdirs:
+    - lib
+extra-deps: []
+resolver: lts-3.0
