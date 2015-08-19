@@ -66,7 +66,7 @@ instance Syntax State where
  layout viewport state = do
     return $ background dark1
            $ centerContainer viewport
-           $ vertical [layoutExpr Seq.empty (view stateExpr state)]
+           $ vertical [layoutExpr (pad 5 5 5 5) Seq.empty (view stateExpr state)]
   where
     dark1 = RGB 0.2 0.2 0.2
     dark2 = RGB 0.3 0.3 0.3
@@ -78,7 +78,7 @@ instance Syntax State where
 
     sel :: Path -> Layout -> Layout
     sel path
-        | current = background dark3
+        | current = border dark2 . background dark3
         | otherwise = id
       where current = path == state ^. statePath
 
@@ -88,8 +88,8 @@ instance Syntax State where
         $ extend (Extents w 1)
         $ horizontal []
 
-    layoutExpr :: Path -> M.Expr Hole -> Layout
-    layoutExpr path = sel path . \case
+    layoutExpr :: (Layout -> Layout) -> Path -> M.Expr Hole -> Layout
+    layoutExpr hook path = sel path . hook . \case
         M.Const c -> layoutConst c
         M.Var   x -> layoutVar   x
         M.Lam x _A  b -> layoutLam path (Text.Lazy.toStrict x) _A  b
@@ -120,19 +120,19 @@ instance Syntax State where
             , horizontal
               [ sel (path |> (-2)) (pad 4 4 0 0 (text x))
               , pad 4 4 0 0 (punct ":")
-              , pad 4 4 0 0 (layoutExpr (path |> (-1)) _A)
+              , layoutExpr (pad 4 4 0 0) (path |> (-1)) _A
               ]
             ]
-        bodyBox = layoutExpr (path |> 0) b
+        bodyBox = layoutExpr id (path |> 0) b
 
     layoutLam = layoutCorner "λ"
     layoutPi  = layoutCorner "Π"
 
     layoutApp :: Path -> M.Expr Hole -> M.Expr Hole -> Layout
     layoutApp path f a = (center . horizontal)
-        [ layoutExpr (path |> 0) f
-        , (pad 5 5 5 5 . border dark2 . sel (path |> 1) . pad 5 5 5 5)
-          (layoutExpr (path |> 1) a)
+        [ layoutExpr (pad 5 5 5 5) (path |> 0) f
+        , (pad 5 5 5 5 . border dark2)
+          (layoutExpr (pad 5 5 5 5) (path |> 1) a)
         ]
 
  react _ (KeyPress modifiers keyCode) state
