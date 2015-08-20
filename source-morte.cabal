@@ -5,7 +5,8 @@ cabal-version:       >=1.10
 
 executable source-morte
   main-is:             Main.hs
-  other-modules:       Source.Language.Morte
+  other-modules:       Control.Lens.Discard
+                       Source.Language.Morte
 
   build-depends:       base
                ,       containers
@@ -20,3 +21,5 @@ executable source-morte
   default-extensions:  LambdaCase
                        ScopedTypeVariables
                        OverloadedStrings
+                       RankNTypes
+                       GADTs

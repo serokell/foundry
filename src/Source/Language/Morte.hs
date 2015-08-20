@@ -14,6 +14,7 @@ import Data.Maybe
 import Data.Monoid
 import Data.String (fromString)
 import Control.Lens
+import Control.Lens.Discard
 
 import Source.Syntax
 import Source.Input
@@ -27,23 +28,47 @@ import qualified Morte.Import as M.I
 
 type Path = Seq Int
 
-data PP a = PPText Text | PPExpr (M.Expr a)
+atPath :: Path -> D'Traversal' (M.Expr a) (Node a)
+atPath path h e = case uncons path of
+  Nothing -> fmap getNode (h (NodeExpr e))
+  Just (p, ps) -> case e of
 
--- TODO: a prism
-atPath :: Path -> M.Expr a -> Maybe (PP a)
-atPath = atPath' . toList
-  where
-    atPath' [] e = Just (PPExpr e)
-    atPath' (0:steps) (M.Lam _ _  b) = atPath' steps b
-    atPath' ((-1):steps) (M.Lam _ _A _) = atPath' steps _A
-    atPath' [-2] (M.Lam x _   _) = Just (PPText (Text.Lazy.toStrict x))
-    atPath' (0:steps) (M.Pi _ _  _B) = atPath' steps _B
-    atPath' ((-1):steps) (M.Pi _ _A  _) = atPath' steps _A
-    atPath' [-2] (M.Pi x _   _) = Just (PPText (Text.Lazy.toStrict x))
-    atPath' (0:steps) (M.App f _) = atPath' steps f
-    atPath' (1:steps) (M.App _ x) = atPath' steps x
-    atPath' _ _ = Nothing
+    M.App f x -> case p of
+        0 -> (\f' -> M.App f' x) <$> atPath ps h f
+        1 -> (\x' -> M.App f x') <$> atPath ps h x
+        _ -> pure e
 
+    M.Lam x _A b -> case p of
+        -2 | Seq.null ps
+            ->  h (NodeText (Text.Lazy.toStrict x))
+           <&> \x' -> M.Lam (Text.Lazy.fromStrict (getNode x')) _A b
+        -1 -> (\_A' -> M.Lam x _A' b) <$> atPath ps h _A
+        0  -> (\ b' -> M.Lam x _A b') <$> atPath ps h  b
+        _ -> pure e
+
+    M.Pi x _A _B -> case p of
+        -2 | Seq.null ps
+            ->  h (NodeText (Text.Lazy.toStrict x))
+           <&> \x' -> M.Pi (Text.Lazy.fromStrict (getNode x')) _A _B
+        -1 -> (\_A' -> M.Pi x _A' _B) <$> atPath ps h _A
+        0  -> (\_B' -> M.Pi x _A _B') <$> atPath ps h _B
+        _ -> pure e
+
+    _ -> pure e
+
+
+data Node a t where
+    NodeText :: Text -> Node a Text
+    NodeExpr :: M.Expr a -> Node a (M.Expr a)
+
+getNode :: Node a t -> t
+getNode = \case
+    NodeText t -> t
+    NodeExpr t -> t
+
+getNodeExpr :: Discard (Node a) -> Maybe (M.Expr a)
+getNodeExpr (Discard (NodeExpr expr)) = Just expr
+getNodeExpr _ = Nothing
 
 data Hole = Blank | Path M.Path
 
@@ -170,9 +195,9 @@ instance Syntax State where
     pathChild :: M.Expr a -> Path -> Maybe Path
     pathChild = pathNthChild 0
 
-    pathNthChild :: Int -> M.Expr a -> Path -> Maybe Path
+    pathNthChild :: forall a . Int -> M.Expr a -> Path -> Maybe Path
     pathNthChild n expr path = do
-        PPExpr subexpr <- atPath path expr
+        subexpr <- d'preview (atPath path) expr >>= getNodeExpr
         case subexpr of
             M.App _ _ -> do
                 guard (n >= 0 && n <= 1)
