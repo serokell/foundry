@@ -75,6 +75,7 @@ data Hole = Blank | Path M.Path
 data State = State
     { _stateExpr :: M.Expr Hole
     , _statePath :: Path
+    , _statePointer :: Offset
     }
 
 makeLenses ''State
@@ -86,79 +87,13 @@ instance Syntax State where
     e <- case M.P.exprFromText et of
       Left  _ -> return $ M.Const M.Star
       Right e -> fmap M.absurd <$> M.I.load e
-    return $ State e Seq.empty
+    return $ State e Seq.empty (Offset 0 0)
 
  layout viewport state = do
-    return $ background dark1
-           $ centerContainer viewport
-           $ vertical [layoutExpr (pad 5 5 5 5) Seq.empty (view stateExpr state)]
-  where
-    dark1 = RGB 0.2 0.2 0.2
-    dark2 = RGB 0.3 0.3 0.3
-    dark3 = RGB 0.25 0.25 0.25
-    light1 = RGB 0.7 0.7 0.7
-    font = Font "Ubuntu" 12 (RGB 1 1 1) FontWeightNormal
-    text = layoutText font
-    punct = layoutText (font { fontColor = light1 })
-
-    sel :: Path -> Layout -> Layout
-    sel path
-        | current = border dark2 . background dark3
-        | otherwise = id
-      where current = path == state ^. statePath
-
-    line :: Color -> Int -> Layout
-    line color w
-        = background color
-        $ extend (Extents w 1)
-        $ horizontal []
-
-    layoutExpr :: (Layout -> Layout) -> Path -> M.Expr Hole -> Layout
-    layoutExpr hook path = sel path . hook . \case
-        M.Const c -> layoutConst c
-        M.Var   x -> layoutVar   x
-        M.Lam x _A  b -> layoutLam path (Text.Lazy.toStrict x) _A  b
-        M.Pi  x _A _B -> layoutPi  path (Text.Lazy.toStrict x) _A _B
-        M.App f a -> layoutApp path f a
-        _ -> text "Can't render"
-
-    layoutConst :: M.Const -> Layout
-    layoutConst = \case
-        M.Star -> punct "★"
-        M.Box -> punct "□"
-
-    layoutVar :: M.Var -> Layout
-    layoutVar (M.V txt n) = text (Text.Lazy.toStrict txt <> i)
-      where
-        -- TODO: subscript
-        i = if n == 0 then "" else "@" <> fromString (show n)
-
-    layoutCorner :: Text -> Path -> Text -> M.Expr Hole -> M.Expr Hole -> Layout
-    layoutCorner sym path x _A b = vertical
-        [ headerBox
-        , pad 0 0 4 4 $ line light1 (width headerBox `max` width bodyBox)
-        , bodyBox
-        ]
-      where
-        headerBox = horizontal
-            [ pad 0 4 0 0 (punct sym)
-            , horizontal
-              [ sel (path |> (-2)) (pad 4 4 0 0 (text x))
-              , pad 4 4 0 0 (punct ":")
-              , layoutExpr (pad 4 4 0 0) (path |> (-1)) _A
-              ]
-            ]
-        bodyBox = layoutExpr id (path |> 0) b
-
-    layoutLam = layoutCorner "λ"
-    layoutPi  = layoutCorner "Π"
-
-    layoutApp :: Path -> M.Expr Hole -> M.Expr Hole -> Layout
-    layoutApp path f a = (center . horizontal)
-        [ layoutExpr (pad 5 5 5 5) (path |> 0) f
-        , (pad 5 5 5 5 . border dark2)
-          (layoutExpr (pad 5 5 5 5) (path |> 1) a)
-        ]
+    l <- layout' viewport state
+    let mp = locateFirstDecoration (state ^. statePointer) (layoutPaths l)
+    print mp
+    return (layoutDecorations mp l)
 
  react _ inputEvent state
   | KeyPress _ keyCode <- inputEvent
@@ -184,6 +119,10 @@ instance Syntax State where
   = return . Just
   $ updatePath
   $ pathChild (state ^. stateExpr) (state ^. statePath)
+
+  | PointerMotion x y <- inputEvent
+  = return . Just
+  $ state & statePointer .~ Offset x y
 
   | otherwise
   = return Nothing
@@ -229,3 +168,102 @@ instance Syntax State where
     pathNeighbourL, pathNeighbourR :: M.Expr a -> Path -> Maybe Path
     pathNeighbourL = pathNeighbour (subtract 1)
     pathNeighbourR = pathNeighbour (+ 1)
+
+data LD = LD'Path Path | LD'Decoration (Maybe Path -> Maybe Decoration)
+
+pathHere :: Path -> Layout LD -> Layout LD
+pathHere = LayoutDecoration . LD'Path
+
+instance FromDecoration LD where
+    fromDecoration d = LD'Decoration (pure (pure d))
+
+layoutPaths :: Layout LD -> Layout Path
+layoutPaths
+    = stripNothingDecoration
+    . fmap (\case { LD'Path p -> Just p; _ -> Nothing } )
+
+layoutDecorations :: Maybe Path -> Layout LD -> Layout Decoration
+layoutDecorations p
+    = stripNothingDecoration
+    . fmap (\case { LD'Decoration f -> f p; _ -> Nothing })
+
+layout' :: Extents -> State -> IO (Layout LD)
+layout' viewport state = do
+    return $ background dark1
+           $ centerContainer viewport
+           $ vertical [layoutExpr (pad 5 5 5 5) Seq.empty (view stateExpr state)]
+  where
+    dark1 = RGB 0.2 0.2 0.2
+    dark2 = RGB 0.3 0.3 0.3
+    dark3 = RGB 0.25 0.25 0.25
+    light1 = RGB 0.7 0.7 0.7
+    font = Font "Ubuntu" 12 (RGB 1 1 1) FontWeightNormal
+    text = layoutText font
+    punct = layoutText (font { fontColor = light1 })
+
+    sel :: Path -> Layout LD -> Layout LD
+    sel path = hover' . sel' . pathHere path
+      where
+        current = path == state ^. statePath
+
+        sel' | current = border dark2 . background dark3
+             | otherwise = id
+
+        hover' = (LayoutDecoration . LD'Decoration) hover
+
+        hover mp
+            | Just p <- mp, p == path = Just (DecorationBorder light1)
+            | otherwise = Nothing
+
+    line :: Color -> Int -> Layout LD
+    line color w
+        = background color
+        $ extend (Extents w 1)
+        $ horizontal []
+
+    layoutExpr :: (Layout LD -> Layout LD) -> Path -> M.Expr Hole -> Layout LD
+    layoutExpr hook path = sel path . hook . \case
+        M.Const c -> layoutConst c
+        M.Var   x -> layoutVar   x
+        M.Lam x _A  b -> layoutLam path (Text.Lazy.toStrict x) _A  b
+        M.Pi  x _A _B -> layoutPi  path (Text.Lazy.toStrict x) _A _B
+        M.App f a -> layoutApp path f a
+        _ -> text "Can't render"
+
+    layoutConst :: M.Const -> Layout LD
+    layoutConst = \case
+        M.Star -> punct "★"
+        M.Box -> punct "□"
+
+    layoutVar :: M.Var -> Layout LD
+    layoutVar (M.V txt n) = text (Text.Lazy.toStrict txt <> i)
+      where
+        -- TODO: subscript
+        i = if n == 0 then "" else "@" <> fromString (show n)
+
+    layoutCorner :: Text -> Path -> Text -> M.Expr Hole -> M.Expr Hole -> Layout LD
+    layoutCorner sym path x _A b = vertical
+        [ headerBox
+        , pad 0 0 4 4 $ line light1 (width headerBox `max` width bodyBox)
+        , bodyBox
+        ]
+      where
+        headerBox = horizontal
+            [ pad 0 4 0 0 (punct sym)
+            , horizontal
+              [ sel (path |> (-2)) (pad 4 4 0 0 (text x))
+              , pad 4 4 0 0 (punct ":")
+              , layoutExpr (pad 4 4 0 0) (path |> (-1)) _A
+              ]
+            ]
+        bodyBox = layoutExpr id (path |> 0) b
+
+    layoutLam = layoutCorner "λ"
+    layoutPi  = layoutCorner "Π"
+
+    layoutApp :: Path -> M.Expr Hole -> M.Expr Hole -> Layout LD
+    layoutApp path f a = (center . horizontal)
+        [ layoutExpr (pad 5 5 5 5) (path |> 0) f
+        , (pad 5 5 5 5)
+          (layoutExpr (border dark2 . pad 5 5 5 5) (path |> 1) a)
+        ]
