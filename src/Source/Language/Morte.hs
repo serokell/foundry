@@ -160,23 +160,27 @@ instance Syntax State where
           (layoutExpr (pad 5 5 5 5) (path |> 1) a)
         ]
 
- react _ (KeyPress modifiers keyCode) state
-  | keyCode == KeyCode.ArrowLeft || keyChar keyCode == Just 'h'
+ react _ inputEvent state
+  | KeyPress _ keyCode <- inputEvent
+  , keyCode == KeyCode.ArrowLeft || keyChar keyCode == Just 'h'
   = return . Just
   $ updatePath
   $ pathNeighbourL (state ^. stateExpr) (state ^. statePath)
 
-  | keyCode == KeyCode.ArrowRight || keyChar keyCode == Just 'l'
+  | KeyPress _ keyCode <- inputEvent
+  , keyCode == KeyCode.ArrowRight || keyChar keyCode == Just 'l'
   = return . Just
   $ updatePath
   $ pathNeighbourR (state ^. stateExpr) (state ^. statePath)
 
-  | keyCode == KeyCode.ArrowUp || keyChar keyCode == Just 'k'
+  | KeyPress _ keyCode <- inputEvent
+  , keyCode == KeyCode.ArrowUp || keyChar keyCode == Just 'k'
   = return . Just
   $ updatePath
   $ pathUp (state ^. statePath)
 
-  | keyCode == KeyCode.ArrowDown || keyChar keyCode == Just 'j'
+  | KeyPress _ keyCode <- inputEvent
+  , keyCode == KeyCode.ArrowDown || keyChar keyCode == Just 'j'
   = return . Just
   $ updatePath
   $ pathChild (state ^. stateExpr) (state ^. statePath)
