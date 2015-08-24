@@ -15,6 +15,7 @@ import Data.Monoid
 import Data.String (fromString)
 import Control.Lens
 import Control.Lens.Discard
+import Data.IORef
 
 import Source.Syntax
 import Source.Input
@@ -76,6 +77,7 @@ data State = State
     { _stateExpr :: M.Expr Hole
     , _statePath :: Path
     , _statePointer :: Offset
+    , _stateHover :: IORef (Maybe Path)
     }
 
 makeLenses ''State
@@ -87,12 +89,13 @@ instance Syntax State where
     e <- case M.P.exprFromText et of
       Left  _ -> return $ M.Const M.Star
       Right e -> fmap M.absurd <$> M.I.load e
-    return $ State e Seq.empty (Offset 0 0)
+    hoverRef <- newIORef Nothing
+    return $ State e Seq.empty (Offset 0 0) hoverRef
 
  layout viewport state = do
     l <- layout' viewport state
     let mp = locateFirstDecoration (state ^. statePointer) (layoutPaths l)
-    print mp
+    writeIORef (state ^. stateHover) mp
     return (layoutDecorations mp l)
 
  react _ inputEvent state
@@ -119,6 +122,13 @@ instance Syntax State where
   = return . Just
   $ updatePath
   $ pathChild (state ^. stateExpr) (state ^. statePath)
+
+  | ButtonPress <- inputEvent = do
+      mp <- readIORef (state ^. stateHover)
+      case mp of
+          Nothing   -> return Nothing
+          Just path -> return . Just
+                     $ state & statePath .~ path
 
   | PointerMotion x y <- inputEvent
   = return . Just
@@ -202,7 +212,7 @@ layout' viewport state = do
     punct = layoutText (font { fontColor = light1 })
 
     sel :: Path -> Layout LD -> Layout LD
-    sel path = hover' . sel' . pathHere path
+    sel path = sel' . hover' . pad 1 1 1 1 . pathHere path
       where
         current = path == state ^. statePath
 
