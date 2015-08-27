@@ -179,13 +179,16 @@ instance Syntax State where
     pathNeighbourL = pathNeighbour (subtract 1)
     pathNeighbourR = pathNeighbour (+ 1)
 
-data LD = LD'Path Path | LD'Decoration (Maybe Path -> Maybe Decoration)
+data LD = LD'Path Path | LD'Decoration (Maybe Path -> Layout Decoration -> Layout Decoration)
 
 pathHere :: Path -> Layout LD -> Layout LD
 pathHere = LayoutDecoration . LD'Path
 
+onHoverPath :: (Maybe Path -> Layout Decoration -> Layout Decoration) -> Layout LD -> Layout LD
+onHoverPath = LayoutDecoration . LD'Decoration
+
 instance FromDecoration LD where
-    fromDecoration d = LD'Decoration (pure (pure d))
+    fromDecoration d = LD'Decoration (\_ -> LayoutDecoration d)
 
 layoutPaths :: Layout LD -> Layout Path
 layoutPaths
@@ -194,8 +197,9 @@ layoutPaths
 
 layoutDecorations :: Maybe Path -> Layout LD -> Layout Decoration
 layoutDecorations p
-    = stripNothingDecoration
-    . fmap (\case { LD'Decoration f -> f p; _ -> Nothing })
+    = layoutAppDecoration
+    . stripNothingDecoration
+    . fmap (\case { LD'Decoration f -> Just (f p); _ -> Nothing })
 
 layout' :: Extents -> State -> IO (Layout LD)
 layout' viewport state = do
@@ -212,18 +216,17 @@ layout' viewport state = do
     punct = layoutText (font { fontColor = light1 })
 
     sel :: Path -> Layout LD -> Layout LD
-    sel path = sel' . hover' . pad 1 1 1 1 . pathHere path
+    sel path = sel' . hover . pathHere path
       where
         current = path == state ^. statePath
 
         sel' | current = border dark2 . background dark3
              | otherwise = id
 
-        hover' = (LayoutDecoration . LD'Decoration) hover
-
-        hover mp
-            | Just p <- mp, p == path = Just (DecorationBorder light1)
-            | otherwise = Nothing
+        -- TODO: border always on top
+        hover = onHoverPath $ \case
+            Just p | p == path -> border light1
+            _ -> id
 
     line :: Color -> Int -> Layout LD
     line color w

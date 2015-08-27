@@ -6,7 +6,7 @@ packages:
     commit: 845bf236e817d7cd14e9b5c6081df2a5efadcac2
 - location:
     git: git@github.com:int-index/source.git
-    commit: 25c530b45fe9c75dbbf30a707e66d6a94866dd73
+    commit: f42916fb54d77be2b2614cae762b7db3fbc21046
   subdirs:
     - lib
 extra-deps: []
