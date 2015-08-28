@@ -216,7 +216,7 @@ layout' viewport state = do
     punct = layoutText (font { fontColor = light1 })
 
     sel :: Path -> Layout LD -> Layout LD
-    sel path = sel' . hover . pathHere path
+    sel path = hover . sel' . pathHere path
       where
         current = path == state ^. statePath
 
@@ -225,13 +225,13 @@ layout' viewport state = do
 
         -- TODO: border always on top
         hover = onHoverPath $ \case
-            Just p | p == path -> border light1
+            Just p | p == path -> pad 1 1 1 1 . border light1 . pad 2 2 2 2
             _ -> id
 
     line :: Color -> Int -> Layout LD
     line color w
         = background color
-        $ extend (Extents w 1)
+        $ pad w 0 1 0
         $ horizontal []
 
     layoutExpr :: (Layout LD -> Layout LD) -> Path -> M.Expr Hole -> Layout LD
