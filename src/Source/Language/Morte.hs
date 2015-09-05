@@ -216,7 +216,7 @@ layout' viewport state = do
     punct = layoutText (font { fontColor = light1 })
 
     sel :: Path -> Layout LD -> Layout LD
-    sel path = hover . sel' . pathHere path
+    sel path = hover . pad 1 1 1 1 . sel' . pathHere path
       where
         current = path == state ^. statePath
 
@@ -225,7 +225,7 @@ layout' viewport state = do
 
         -- TODO: border always on top
         hover = onHoverPath $ \case
-            Just p | p == path -> pad 1 1 1 1 . border light1 . pad 2 2 2 2
+            Just p | p == path -> border light1
             _ -> id
 
     line :: Color -> Int -> Layout LD
