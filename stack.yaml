@@ -6,8 +6,8 @@ packages:
     commit: 845bf236e817d7cd14e9b5c6081df2a5efadcac2
 - location:
     git: git@github.com:int-index/source.git
-    commit: f1ae688a2bd634f64a6b2b72c736da94adc003eb
+    commit: 87fc68b7b0531a7c0fdcbe5309b3d368d1197111
   subdirs:
     - lib
 extra-deps: []
-resolver: lts-3.7
+resolver: lts-3.8

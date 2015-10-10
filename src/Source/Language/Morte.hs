@@ -20,7 +20,7 @@ import Data.IORef
 import Source.Syntax
 import Source.Input
 import Source.Style
-import Source.Layout
+import Source.OldLayout
 import qualified Source.Input.KeyCode as KeyCode
 
 import qualified Morte.Core as M
@@ -93,10 +93,10 @@ instance Syntax State where
     return $ State e Seq.empty (Offset 0 0) hoverRef
 
  layout viewport state = do
-    l <- layout' viewport state
+    l <- layout' (uncurry Extents viewport) state
     let mp = locateFirstDecoration (state ^. statePointer) (layoutPaths l)
     writeIORef (state ^. stateHover) mp
-    return (layoutDecorations mp l)
+    return (migrate (layoutDecorations mp l))
 
  react _ inputEvent state
   | KeyPress _ keyCode <- inputEvent
