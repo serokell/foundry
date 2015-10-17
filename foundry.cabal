@@ -5,8 +5,7 @@ cabal-version:       >=1.10
 
 executable foundry
   main-is:             Main.hs
-  other-modules:       Control.Lens.Discard
-                       Source.Language.Morte
+  other-modules:       Source.Language.Morte
                        Source.Language.Morte.Node
 
   build-depends:       base
