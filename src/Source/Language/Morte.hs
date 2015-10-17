@@ -37,7 +37,7 @@ blank' = do
   _stateExpr <- view noded <$> case M.P.exprFromText et of
     Left  _ -> return $ M.Const M.Star
     Right e -> M.I.load e
-  let _statePath = Discard Here
+  let _statePath = Discard (pExprLam -@- pLamExpr1 -@- pHere)
   return State{..}
 
 getExcess :: Integral n => n -> n -> (n, n)
@@ -87,7 +87,7 @@ layout' viewport state = do
   return
     $ background dark1
     $ center viewport
-    $ layoutExpr (join pad (5, 5)) (state ^. stateExpr)
+    $ layoutExpr (join pad (5, 5)) pHere (state ^. stateExpr)
   where
     dark1 = RGB 0.2 0.2 0.2
     dark2 = RGB 0.3 0.3 0.3
@@ -97,22 +97,27 @@ layout' viewport state = do
     text = textline font
     punct = textline (font { fontColor = light1 })
 
-    sel :: Discard PathExpr -> CollageDraw Int Int -> CollageDraw Int Int
+    sel :: forall q . PathExpr q -> CollageDraw Int Int -> CollageDraw Int Int
     sel path
       | current = outline dark2 . background dark3
       | otherwise = id
       where
-        current = path == state ^. statePath
+        current = Discard path == state ^. statePath
 
-    layoutExpr :: Op1 (CollageDraw Int Int) -> NodeExpr -> CollageDraw Int Int
-    layoutExpr hook
-      = hook
+    layoutExpr
+      :: Op1 (CollageDraw Int Int)
+      -> PathExpr ('LabelSum 'Expr)
+      -> NodeExpr
+      -> CollageDraw Int Int
+    layoutExpr hook path
+      = sel path
+      . hook
       . onExpr
           layoutConst
           layoutVar
-          layoutLam
-          layoutPi
-          layoutApp
+          (layoutLam $ path -@- pExprLam)
+          (layoutPi  $ path -@- pExprPi)
+          (layoutApp $ path -@- pExprApp)
           layoutEmbed
 
     layoutConst :: NodeConst -> CollageDraw Int Int
@@ -126,39 +131,78 @@ layout' viewport state = do
         -- TODO: subscript
         i = if n == 0 then "" else "@" <> fromString (show n)
 
-    layoutApp :: NodeApp -> CollageDraw Int Int
-    layoutApp = withProduct $ \get ->
-        [ layoutExpr (join pad (5, 5)) (get SAppExpr1)
-        , join pad (5, 5) (layoutExpr (outline dark2 . join pad (5, 5)) (get SAppExpr2))
+    layoutApp
+      :: PathExpr ('LabelProduct 'App)
+      -> NodeApp
+      -> CollageDraw Int Int
+    layoutApp path = withProduct $ \get ->
+        [ layoutExpr
+            (join pad (5, 5))
+            (path -@- pAppExpr1)
+            (get SAppExpr1)
+        , join pad (5, 5) (layoutExpr
+            (outline dark2 . join pad (5, 5))
+            (path -@- pAppExpr2)
+            (get SAppExpr2))
         ] & horizontalCenter
 
-    layoutLam :: NodeLam -> CollageDraw Int Int
-    layoutLam = withProduct $ \get ->
-      layoutCorner "λ" (get SLamArg) (get SLamExpr1) (get SLamExpr2)
-
-    layoutPi :: NodePi -> CollageDraw Int Int
-    layoutPi = withProduct $ \get ->
-      layoutCorner "Π" (get SPiArg) (get SPiExpr1) (get SPiExpr2)
-
-    layoutCorner :: Text -> NodeArg -> NodeExpr -> NodeExpr -> CollageDraw Int Int
-    layoutCorner quantifier (End x) _A b =
-      [ header
-      , join pad (0, 4) (line light1 maxWidth)
-      , body
-      ] & vertical
-      where
+    layoutLam
+      :: PathExpr ('LabelProduct 'Lam)
+      -> NodeLam
+      -> CollageDraw Int Int
+    layoutLam path = withProduct $ \get ->
+      let
         maxWidth = (max `on` fst.getExtents) header body
         header =
-          [ extend (4, 0) (punct quantifier)
-          , [ join pad (4, 0) (text x)
+          [ extend (4, 0) (punct "λ")
+          , [ layoutArg
+                (join pad (4, 0))
+                (path -@- pLamArg)
+                (get SLamArg)
             , join pad (4, 0) (punct ":")
-            , layoutExpr (join pad (4, 0)) _A
+            , layoutExpr (join pad (4, 0)) (path -@- pLamExpr1) (get SLamExpr1)
             ] & horizontal
           ] & horizontal
-        body = layoutExpr id b
+        body = layoutExpr id (path -@- pLamExpr2) (get SLamExpr2)
+      in
+        [ header
+        , join pad (0, 4) (line light1 maxWidth)
+        , body
+        ] & vertical
+
+    layoutPi
+      :: PathExpr ('LabelProduct 'Pi)
+      -> NodePi
+      -> CollageDraw Int Int
+    layoutPi path = withProduct $ \get ->
+      let
+        maxWidth = (max `on` fst.getExtents) header body
+        header =
+          [ extend (4, 0) (punct "Π")
+          , [ layoutArg
+                (join pad (4, 0))
+                (path -@- pPiArg)
+                (get SPiArg)
+            , join pad (4, 0) (punct ":")
+            , layoutExpr (join pad (4, 0)) (path -@- pPiExpr1) (get SPiExpr1)
+            ] & horizontal
+          ] & horizontal
+        body = layoutExpr id (path -@- pPiExpr2) (get SPiExpr2)
+      in
+        [ header
+        , join pad (0, 4) (line light1 maxWidth)
+        , body
+        ] & vertical
 
     layoutEmbed :: NodeEmbed -> CollageDraw Int Int
     layoutEmbed (End r) = case r of {}
+
+    layoutArg
+      :: Op1 (CollageDraw Int Int)
+      -> PathExpr ('LabelEnd 'Arg)
+      -> NodeArg
+      -> CollageDraw Int Int
+    layoutArg hook path = sel path . hook . text . unEnd
 
 react' :: ((State -> State) -> IO ()) -> InputEvent -> State -> IO (Maybe State)
 react' _asyncReact inputEvent state = case inputEvent of

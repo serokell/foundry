@@ -19,6 +19,7 @@ singletons [d|
   data LabelEnd = Const | Var | Embed | Arg
     deriving (Eq)
 
+  -- TODO: replace it with a GADT
   data Label
     = LabelProduct LabelProduct
     | LabelSum LabelSum
@@ -144,6 +145,9 @@ data Node (p :: Label) where
     -> Node ('LabelSum (RelationSumLabel r))
   End :: SingI p => Repr p -> Node ('LabelEnd p)
 
+unEnd :: Node ('LabelEnd p) -> Repr p
+unEnd (End r) = r
+
 withProduct :: (SingI p => FieldGetter p -> r) -> Node ('LabelProduct p) -> r
 withProduct f (s :- get) = withSingI s (f (fields get))
 
@@ -261,6 +265,61 @@ data Path (p :: Label) (q :: Label) where
     -> Path (RelationSumColabel r) q
     -> Path ('LabelSum (RelationSumLabel r)) q
 
+(-@-) :: Path p q -> Path q q' -> Path p q'
+(-@-) path1 path2 = case path1 of
+  Here -> path2
+  (r :@- p1) -> r :@- (p1 -@- path2)
+  (r :@> p1) -> r :@> (p1 -@- path2)
+
+infixr 9 :@-
+infixr 9 :@>
+infixr 9 -@-
+
+pHere :: SingI p => Path p p
+pHere = Here
+
+pLamArg :: Path ('LabelProduct 'Lam) ('LabelEnd 'Arg)
+pLamArg = SLamArg :@- pHere
+
+pLamExpr1 :: Path ('LabelProduct 'Lam) ('LabelSum 'Expr)
+pLamExpr1 = SLamExpr1 :@- pHere
+
+pLamExpr2 :: Path ('LabelProduct 'Lam) ('LabelSum 'Expr)
+pLamExpr2 = SLamExpr2 :@- pHere
+
+pPiArg :: Path ('LabelProduct 'Pi) ('LabelEnd 'Arg)
+pPiArg = SPiArg :@- pHere
+
+pPiExpr1 :: Path ('LabelProduct 'Pi) ('LabelSum 'Expr)
+pPiExpr1 = SPiExpr1 :@- pHere
+
+pPiExpr2 :: Path ('LabelProduct 'Pi) ('LabelSum 'Expr)
+pPiExpr2 = SPiExpr2 :@- pHere
+
+pAppExpr1 :: Path ('LabelProduct 'App) ('LabelSum 'Expr)
+pAppExpr1 = SAppExpr1 :@- pHere
+
+pAppExpr2 :: Path ('LabelProduct 'App) ('LabelSum 'Expr)
+pAppExpr2 = SAppExpr2 :@- pHere
+
+pExprConst :: Path ('LabelSum 'Expr) ('LabelEnd 'Const)
+pExprConst = SExprConst :@> pHere
+
+pExprVar :: Path ('LabelSum 'Expr) ('LabelEnd 'Var)
+pExprVar = SExprVar :@> pHere
+
+pExprLam :: Path ('LabelSum 'Expr) ('LabelProduct 'Lam)
+pExprLam = SExprLam :@> pHere
+
+pExprPi :: Path ('LabelSum 'Expr) ('LabelProduct 'Pi)
+pExprPi = SExprPi :@> pHere
+
+pExprApp :: Path ('LabelSum 'Expr) ('LabelProduct 'App)
+pExprApp = SExprApp :@> pHere
+
+pExprEmbed :: Path ('LabelSum 'Expr) ('LabelEnd 'Embed)
+pExprEmbed = SExprEmbed :@> pHere
+
 instance Eq (Path p q) where
   Here        == Here        = True
   (r1 :@- p1) == (r2 :@- p2) | Proved Refl <- r1 %~ r2 = p1 == p2
@@ -271,9 +330,6 @@ instance TestEquality (Path p) where
   testEquality p1 p2 = testEquality (pathTarget p1) (pathTarget p2)
 
 type PathExpr = Path ('LabelSum 'Expr)
-
-infixr 9 :@-
-infixr 9 :@>
 
 atPath :: Path p q -> Traversal' (Node p) (Node q)
 atPath path h e = case path of
@@ -310,7 +366,7 @@ instance Eq (Discard (Path p)) where
 
 -- testing definition
 path0 :: Path ('LabelSum 'Expr) ('LabelEnd 'Const)
-path0 = SExprLam :@> SLamExpr1 :@- SExprConst :@> Here
+path0 = pExprLam -@- pLamExpr1 -@- pExprConst -@- pHere
 
 -- testing definition
 expr0 :: NodeExpr
