@@ -7,19 +7,32 @@ executable foundry
   main-is:             Main.hs
   other-modules:       Control.Lens.Discard
                        Source.Language.Morte
+                       Source.Language.Morte.Node
 
   build-depends:       base
                ,       containers
+               ,       bifunctors
                ,       text
                ,       lens
+               ,       singletons >= 2
                ,       morte
                ,       source
 
   hs-source-dirs:      src
 
+  ghc-options:         -Wall
   default-language:    Haskell2010
   default-extensions:  LambdaCase
                        ScopedTypeVariables
                        OverloadedStrings
+                       RecordWildCards
                        RankNTypes
                        GADTs
+                       TypeFamilies
+                       ConstraintKinds
+                       TypeOperators
+                       DataKinds
+                       PolyKinds
+                       UndecidableInstances
+                       InstanceSigs
+                       EmptyCase

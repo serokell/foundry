@@ -3,6 +3,168 @@ module Source.Language.Morte
     ( State
     ) where
 
+import Control.Lens
+import Control.Monad
+import Data.Monoid
+import Data.Biapplicative
+import Data.String (fromString)
+import Data.Function
+import Data.Text (Text)
+import qualified Data.Text.Lazy as Text.Lazy
+import qualified Morte.Core as M
+import qualified Morte.Parser as M.P
+import qualified Morte.Import as M.I
+
+import Source.Syntax
+import Source.Draw
+import Source.Style
+import Source.Input
+import Source.Language.Morte.Node
+
+data State = State
+  { _stateExpr :: NodeExpr
+  , _statePath :: Discard PathExpr }
+makeLenses ''State
+
+instance Syntax State where
+  blank = blank'
+  layout = layout'
+  react = react'
+
+blank' :: IO State
+blank' = do
+  let et = "λ(x : ∀(Nat : *) → ∀(Succ : Nat → Nat) → ∀(Zero : Nat) → Nat) → x (∀(Bool : *) → ∀(True : Bool) → ∀(False : Bool) → Bool) (λ(x : ∀(Bool : *) → ∀(True : Bool) → ∀(False : Bool) → Bool) → x (∀(Bool : *) → ∀(True : Bool) → ∀(False : Bool) → Bool) (λ(Bool : *) → λ(True : Bool) → λ(False : Bool) → False) (λ(Bool : *) → λ(True : Bool) → λ(False : Bool) → True)) (λ(Bool : *) → λ(True : Bool) → λ(False : Bool) → True)"
+  _stateExpr <- view noded <$> case M.P.exprFromText et of
+    Left  _ -> return $ M.Const M.Star
+    Right e -> M.I.load e
+  let _statePath = Discard Here
+  return State{..}
+
+getExcess :: Integral n => n -> n -> (n, n)
+getExcess vacant actual =
+  let
+    excess = max 0 (vacant - actual)
+    excess1 = excess `quot` 2
+    excess2 = excess - excess1
+  in (excess1, excess2)
+
+center
+  :: (Integral n, Integral m, HasExtents n m a)
+  => Extents n m -> Op1 (Collage n m a)
+center (vacantWidth, vacantHeight) collage =
+  let
+    (width, height) = getExtents collage
+    (excessWidth1,  excessWidth2)  = getExcess vacantWidth  width
+    (excessHeight1, excessHeight2) = getExcess vacantHeight height
+  in collage & pad (excessWidth1, excessHeight1) (excessWidth2, excessHeight2)
+
+align
+  :: (Integral n, Integral m, HasExtents n m a)
+  => (Op2 n, Op2 m) -> (Extents n m -> Offset n m) -> Op2 (Collage n m a)
+align adjust move c1 c2 =
+  let vacant = adjust <<*>> getExtents c1 <<*>> getExtents c2
+  in overlay move (center vacant c1) (center vacant c2)
+
+verticalCenter :: (Integral n, Integral m, HasExtents n m a) => OpN (Collage n m a)
+verticalCenter = foldr (align (max, \_ _ -> 0) (_1 .~ 0)) mempty
+
+horizontalCenter :: (Integral n, Integral m, HasExtents n m a) => OpN (Collage n m a)
+horizontalCenter = foldr (align (\_ _ -> 0, max) (_2 .~ 0)) mempty
+
+line :: (Num n, Num m, Ord n, Ord m) => Color -> n -> CollageDraw n m
+line color w
+  = background color
+  $ extend (w, 1)
+  $ mempty
+
+pad :: (Num n, Num m) => Offset n m -> Offset n m -> Op1 (Collage n m a)
+pad o1 o2 = offset o1 . extend o2
+
+type CollageDraw n m = Collage n m (Draw n m)
+
+layout' :: Extents Int Int -> State -> IO (CollageDraw Int Int)
+layout' viewport state = do
+  return
+    $ background dark1
+    $ center viewport
+    $ layoutExpr (join pad (5, 5)) (state ^. stateExpr)
+  where
+    dark1 = RGB 0.2 0.2 0.2
+    dark2 = RGB 0.3 0.3 0.3
+    dark3 = RGB 0.25 0.25 0.25
+    light1 = RGB 0.7 0.7 0.7
+    font = Font "Ubuntu" 12 (RGB 1 1 1) FontWeightNormal
+    text = textline font
+    punct = textline (font { fontColor = light1 })
+
+    sel :: Discard PathExpr -> CollageDraw Int Int -> CollageDraw Int Int
+    sel path
+      | current = outline dark2 . background dark3
+      | otherwise = id
+      where
+        current = path == state ^. statePath
+
+    layoutExpr :: Op1 (CollageDraw Int Int) -> NodeExpr -> CollageDraw Int Int
+    layoutExpr hook
+      = hook
+      . onExpr
+          layoutConst
+          layoutVar
+          layoutLam
+          layoutPi
+          layoutApp
+          layoutEmbed
+
+    layoutConst :: NodeConst -> CollageDraw Int Int
+    layoutConst (End c) = case c of
+      M.Star -> punct "★"
+      M.Box  -> punct "□"
+
+    layoutVar :: NodeVar -> CollageDraw Int Int
+    layoutVar (End (M.V txt n)) = text (Text.Lazy.toStrict txt <> i)
+      where
+        -- TODO: subscript
+        i = if n == 0 then "" else "@" <> fromString (show n)
+
+    layoutApp :: NodeApp -> CollageDraw Int Int
+    layoutApp = withProduct $ \get ->
+        [ layoutExpr (join pad (5, 5)) (get SAppExpr1)
+        , join pad (5, 5) (layoutExpr (outline dark2 . join pad (5, 5)) (get SAppExpr2))
+        ] & horizontalCenter
+
+    layoutLam :: NodeLam -> CollageDraw Int Int
+    layoutLam = withProduct $ \get ->
+      layoutCorner "λ" (get SLamArg) (get SLamExpr1) (get SLamExpr2)
+
+    layoutPi :: NodePi -> CollageDraw Int Int
+    layoutPi = withProduct $ \get ->
+      layoutCorner "Π" (get SPiArg) (get SPiExpr1) (get SPiExpr2)
+
+    layoutCorner :: Text -> NodeArg -> NodeExpr -> NodeExpr -> CollageDraw Int Int
+    layoutCorner quantifier (End x) _A b =
+      [ header
+      , join pad (0, 4) (line light1 maxWidth)
+      , body
+      ] & vertical
+      where
+        maxWidth = (max `on` fst.getExtents) header body
+        header =
+          [ extend (4, 0) (punct quantifier)
+          , [ join pad (4, 0) (text x)
+            , join pad (4, 0) (punct ":")
+            , layoutExpr (join pad (4, 0)) _A
+            ] & horizontal
+          ] & horizontal
+        body = layoutExpr id b
+
+    layoutEmbed :: NodeEmbed -> CollageDraw Int Int
+    layoutEmbed (End r) = case r of {}
+
+react' :: ((State -> State) -> IO ()) -> InputEvent -> State -> IO (Maybe State)
+react' _asyncReact inputEvent state = case inputEvent of
+  _ -> return (Just state)
+
+{-
 import Control.Monad
 import Data.Foldable
 import Data.Sequence (Seq)
@@ -280,3 +442,4 @@ layout' viewport state = do
         , (pad 5 5 5 5)
           (layoutExpr (border dark2 . pad 5 5 5 5) (path |> 1) a)
         ]
+-}

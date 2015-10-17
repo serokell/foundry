@@ -9,5 +9,6 @@ packages:
     commit: 87fc68b7b0531a7c0fdcbe5309b3d368d1197111
   subdirs:
     - lib
-extra-deps: []
+extra-deps:
+- singletons-2.0.0.2
 resolver: lts-3.9
