@@ -104,18 +104,18 @@ type FieldGetter p
   -> Node (RelationProductColabel r)
 
 -- This is a performance hack. In an ideal world `FieldGetter` would be sufficient.
-data Fields (p :: LabelProduct) where
+data FieldGet (p :: LabelProduct) where
   FieldOverride
     :: RelationProductLabel r ~ p
     => Sing r
     -> Node (RelationProductColabel r)
-    -> Fields p
-    -> Fields p
-  Fields :: FieldGetter p -> Fields p
+    -> FieldGet p
+    -> FieldGet p
+  FieldGet :: FieldGetter p -> FieldGet p
 
-fields :: Fields p -> FieldGetter p
+fields :: FieldGet p -> FieldGetter p
 fields = \case
-  Fields f -> f
+  FieldGet f -> f
   FieldOverride r n get -> \r' -> case r %~ r' of
     Proved Refl -> n
     Disproved _ -> fields get r'
@@ -128,9 +128,11 @@ override
   -> Node ('LabelProduct (RelationProductLabel r))
 override r f (s :- get) = s :- FieldOverride r (fields get r & f) (clean get)
   where
-    clean :: Fields (RelationProductLabel r) -> Fields (RelationProductLabel r)
-    clean fs = case fs of
-      Fields{} -> fs
+    clean
+      :: FieldGet (RelationProductLabel r)
+      -> FieldGet (RelationProductLabel r)
+    clean = \case
+      FieldGet f -> FieldGet f
       FieldOverride r' n get' -> case r %~ r' of
         -- Assuming there's at most one FieldOverride for each possible
         -- relation, we do not need to clean further.
@@ -138,7 +140,7 @@ override r f (s :- get) = s :- FieldOverride r (fields get r & f) (clean get)
         Disproved _ -> FieldOverride r' n (clean get')
 
 data Node (p :: Label) where
-  (:-) :: Sing p -> Fields p -> Node ('LabelProduct p)
+  (:-) :: Sing p -> FieldGet p -> Node ('LabelProduct p)
   (:>)
     :: SRelationSum r
     -> Node (RelationSumColabel r)
@@ -158,7 +160,7 @@ nodeImportArg :: Text.Lazy.Text -> NodeArg
 nodeImportArg t = End (Text.Lazy.toStrict t)
 
 mkProduct :: SingI p => FieldGetter p -> Node ('LabelProduct p)
-mkProduct f = sing :- Fields f
+mkProduct f = sing :- FieldGet f
 
 mkLam :: NodeArg -> NodeExpr -> NodeExpr -> NodeLam
 mkLam arg expr1 expr2 = mkProduct (\case
