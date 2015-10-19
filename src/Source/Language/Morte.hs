@@ -5,6 +5,7 @@ module Source.Language.Morte
 
 import Control.Lens
 import Control.Monad
+import Data.Char (toLower)
 import Data.Singletons
 import Data.Foldable
 import Data.Maybe
@@ -213,28 +214,32 @@ react' :: ((State -> State) -> IO ()) -> InputEvent -> State -> IO (Maybe State)
 react' _asyncReact inputEvent state
 
   | KeyPress _ keyCode <- inputEvent
-  , keyCode == KeyCode.ArrowUp || keyChar keyCode == Just 'k'
+  , keyCode == KeyCode.ArrowUp || keyLetter 'k' keyCode
   = return
   $ updatePath
   $ withDiscard pathUp (state ^. statePath)
 
   | KeyPress _ keyCode <- inputEvent
-  , keyCode == KeyCode.ArrowDown || keyChar keyCode == Just 'j'
+  , keyCode == KeyCode.ArrowDown || keyLetter 'j' keyCode
   = return
   $ updatePath
   $ withDiscard (pathChild (state ^. stateExpr)) (state ^. statePath)
 
-  | KeyPress _ keyCode <- inputEvent
-  , keyCode == KeyCode.ArrowLeft || keyChar keyCode == Just 'h'
+  | KeyPress mod keyCode <- inputEvent
+  , keyCode == KeyCode.ArrowLeft || keyLetter 'h' keyCode
   = return
   $ updatePath
-  $ withDiscard (pathSiblingL{- (state ^. stateExpr)-}) (state ^. statePath)
+  $ withDiscard
+      (if Shift `elem` mod then pathNeighbourL else pathSiblingL)
+      (state ^. statePath)
 
-  | KeyPress _ keyCode <- inputEvent
-  , keyCode == KeyCode.ArrowRight || keyChar keyCode == Just 'l'
+  | KeyPress mod keyCode <- inputEvent
+  , keyCode == KeyCode.ArrowRight || keyLetter 'l' keyCode
   = return
   $ updatePath
-  $ withDiscard (pathSiblingR {-(state ^. stateExpr)-}) (state ^. statePath)
+  $ withDiscard
+      (if Shift `elem` mod then pathNeighbourR else pathSiblingR)
+      (state ^. statePath)
 
   | otherwise
   = return Nothing
@@ -243,11 +248,16 @@ react' _asyncReact inputEvent state
     updatePath :: Maybe (Discard PathExpr) -> Maybe State
     updatePath mpath = set statePath <$> mpath ?? state
 
+    keyLetter c keyCode = fmap toLower (keyChar keyCode) == Just c
+
 pathNormalize :: Op1 (Discard (Path p))
 pathNormalize (Discard path) = fromMaybe (Discard path) (pathSumUp path)
 
 pathUp :: Path p q -> Maybe (Discard (Path p))
 pathUp path = pathNormalize <$> pathProductUp path
+
+pathUps :: Path p q -> NonEmpty (Discard (Path p))
+pathUps path = Discard path :| maybe [] (toList . withDiscard pathUps) (pathUp path)
 
 pathSumUp :: Path p q -> Maybe (Discard (Path p))
 pathSumUp = \case
@@ -301,35 +311,56 @@ pathChildren node path = do
   guard $ notNullOf (atPath path'') node
   return (Discard path'')
 
-pathSiblingL :: Path p q -> Maybe (Discard (Path p))
-pathSiblingL = \case
+newtype CyclicStep = CyclicStep Bool
+
+pathSiblingL' :: Path p q -> Maybe (CyclicStep, Discard (Path p))
+pathSiblingL' = \case
   (r :@- Here) -> Just $ case r of
-    SLamArg   -> Discard pLamExpr2
-    SLamExpr1 -> Discard pLamArg
-    SLamExpr2 -> Discard pLamExpr1
-    SPiArg    -> Discard pPiExpr2
-    SPiExpr1  -> Discard pPiArg
-    SPiExpr2  -> Discard pPiExpr1
-    SAppExpr1 -> Discard pAppExpr2
-    SAppExpr2 -> Discard pAppExpr1
-  (r :@- p1) -> withDiscard (\p1' -> Discard (r :@- p1')) <$> pathSiblingL p1
-  (r :@> p1) -> withDiscard (\p1' -> Discard (r :@> p1')) <$> pathSiblingL p1
+    SLamArg   -> (CyclicStep True,  Discard pLamExpr2)
+    SLamExpr1 -> (CyclicStep False, Discard pLamArg)
+    SLamExpr2 -> (CyclicStep False, Discard pLamExpr1)
+    SPiArg    -> (CyclicStep True,  Discard pPiExpr2)
+    SPiExpr1  -> (CyclicStep False, Discard pPiArg)
+    SPiExpr2  -> (CyclicStep False, Discard pPiExpr1)
+    SAppExpr1 -> (CyclicStep True,  Discard pAppExpr2)
+    SAppExpr2 -> (CyclicStep False, Discard pAppExpr1)
+  (r :@- p1) -> fmap (withDiscard (\p1' -> Discard (r :@- p1'))) <$> pathSiblingL' p1
+  (r :@> p1) -> fmap (withDiscard (\p1' -> Discard (r :@> p1'))) <$> pathSiblingL' p1
   Here -> Nothing
 
-pathSiblingR :: Path p q -> Maybe (Discard (Path p))
-pathSiblingR = \case
+pathSiblingR' :: Path p q -> Maybe (CyclicStep, Discard (Path p))
+pathSiblingR' = \case
   (r :@- Here) -> Just $ case r of
-    SLamArg   -> Discard pLamExpr1
-    SLamExpr1 -> Discard pLamExpr2
-    SLamExpr2 -> Discard pLamArg
-    SPiArg    -> Discard pPiExpr1
-    SPiExpr1  -> Discard pPiExpr2
-    SPiExpr2  -> Discard pPiArg
-    SAppExpr1 -> Discard pAppExpr2
-    SAppExpr2 -> Discard pAppExpr1
-  (r :@- p1) -> withDiscard (\p1' -> Discard (r :@- p1')) <$> pathSiblingR p1
-  (r :@> p1) -> withDiscard (\p1' -> Discard (r :@> p1')) <$> pathSiblingR p1
+    SLamArg   -> (CyclicStep False, Discard pLamExpr1)
+    SLamExpr1 -> (CyclicStep False, Discard pLamExpr2)
+    SLamExpr2 -> (CyclicStep True,  Discard pLamArg)
+    SPiArg    -> (CyclicStep False, Discard pPiExpr1)
+    SPiExpr1  -> (CyclicStep False, Discard pPiExpr2)
+    SPiExpr2  -> (CyclicStep True,  Discard pPiArg)
+    SAppExpr1 -> (CyclicStep False, Discard pAppExpr2)
+    SAppExpr2 -> (CyclicStep True,  Discard pAppExpr1)
+  (r :@- p1) -> fmap (withDiscard (\p1' -> Discard (r :@- p1'))) <$> pathSiblingR' p1
+  (r :@> p1) -> fmap (withDiscard (\p1' -> Discard (r :@> p1'))) <$> pathSiblingR' p1
   Here -> Nothing
+
+nonCyclic :: (CyclicStep, a) -> Maybe a
+nonCyclic (CyclicStep cyclic, a) = pure a <* guard (not cyclic)
+
+pathSiblingL :: Path p q -> Maybe (Discard (Path p))
+pathSiblingL path = snd <$> pathSiblingL' path
+
+pathSiblingR :: Path p q -> Maybe (Discard (Path p))
+pathSiblingR path = snd <$> pathSiblingR' path
+
+pathNeighbourL :: Path p q -> Maybe (Discard (Path p))
+pathNeighbourL path =
+  (getFirst . foldMap First)
+  (withDiscard (nonCyclic <=< pathSiblingL') <$> pathUps path)
+
+pathNeighbourR :: Path p q -> Maybe (Discard (Path p))
+pathNeighbourR path =
+  (getFirst . foldMap First)
+  (withDiscard (nonCyclic <=< pathSiblingR') <$> pathUps path)
 
 {-
 import Control.Monad
