@@ -360,6 +360,9 @@ pathSource = \case
 data Discard t where
   Discard :: t a -> Discard t
 
+withDiscard :: (forall a . t a -> r) -> Discard t -> r
+withDiscard cont (Discard t) = cont t
+
 instance Eq (Discard (Path p)) where
   Discard p1 == Discard p2
     | Just Refl <- testEquality p1 p2

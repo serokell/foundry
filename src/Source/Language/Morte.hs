@@ -5,6 +5,8 @@ module Source.Language.Morte
 
 import Control.Lens
 import Control.Monad
+import Data.Singletons
+import Data.Maybe
 import Data.Monoid
 import Data.Biapplicative
 import Data.String (fromString)
@@ -19,6 +21,7 @@ import Source.Syntax
 import Source.Draw
 import Source.Style
 import Source.Input
+import qualified Source.Input.KeyCode as KeyCode
 import Source.Language.Morte.Node
 
 data State = State
@@ -37,7 +40,7 @@ blank' = do
   _stateExpr <- view noded <$> case M.P.exprFromText et of
     Left  _ -> return $ M.Const M.Star
     Right e -> M.I.load e
-  let _statePath = Discard (pExprLam -@- pLamExpr1 -@- pHere)
+  let _statePath = Discard pHere
   return State{..}
 
 getExcess :: Integral n => n -> n -> (n, n)
@@ -205,8 +208,70 @@ layout' viewport state = do
     layoutArg hook path = sel path . hook . text . unEnd
 
 react' :: ((State -> State) -> IO ()) -> InputEvent -> State -> IO (Maybe State)
-react' _asyncReact inputEvent state = case inputEvent of
-  _ -> return (Just state)
+react' _asyncReact inputEvent state
+
+  | KeyPress _ keyCode <- inputEvent
+  , keyCode == KeyCode.ArrowUp || keyChar keyCode == Just 'k'
+  = return
+  $ updatePath
+  $ withDiscard pathProductUp (state ^. statePath)
+
+  | KeyPress _ keyCode <- inputEvent
+  , keyCode == KeyCode.ArrowDown || keyChar keyCode == Just 'j'
+  = return
+  $ updatePath
+  $ withDiscard (pathChild (state ^. stateExpr)) (state ^. statePath)
+
+  | otherwise
+  = return Nothing
+
+  where
+    updatePath :: Maybe (Discard PathExpr) -> Maybe State
+    updatePath mpath = set statePath . pathNormalize <$> mpath ?? state
+
+pathNormalize :: Op1 (Discard (Path p))
+pathNormalize (Discard path) = fromMaybe (Discard path) (pathSumUp path)
+
+pathSumUp :: Path p q -> Maybe (Discard (Path p))
+pathSumUp = \case
+  (r :@> Here) -> Just (Discard (withSingI (sRelationSumLabel r) Here))
+  (r :@> p1) -> withDiscard (\p1' -> Discard (r :@> p1')) <$> pathSumUp p1
+  (r :@- p1) -> withDiscard (\p1' -> Discard (r :@- p1')) <$> pathSumUp p1
+  Here -> Nothing
+
+pathProductUp :: forall p q . Path p q -> Maybe (Discard (Path p))
+pathProductUp = \case
+  (r :@- Here) -> Just (Discard (withSingI (sRelationProductLabel r) Here))
+  (r :@- p1) -> withDiscard (\p1' -> Discard (r :@- p1')) <$> pathProductUp p1
+  (r :@> p1) -> withDiscard (\p1' -> Discard (r :@> p1')) <$> pathProductUp p1
+  Here -> Nothing
+
+pathSumDown :: forall p q . Path p q -> [Discard (Path p)]
+pathSumDown path = case pathTarget path of
+  SLabelSum l -> case l of
+    SExpr ->
+      [ Discard (path -@- pExprConst)
+      , Discard (path -@- pExprVar)
+      , Discard (path -@- pExprLam)
+      , Discard (path -@- pExprPi)
+      , Discard (path -@- pExprApp)
+      , Discard (path -@- pExprEmbed) ]
+  _ -> []
+
+pathProductDown :: forall p q . Path p q -> Maybe (Discard (Path p))
+pathProductDown path = case pathTarget path of
+  SLabelProduct l -> Just $ case l of
+    SLam -> Discard (path -@- pLamExpr2)
+    SPi  -> Discard (path -@- pPiExpr2)
+    SApp -> Discard (path -@- pAppExpr1)
+  _ -> Nothing
+
+pathChild :: forall p q . Node p -> Path p q -> Maybe (Discard (Path p))
+pathChild node path = listToMaybe $ do
+  Discard path'  <- pathSumDown path
+  Discard path'' <- maybeToList (pathProductDown path')
+  guard $ notNullOf (atPath path'') node
+  return (Discard path'')
 
 {-
 import Control.Monad
