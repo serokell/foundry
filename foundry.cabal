@@ -11,6 +11,7 @@ executable foundry
   build-depends:       base
                ,       containers
                ,       bifunctors
+               ,       semigroups
                ,       text
                ,       lens
                ,       singletons >= 2
