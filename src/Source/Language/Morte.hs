@@ -6,6 +6,7 @@ module Source.Language.Morte
 import Control.Lens
 import Control.Monad
 import Data.Char (toLower)
+import Data.Functor.Compose
 import Data.Singletons
 import Data.Foldable
 import Data.Maybe
@@ -297,8 +298,8 @@ pathProductDown path = case pathTarget path of
       , Discard (path -@- pPiExpr1)
       , Discard (path -@- pPiArg) ]
     SApp ->
-      [ Discard (path -@- pAppExpr1)
-      , Discard (path -@- pAppExpr2) ]
+      [ Discard (path -@- pAppExpr2)
+      , Discard (path -@- pAppExpr1) ]
   _ -> []
 
 pathChild :: Node p -> Path p q -> Maybe (Discard (Path p))
@@ -311,37 +312,38 @@ pathChildren node path = do
   guard $ notNullOf (atPath path'') node
   return (Discard path'')
 
+data Direction = L | R
+
 newtype CyclicStep = CyclicStep Bool
 
+pathSibling' :: Direction -> Path p q -> Compose Maybe ((,) CyclicStep) (Discard (Path p))
+pathSibling' direction = \case
+  (r :@- Here) -> Compose . Just $ case (direction, r) of
+    (L, SLamArg)   -> (CyclicStep True,  Discard pLamExpr2)
+    (R, SLamArg)   -> (CyclicStep False, Discard pLamExpr1)
+    (L, SLamExpr1) -> (CyclicStep False, Discard pLamArg)
+    (R, SLamExpr1) -> (CyclicStep False, Discard pLamExpr2)
+    (L, SLamExpr2) -> (CyclicStep False, Discard pLamExpr1)
+    (R, SLamExpr2) -> (CyclicStep True,  Discard pLamArg)
+    (L, SPiArg)    -> (CyclicStep True,  Discard pPiExpr2)
+    (R, SPiArg)    -> (CyclicStep False, Discard pPiExpr1)
+    (L, SPiExpr1)  -> (CyclicStep False, Discard pPiArg)
+    (R, SPiExpr1)  -> (CyclicStep False, Discard pPiExpr2)
+    (L, SPiExpr2)  -> (CyclicStep False, Discard pPiExpr1)
+    (R, SPiExpr2)  -> (CyclicStep True,  Discard pPiArg)
+    (L, SAppExpr1) -> (CyclicStep True,  Discard pAppExpr2)
+    (R, SAppExpr1) -> (CyclicStep False, Discard pAppExpr2)
+    (L, SAppExpr2) -> (CyclicStep False, Discard pAppExpr1)
+    (R, SAppExpr2) -> (CyclicStep True,  Discard pAppExpr1)
+  (r :@- p1) -> withDiscard (\p1' -> Discard (r :@- p1')) <$> pathSibling' direction p1
+  (r :@> p1) -> withDiscard (\p1' -> Discard (r :@> p1')) <$> pathSibling' direction p1
+  Here -> Compose Nothing
+
 pathSiblingL' :: Path p q -> Maybe (CyclicStep, Discard (Path p))
-pathSiblingL' = \case
-  (r :@- Here) -> Just $ case r of
-    SLamArg   -> (CyclicStep True,  Discard pLamExpr2)
-    SLamExpr1 -> (CyclicStep False, Discard pLamArg)
-    SLamExpr2 -> (CyclicStep False, Discard pLamExpr1)
-    SPiArg    -> (CyclicStep True,  Discard pPiExpr2)
-    SPiExpr1  -> (CyclicStep False, Discard pPiArg)
-    SPiExpr2  -> (CyclicStep False, Discard pPiExpr1)
-    SAppExpr1 -> (CyclicStep True,  Discard pAppExpr2)
-    SAppExpr2 -> (CyclicStep False, Discard pAppExpr1)
-  (r :@- p1) -> fmap (withDiscard (\p1' -> Discard (r :@- p1'))) <$> pathSiblingL' p1
-  (r :@> p1) -> fmap (withDiscard (\p1' -> Discard (r :@> p1'))) <$> pathSiblingL' p1
-  Here -> Nothing
+pathSiblingL' = getCompose . pathSibling' L
 
 pathSiblingR' :: Path p q -> Maybe (CyclicStep, Discard (Path p))
-pathSiblingR' = \case
-  (r :@- Here) -> Just $ case r of
-    SLamArg   -> (CyclicStep False, Discard pLamExpr1)
-    SLamExpr1 -> (CyclicStep False, Discard pLamExpr2)
-    SLamExpr2 -> (CyclicStep True,  Discard pLamArg)
-    SPiArg    -> (CyclicStep False, Discard pPiExpr1)
-    SPiExpr1  -> (CyclicStep False, Discard pPiExpr2)
-    SPiExpr2  -> (CyclicStep True,  Discard pPiArg)
-    SAppExpr1 -> (CyclicStep False, Discard pAppExpr2)
-    SAppExpr2 -> (CyclicStep True,  Discard pAppExpr1)
-  (r :@- p1) -> fmap (withDiscard (\p1' -> Discard (r :@- p1'))) <$> pathSiblingR' p1
-  (r :@> p1) -> fmap (withDiscard (\p1' -> Discard (r :@> p1'))) <$> pathSiblingR' p1
-  Here -> Nothing
+pathSiblingR' = getCompose . pathSibling' R
 
 nonCyclic :: (CyclicStep, a) -> Maybe a
 nonCyclic (CyclicStep cyclic, a) = pure a <* guard (not cyclic)

@@ -10,6 +10,7 @@ executable foundry
 
   build-depends:       base
                ,       containers
+               ,       transformers
                ,       bifunctors
                ,       semigroups
                ,       text
