@@ -3,7 +3,7 @@ packages:
 - '.'
 - location:
     git: git@github.com:int-index/source.git
-    commit: 6d3c70dae2d0deef0060a26297f93bfce025227d
+    commit: f8025e9c7769e3b12e37b760c6b27d84108d5d4a
   subdirs:
     - lib
 extra-deps:

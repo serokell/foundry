@@ -55,9 +55,7 @@ getExcess vacant actual =
     excess2 = excess - excess1
   in (excess1, excess2)
 
-center
-  :: (Integral n, Integral m, HasExtents n m a)
-  => Extents n m -> Op1 (Collage n m a)
+center :: (Integral n, Integral m) => Extents n m -> Op1 (CollageDraw n m)
 center (vacantWidth, vacantHeight) collage =
   let
     (width, height) = getExtents collage
@@ -66,16 +64,16 @@ center (vacantWidth, vacantHeight) collage =
   in collage & pad (excessWidth1, excessHeight1) (excessWidth2, excessHeight2)
 
 align
-  :: (Integral n, Integral m, HasExtents n m a)
-  => (Op2 n, Op2 m) -> (Extents n m -> Offset n m) -> Op2 (Collage n m a)
+  :: (Integral n, Integral m)
+  => (Op2 n, Op2 m) -> (Extents n m -> Offset n m) -> Op2 (CollageDraw n m)
 align adjust move c1 c2 =
   let vacant = adjust <<*>> getExtents c1 <<*>> getExtents c2
   in overlay move (center vacant c1) (center vacant c2)
 
-verticalCenter :: (Integral n, Integral m, HasExtents n m a) => OpN (Collage n m a)
+verticalCenter :: (Integral n, Integral m) => OpN (CollageDraw n m)
 verticalCenter = foldr (align (max, \_ _ -> 0) (_1 .~ 0)) mempty
 
-horizontalCenter :: (Integral n, Integral m, HasExtents n m a) => OpN (Collage n m a)
+horizontalCenter :: (Integral n, Integral m) => OpN (CollageDraw n m)
 horizontalCenter = foldr (align (\_ _ -> 0, max) (_2 .~ 0)) mempty
 
 line :: (Num n, Num m, Ord n, Ord m) => Color -> n -> CollageDraw n m
@@ -84,7 +82,7 @@ line color w
   $ extend (w, 1)
   $ mempty
 
-pad :: (Num n, Num m) => Offset n m -> Offset n m -> Op1 (Collage n m a)
+pad :: (Num n, Num m, Ord n, Ord m) => Offset n m -> Offset n m -> Op1 (CollageDraw n m)
 pad o1 o2 = offset o1 . extend o2
 
 type CollageDraw n m = Collage n m (Draw n m)
@@ -339,19 +337,15 @@ pathSibling' direction = \case
   (r :@> p1) -> withDiscard (\p1' -> Discard (r :@> p1')) <$> pathSibling' direction p1
   Here -> Compose Nothing
 
-pathSiblingL' :: Path p q -> Maybe (CyclicStep, Discard (Path p))
+pathSiblingL', pathSiblingR' :: Path p q -> Maybe (CyclicStep, Discard (Path p))
 pathSiblingL' = getCompose . pathSibling' L
-
-pathSiblingR' :: Path p q -> Maybe (CyclicStep, Discard (Path p))
 pathSiblingR' = getCompose . pathSibling' R
 
 nonCyclic :: (CyclicStep, a) -> Maybe a
 nonCyclic (CyclicStep cyclic, a) = pure a <* guard (not cyclic)
 
-pathSiblingL :: Path p q -> Maybe (Discard (Path p))
+pathSiblingL, pathSiblingR :: Path p q -> Maybe (Discard (Path p))
 pathSiblingL path = snd <$> pathSiblingL' path
-
-pathSiblingR :: Path p q -> Maybe (Discard (Path p))
 pathSiblingR path = snd <$> pathSiblingR' path
 
 pathNeighbourL :: Path p q -> Maybe (Discard (Path p))
