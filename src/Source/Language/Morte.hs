@@ -35,9 +35,10 @@ data State n m = State
   , _statePointer :: Offset n m }
 makeLenses ''State
 
-instance (n ~ Int, m ~ Int) => Syntax n m (CollageDraw n m) (State n m) where
+instance (n ~ Int, m ~ Int) => Syntax n m (CollageDraw' n m) (State n m) where
   blank = blank'
   layout = layout'
+  draw _ = draw'
   react = react'
 
 blank' :: IO (State Int Int)
@@ -59,7 +60,12 @@ getExcess vacant actual =
     excess2 = excess - excess1
   in (excess1, excess2)
 
-center :: (Integral n, Integral m) => Extents n m -> Op1 (CollageDraw n m)
+center
+  :: ( Integral n
+     , Integral m
+     , HasExtents n m draw
+     , DrawPhantom n m draw
+     ) => Extents n m -> Op1 (Collage n m draw)
 center (vacantWidth, vacantHeight) collage =
   let
     (width, height) = getExtents collage
@@ -68,28 +74,101 @@ center (vacantWidth, vacantHeight) collage =
   in collage & pad (excessWidth1, excessHeight1) (excessWidth2, excessHeight2)
 
 align
-  :: (Integral n, Integral m)
-  => (Op2 n, Op2 m) -> (Extents n m -> Offset n m) -> Op2 (CollageDraw n m)
+  :: ( Integral n
+     , Integral m
+     , HasExtents n m draw
+     , DrawPhantom n m draw
+     ) => (Op2 n, Op2 m)
+       -> (Extents n m -> Offset n m)
+       -> Op2 (Collage n m draw)
 align adjust move c1 c2 =
   let vacant = adjust <<*>> getExtents c1 <<*>> getExtents c2
   in overlay move (center vacant c1) (center vacant c2)
 
-verticalCenter :: (Integral n, Integral m) => OpN (CollageDraw n m)
+verticalCenter
+  :: ( Integral n
+     , Integral m
+     , HasExtents n m draw
+     , DrawPhantom n m draw
+     ) => OpN (Collage n m draw)
 verticalCenter = foldr (align (max, \_ _ -> 0) (_1 .~ 0)) mempty
 
-horizontalCenter :: (Integral n, Integral m) => OpN (CollageDraw n m)
+horizontalCenter
+  :: ( Integral n
+     , Integral m
+     , HasExtents n m draw
+     , DrawPhantom n m draw
+     ) => OpN (Collage n m draw)
 horizontalCenter = foldr (align (\_ _ -> 0, max) (_2 .~ 0)) mempty
 
-line :: (Num n, Num m, Ord n, Ord m) => Color -> n -> CollageDraw n m
-line color w
-  = background color
-  $ extend (w, 1)
-  $ mempty
+line
+  :: ( Num n
+     , Num m
+     , Ord n
+     , Ord m
+     , HasExtents n m draw
+     , DrawPhantom n m draw
+     , DrawRectangle n m draw
+     ) => Color -> n -> Collage n m draw
+line color w = pure (drawRectangle (w, 1) Nothing (Just color))
 
-pad :: (Num n, Num m, Ord n, Ord m) => Offset n m -> Offset n m -> Op1 (CollageDraw n m)
+pad
+  :: ( Num n
+     , Num m
+     , Ord n
+     , Ord m
+     , HasExtents n m draw
+     , DrawPhantom n m draw
+     ) => Offset n m -> Offset n m -> Op1 (Collage n m draw)
 pad o1 o2 = offset o1 . extend o2
 
-layout' :: Extents Int Int -> State Int Int -> IO (CollageDraw Int Int)
+data Draw' n m
+  = Draw' {- z-index -} (Draw n m)
+  | ActiveZone (Extents n m) (Discard PathExpr)
+
+active :: (Num n, Ord n, Num m, Ord m) => PathExpr p -> Op1 (CollageDraw' n m)
+active p c = pure (ActiveZone (getExtents c) (Discard p)) `mappend` c
+
+activate
+  :: forall n m
+   . (Ord n, Num n, Ord m, Num m)
+  => Offset n m -> CollageDraw' n m -> Maybe (Discard PathExpr)
+activate o = getLast . foldMap (Last . uncurry check) . view _Collage
+  where
+    within :: (Ord a, Num a) => a -> a -> a -> Bool
+    within a zoneOffset zoneExtents
+       = a >  zoneOffset
+      && a < (zoneOffset + zoneExtents)
+    check :: Offset n m -> Draw' n m -> Maybe (Discard PathExpr)
+    check o' d = do
+      ActiveZone e p <- Just d
+      guard
+        $ uncurry (&&)
+        $ biliftA3 within within o o' e
+      Just p
+
+instance DrawPhantom n m (Draw' n m) where
+  drawPhantom e = Draw' (drawPhantom e)
+
+instance DrawRectangle n m (Draw' n m) where
+  drawRectangle e o b = Draw' (drawRectangle e o b)
+
+instance (Integral n, Integral m) => DrawText n m (Draw' n m) where
+  drawText f t = Draw' (drawText f t)
+
+instance HasExtents n m (Draw' n m) where
+  getExtents = \case
+    Draw' d -> getExtents d
+    ActiveZone e _ -> e
+
+type CollageDraw' n m = Collage n m (Draw' n m)
+
+draw' :: (Num n, Num m) => CollageDraw' n m -> CollageDraw n m
+draw' c = c >>= \case
+  Draw' d -> pure d
+  _       -> mempty
+
+layout' :: Extents Int Int -> State Int Int -> IO (CollageDraw' Int Int)
 layout' viewport state = do
   return
     $ background dark1
@@ -104,18 +183,18 @@ layout' viewport state = do
     text = textline font
     punct = textline (font { fontColor = light1 })
 
-    sel :: forall q . PathExpr q -> CollageDraw Int Int -> CollageDraw Int Int
+    sel :: forall q . PathExpr q -> CollageDraw' Int Int -> CollageDraw' Int Int
     sel path
-      | current = outline dark2 . background dark3
-      | otherwise = id
+      | current = active path . outline dark2 . background dark3
+      | otherwise = active path
       where
         current = Discard path == state ^. statePath
 
     layoutExpr
-      :: Op1 (CollageDraw Int Int)
+      :: Op1 (CollageDraw' Int Int)
       -> PathExpr ('LabelSum 'Expr)
       -> NodeExpr
-      -> CollageDraw Int Int
+      -> CollageDraw' Int Int
     layoutExpr hook path
       = sel path
       . hook
@@ -127,12 +206,12 @@ layout' viewport state = do
           (layoutApp $ path -@- pExprApp)
           layoutEmbed
 
-    layoutConst :: NodeConst -> CollageDraw Int Int
+    layoutConst :: NodeConst -> CollageDraw' Int Int
     layoutConst (End c) = case c of
       M.Star -> punct "★"
       M.Box  -> punct "□"
 
-    layoutVar :: NodeVar -> CollageDraw Int Int
+    layoutVar :: NodeVar -> CollageDraw' Int Int
     layoutVar (End (M.V txt n)) = text (Text.Lazy.toStrict txt <> i)
       where
         -- TODO: subscript
@@ -141,7 +220,7 @@ layout' viewport state = do
     layoutApp
       :: PathExpr ('LabelProduct 'App)
       -> NodeApp
-      -> CollageDraw Int Int
+      -> CollageDraw' Int Int
     layoutApp path = withProduct $ \get ->
         [ layoutExpr
             (join pad (5, 5))
@@ -156,7 +235,7 @@ layout' viewport state = do
     layoutLam
       :: PathExpr ('LabelProduct 'Lam)
       -> NodeLam
-      -> CollageDraw Int Int
+      -> CollageDraw' Int Int
     layoutLam path = withProduct $ \get ->
       let
         maxWidth = (max `on` fst.getExtents) header body
@@ -180,7 +259,7 @@ layout' viewport state = do
     layoutPi
       :: PathExpr ('LabelProduct 'Pi)
       -> NodePi
-      -> CollageDraw Int Int
+      -> CollageDraw' Int Int
     layoutPi path = withProduct $ \get ->
       let
         maxWidth = (max `on` fst.getExtents) header body
@@ -201,23 +280,23 @@ layout' viewport state = do
         , body
         ] & vertical
 
-    layoutEmbed :: NodeEmbed -> CollageDraw Int Int
+    layoutEmbed :: NodeEmbed -> CollageDraw' Int Int
     layoutEmbed (End r) = case r of {}
 
     layoutArg
-      :: Op1 (CollageDraw Int Int)
+      :: Op1 (CollageDraw' Int Int)
       -> PathExpr ('LabelEnd 'Arg)
       -> NodeArg
-      -> CollageDraw Int Int
+      -> CollageDraw' Int Int
     layoutArg hook path = sel path . hook . text . unEnd
 
 react'
   :: ((State Int Int -> State Int Int) -> IO ())
-  -> CollageDraw Int Int
+  -> CollageDraw' Int Int
   -> InputEvent Int Int
   -> State Int Int
   -> IO (Maybe (State Int Int))
-react' _asyncReact _layout inputEvent state
+react' _asyncReact layout inputEvent state
 
   | KeyPress _ keyCode <- inputEvent
   , keyCode == KeyCode.ArrowUp || keyLetter 'k' keyCode
@@ -252,7 +331,10 @@ react' _asyncReact _layout inputEvent state
   $ state & statePointer .~ (x, y)
 
   | ButtonPress <- inputEvent
-  = return Nothing <* print (state ^. statePointer)
+  -- = return Nothing <* print (state ^. statePointer)
+  = return
+  $ updatePath
+  $ activate (state ^. statePointer) layout
 
   | otherwise
   = return Nothing
