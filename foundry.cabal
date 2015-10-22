@@ -37,3 +37,4 @@ executable foundry
                        UndecidableInstances
                        InstanceSigs
                        EmptyCase
+                       FunctionalDependencies

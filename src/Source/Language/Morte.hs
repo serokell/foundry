@@ -1,4 +1,5 @@
 {-# LANGUAGE TemplateHaskell #-}
+{-# LANGUAGE FlexibleInstances #-}
 module Source.Language.Morte
     ( State
     ) where
@@ -28,23 +29,26 @@ import Source.Input
 import qualified Source.Input.KeyCode as KeyCode
 import Source.Language.Morte.Node
 
-data State = State
+data State n m = State
   { _stateExpr :: NodeExpr
-  , _statePath :: Discard PathExpr }
+  , _statePath :: Discard PathExpr
+  , _statePointer :: Offset n m }
 makeLenses ''State
 
-instance Syntax State where
+instance (n ~ Int, m ~ Int) => Syntax n m (CollageDraw n m) (State n m) where
   blank = blank'
   layout = layout'
   react = react'
 
-blank' :: IO State
+blank' :: IO (State Int Int)
 blank' = do
   let et = "λ(x : ∀(Nat : *) → ∀(Succ : Nat → Nat) → ∀(Zero : Nat) → Nat) → x (∀(Bool : *) → ∀(True : Bool) → ∀(False : Bool) → Bool) (λ(x : ∀(Bool : *) → ∀(True : Bool) → ∀(False : Bool) → Bool) → x (∀(Bool : *) → ∀(True : Bool) → ∀(False : Bool) → Bool) (λ(Bool : *) → λ(True : Bool) → λ(False : Bool) → False) (λ(Bool : *) → λ(True : Bool) → λ(False : Bool) → True)) (λ(Bool : *) → λ(True : Bool) → λ(False : Bool) → True)"
   _stateExpr <- view noded <$> case M.P.exprFromText et of
     Left  _ -> return $ M.Const M.Star
     Right e -> M.I.load e
-  let _statePath = Discard pHere
+  let
+    _statePath = Discard pHere
+    _statePointer = (0, 0)
   return State{..}
 
 getExcess :: Integral n => n -> n -> (n, n)
@@ -85,9 +89,7 @@ line color w
 pad :: (Num n, Num m, Ord n, Ord m) => Offset n m -> Offset n m -> Op1 (CollageDraw n m)
 pad o1 o2 = offset o1 . extend o2
 
-type CollageDraw n m = Collage n m (Draw n m)
-
-layout' :: Extents Int Int -> State -> IO (CollageDraw Int Int)
+layout' :: Extents Int Int -> State Int Int -> IO (CollageDraw Int Int)
 layout' viewport state = do
   return
     $ background dark1
@@ -209,8 +211,13 @@ layout' viewport state = do
       -> CollageDraw Int Int
     layoutArg hook path = sel path . hook . text . unEnd
 
-react' :: ((State -> State) -> IO ()) -> InputEvent -> State -> IO (Maybe State)
-react' _asyncReact inputEvent state
+react'
+  :: ((State Int Int -> State Int Int) -> IO ())
+  -> CollageDraw Int Int
+  -> InputEvent Int Int
+  -> State Int Int
+  -> IO (Maybe (State Int Int))
+react' _asyncReact _layout inputEvent state
 
   | KeyPress _ keyCode <- inputEvent
   , keyCode == KeyCode.ArrowUp || keyLetter 'k' keyCode
@@ -240,11 +247,18 @@ react' _asyncReact inputEvent state
       (if Shift `elem` mod then pathNeighbourR else pathSiblingR)
       (state ^. statePath)
 
+  | PointerMotion x y <- inputEvent
+  = return . Just
+  $ state & statePointer .~ (x, y)
+
+  | ButtonPress <- inputEvent
+  = return Nothing <* print (state ^. statePointer)
+
   | otherwise
   = return Nothing
 
   where
-    updatePath :: Maybe (Discard PathExpr) -> Maybe State
+    updatePath :: Maybe (Discard PathExpr) -> Maybe (State Int Int)
     updatePath mpath = set statePath <$> mpath ?? state
 
     keyLetter c keyCode = fmap toLower (keyChar keyCode) == Just c
