@@ -2,7 +2,7 @@ flags: {}
 packages:
 - '.'
 - location:
-    git: git@github.com:int-index/source.git
+    git: https://github.com/int-index/source
     commit: c8062c86618b358dc15cc21c807dde131029a1a7
   subdirs:
     - lib

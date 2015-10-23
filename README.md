@@ -1,5 +1,7 @@
 # Godsmen Foundry
 
+[![Build Status](https://travis-ci.org/int-index/foundry.svg)](https://travis-ci.org/int-index/foundry)
+
 Godsmen Foundry is a Morte IDE based on Source.
 
 Implementation status:
