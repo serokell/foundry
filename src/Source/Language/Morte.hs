@@ -147,6 +147,26 @@ activate o = getLast . foldMap (Last . uncurry check) . view _Collage
         $ biliftA3 within within o o' e
       Just p
 
+hover
+  :: forall n m
+   . (Ord n, Num n, Ord m, Num m)
+  => Offset n m
+  -> Op1 (CollageDraw' n m)
+  -> Op1 (CollageDraw' n m)
+hover o f c = c <> (maybe mempty id . getLast . foldMap (Last . uncurry check) . view _Collage) c
+  where
+    within :: (Ord a, Num a) => a -> a -> a -> Bool
+    within a zoneOffset zoneExtents
+       = a >  zoneOffset
+      && a < (zoneOffset + zoneExtents)
+    check :: Offset n m -> Draw' n m -> Maybe (CollageDraw' n m)
+    check o' d = do
+      ActiveZone e p <- Just d
+      guard
+        $ uncurry (&&)
+        $ biliftA3 within within o o' e
+      Just $ (offset o' . f) (phantom e)
+
 instance DrawPhantom n m (Draw' n m) where
   drawPhantom e = Draw' (drawPhantom e)
 
@@ -171,6 +191,7 @@ draw' c = c >>= \case
 layout' :: Extents Int Int -> State Int Int -> IO (CollageDraw' Int Int)
 layout' viewport state = do
   return
+    $ hover (state ^. statePointer) (outline light1)
     $ background dark1
     $ center viewport
     $ layoutExpr (join pad (5, 5)) pHere (state ^. stateExpr)
@@ -331,7 +352,6 @@ react' _asyncReact layout inputEvent state
   $ state & statePointer .~ (x, y)
 
   | ButtonPress <- inputEvent
-  -- = return Nothing <* print (state ^. statePointer)
   = return
   $ updatePath
   $ activate (state ^. statePointer) layout
