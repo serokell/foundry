@@ -130,42 +130,35 @@ active :: (Num n, Ord n, Num m, Ord m) => PathExpr p -> Op1 (CollageDraw' n m)
 active p c = pure (ActiveZone (getExtents c) (Discard p)) `mappend` c
 
 activate
-  :: forall n m
+  :: forall n m r
    . (Ord n, Num n, Ord m, Num m)
-  => Offset n m -> CollageDraw' n m -> Maybe (Discard PathExpr)
-activate o = getLast . foldMap (Last . uncurry check) . view _Collage
+  => (Offset n m -> Extents n m -> Discard PathExpr -> r)
+  -> Offset n m
+  -> CollageDraw' n m
+  -> Maybe r
+activate f o = getLast . foldMap (Last . uncurry check) . view _Collage
   where
     within :: (Ord a, Num a) => a -> a -> a -> Bool
     within a zoneOffset zoneExtents
        = a >  zoneOffset
       && a < (zoneOffset + zoneExtents)
-    check :: Offset n m -> Draw' n m -> Maybe (Discard PathExpr)
+    check :: Offset n m -> Draw' n m -> Maybe r
     check o' d = do
       ActiveZone e p <- Just d
       guard
         $ uncurry (&&)
         $ biliftA3 within within o o' e
-      Just p
+      Just (f o' e p)
 
 hover
   :: forall n m
    . (Ord n, Num n, Ord m, Num m)
-  => Offset n m
+  => Op1 (CollageDraw' n m)
+  -> Offset n m
   -> Op1 (CollageDraw' n m)
-  -> Op1 (CollageDraw' n m)
-hover o f c = c <> (maybe mempty id . getLast . foldMap (Last . uncurry check) . view _Collage) c
+hover f o c = c <> maybe mempty id (activate obj o c)
   where
-    within :: (Ord a, Num a) => a -> a -> a -> Bool
-    within a zoneOffset zoneExtents
-       = a >  zoneOffset
-      && a < (zoneOffset + zoneExtents)
-    check :: Offset n m -> Draw' n m -> Maybe (CollageDraw' n m)
-    check o' d = do
-      ActiveZone e p <- Just d
-      guard
-        $ uncurry (&&)
-        $ biliftA3 within within o o' e
-      Just $ (offset o' . f) (phantom e)
+    obj o e _ = offset o (f (phantom e))
 
 instance DrawPhantom n m (Draw' n m) where
   drawPhantom e = Draw' (drawPhantom e)
@@ -191,7 +184,7 @@ draw' c = c >>= \case
 layout' :: Extents Int Int -> State Int Int -> IO (CollageDraw' Int Int)
 layout' viewport state = do
   return
-    $ hover (state ^. statePointer) (outline light1)
+    $ hover (outline light1) (state ^. statePointer)
     $ background dark1
     $ center viewport
     $ layoutExpr (join pad (5, 5)) pHere (state ^. stateExpr)
@@ -354,7 +347,7 @@ react' _asyncReact layout inputEvent state
   | ButtonPress <- inputEvent
   = return
   $ updatePath
-  $ activate (state ^. statePointer) layout
+  $ activate (\_ _ p -> p) (state ^. statePointer) layout
 
   | otherwise
   = return Nothing
