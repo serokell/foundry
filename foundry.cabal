@@ -5,7 +5,8 @@ cabal-version:       >=1.10
 
 executable foundry
   main-is:             Main.hs
-  other-modules:       Source.Language.Morte
+  other-modules:       Data.Node
+                       Source.Language.Morte
                        Source.Language.Morte.Node
 
   build-depends:       base
@@ -15,7 +16,6 @@ executable foundry
                ,       semigroups
                ,       text
                ,       lens
-               ,       singletons >= 2
                ,       morte
                ,       source
 

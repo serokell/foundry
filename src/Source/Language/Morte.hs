@@ -8,14 +8,11 @@ import Control.Lens
 import Control.Monad
 import Data.Char (toLower)
 import Data.Functor.Compose
-import Data.Singletons
 import Data.Foldable
-import Data.Maybe
 import Data.Monoid
 import Data.Biapplicative
 import Data.String (fromString)
 import Data.Function
-import Data.Text (Text)
 import Data.List.NonEmpty (NonEmpty(..))
 import qualified Data.Text.Lazy as Text.Lazy
 import qualified Morte.Core as M
@@ -30,9 +27,11 @@ import qualified Source.Input.KeyCode as KeyCode
 import Source.Language.Morte.Node
 
 data State n m = State
-  { _stateExpr :: NodeExpr
-  , _statePath :: Discard PathExpr
-  , _statePointer :: Offset n m }
+  { _stateExpr :: Node
+  , _statePath :: Path
+  , _statePointer :: Offset n m
+  }
+
 makeLenses ''State
 
 instance (n ~ Int, m ~ Int) => Syntax n m (CollageDraw' n m) (State n m) where
@@ -44,11 +43,11 @@ instance (n ~ Int, m ~ Int) => Syntax n m (CollageDraw' n m) (State n m) where
 blank' :: IO (State Int Int)
 blank' = do
   let et = "λ(x : ∀(Nat : *) → ∀(Succ : Nat → Nat) → ∀(Zero : Nat) → Nat) → x (∀(Bool : *) → ∀(True : Bool) → ∀(False : Bool) → Bool) (λ(x : ∀(Bool : *) → ∀(True : Bool) → ∀(False : Bool) → Bool) → x (∀(Bool : *) → ∀(True : Bool) → ∀(False : Bool) → Bool) (λ(Bool : *) → λ(True : Bool) → λ(False : Bool) → False) (λ(Bool : *) → λ(True : Bool) → λ(False : Bool) → True)) (λ(Bool : *) → λ(True : Bool) → λ(False : Bool) → True)"
-  _stateExpr <- view noded <$> case M.P.exprFromText et of
+  _stateExpr <- nodeImportExpr <$> case M.P.exprFromText et of
     Left  _ -> return $ M.Const M.Star
     Right e -> M.I.load e
   let
-    _statePath = Discard pHere
+    _statePath = mempty
     _statePointer = (0, 0)
   return State{..}
 
@@ -124,15 +123,15 @@ pad o1 o2 = offset o1 . extend o2
 
 data Draw' n m
   = Draw' {- z-index -} (Draw n m)
-  | ActiveZone (Extents n m) (Discard PathExpr)
+  | ActiveZone (Extents n m) Path
 
-active :: (Num n, Ord n, Num m, Ord m) => PathExpr p -> Op1 (CollageDraw' n m)
-active p c = pure (ActiveZone (getExtents c) (Discard p)) `mappend` c
+active :: (Num n, Ord n, Num m, Ord m) => Path -> Op1 (CollageDraw' n m)
+active p c = pure (ActiveZone (getExtents c) p) `mappend` c
 
 activate
   :: forall n m r
    . (Ord n, Num n, Ord m, Num m)
-  => (Offset n m -> Extents n m -> Discard PathExpr -> r)
+  => (Offset n m -> Extents n m -> Path -> r)
   -> Offset n m
   -> CollageDraw' n m
   -> Maybe r
@@ -187,7 +186,7 @@ layout' viewport state = do
     $ hover (outline light1) (state ^. statePointer)
     $ background dark1
     $ center viewport
-    $ layoutExpr (join pad (5, 5)) pHere (state ^. stateExpr)
+    $ layoutExpr (join pad (5, 5)) mempty (state ^. stateExpr)
   where
     dark1 = RGB 0.2 0.2 0.2
     dark2 = RGB 0.3 0.3 0.3
@@ -197,17 +196,17 @@ layout' viewport state = do
     text = textline font
     punct = textline (font { fontColor = light1 })
 
-    sel :: forall q . PathExpr q -> CollageDraw' Int Int -> CollageDraw' Int Int
+    sel :: Path -> CollageDraw' Int Int -> CollageDraw' Int Int
     sel path
       | current = active path . outline dark2 . background dark3
       | otherwise = active path
       where
-        current = Discard path == state ^. statePath
+        current = path == state ^. statePath
 
     layoutExpr
       :: Op1 (CollageDraw' Int Int)
-      -> PathExpr ('LabelSum 'Expr)
-      -> NodeExpr
+      -> Path
+      -> Node
       -> CollageDraw' Int Int
     layoutExpr hook path
       = sel path
@@ -215,94 +214,86 @@ layout' viewport state = do
       . onExpr
           layoutConst
           layoutVar
-          (layoutLam $ path -@- pExprLam)
-          (layoutPi  $ path -@- pExprPi)
-          (layoutApp $ path -@- pExprApp)
+          (layoutLam path)
+          (layoutPi path)
+          (layoutApp path)
           layoutEmbed
 
-    layoutConst :: NodeConst -> CollageDraw' Int Int
-    layoutConst (End c) = case c of
+    layoutConst :: Node -> CollageDraw' Int Int
+    layoutConst = onConst $ \case
       M.Star -> punct "★"
       M.Box  -> punct "□"
 
-    layoutVar :: NodeVar -> CollageDraw' Int Int
-    layoutVar (End (M.V txt n)) = text (Text.Lazy.toStrict txt <> i)
-      where
+    layoutVar :: Node -> CollageDraw' Int Int
+    layoutVar = onVar $ \(M.V txt n) ->
+      let
         -- TODO: subscript
         i = if n == 0 then "" else "@" <> fromString (show n)
+      in text (Text.Lazy.toStrict txt <> i)
 
-    layoutApp
-      :: PathExpr ('LabelProduct 'App)
-      -> NodeApp
-      -> CollageDraw' Int Int
-    layoutApp path = withProduct $ \get ->
-        [ layoutExpr
-            (join pad (5, 5))
-            (path -@- pAppExpr1)
-            (get SAppExpr1)
-        , join pad (5, 5) (layoutExpr
-            (outline dark2 . join pad (5, 5))
-            (path -@- pAppExpr2)
-            (get SAppExpr2))
-        ] & horizontalCenter
-
-    layoutLam
-      :: PathExpr ('LabelProduct 'Lam)
-      -> NodeLam
-      -> CollageDraw' Int Int
-    layoutLam path = withProduct $ \get ->
+    layoutLam :: Path -> Node -> CollageDraw' Int Int
+    layoutLam path = onLam $ \arg expr1 expr2 ->
       let
         maxWidth = (max `on` fst.getExtents) header body
         header =
           [ extend (4, 0) (punct "λ")
           , [ layoutArg
                 (join pad (4, 0))
-                (path -@- pLamArg)
-                (get SLamArg)
+                (path <> rp LamArg)
+                arg
             , join pad (4, 0) (punct ":")
-            , layoutExpr (join pad (4, 0)) (path -@- pLamExpr1) (get SLamExpr1)
+            , layoutExpr (join pad (4, 0)) (path <> rp LamExpr1) expr1
             ] & horizontal
           ] & horizontal
-        body = layoutExpr id (path -@- pLamExpr2) (get SLamExpr2)
+        body = layoutExpr id (path <> rp LamExpr2) expr2
       in
         [ header
         , join pad (0, 4) (line light1 maxWidth)
         , body
         ] & vertical
 
-    layoutPi
-      :: PathExpr ('LabelProduct 'Pi)
-      -> NodePi
-      -> CollageDraw' Int Int
-    layoutPi path = withProduct $ \get ->
+    layoutPi :: Path -> Node -> CollageDraw' Int Int
+    layoutPi path = onPi $ \arg expr1 expr2 ->
       let
         maxWidth = (max `on` fst.getExtents) header body
         header =
           [ extend (4, 0) (punct "Π")
           , [ layoutArg
                 (join pad (4, 0))
-                (path -@- pPiArg)
-                (get SPiArg)
+                (path <> rp PiArg)
+                arg
             , join pad (4, 0) (punct ":")
-            , layoutExpr (join pad (4, 0)) (path -@- pPiExpr1) (get SPiExpr1)
+            , layoutExpr (join pad (4, 0)) (path <> rp PiExpr1) expr1
             ] & horizontal
           ] & horizontal
-        body = layoutExpr id (path -@- pPiExpr2) (get SPiExpr2)
+        body = layoutExpr id (path <> rp PiExpr2) expr2
       in
         [ header
         , join pad (0, 4) (line light1 maxWidth)
         , body
         ] & vertical
 
-    layoutEmbed :: NodeEmbed -> CollageDraw' Int Int
-    layoutEmbed (End r) = case r of {}
+    layoutApp :: Path -> Node -> CollageDraw' Int Int
+    layoutApp path = onApp $ \expr1 expr2 ->
+        [ layoutExpr
+            (join pad (5, 5))
+            (path <> rp AppExpr1)
+            expr1
+        , join pad (5, 5) (layoutExpr
+            (outline dark2 . join pad (5, 5))
+            (path <> rp AppExpr2)
+            expr2)
+        ] & horizontalCenter
+
+    layoutEmbed :: Node -> CollageDraw' Int Int
+    layoutEmbed _ = mempty
 
     layoutArg
       :: Op1 (CollageDraw' Int Int)
-      -> PathExpr ('LabelEnd 'Arg)
-      -> NodeArg
+      -> Path
+      -> Node
       -> CollageDraw' Int Int
-    layoutArg hook path = sel path . hook . text . unEnd
+    layoutArg hook path = onArg (sel path . hook . text)
 
 react'
   :: ((State Int Int -> State Int Int) -> IO ())
@@ -316,29 +307,27 @@ react' _asyncReact layout inputEvent state
   , keyCode == KeyCode.ArrowUp || keyLetter 'k' keyCode
   = return
   $ updatePath
-  $ withDiscard pathUp (state ^. statePath)
+  $ pathUp (state ^. statePath)
 
   | KeyPress _ keyCode <- inputEvent
   , keyCode == KeyCode.ArrowDown || keyLetter 'j' keyCode
   = return
   $ updatePath
-  $ withDiscard (pathChild (state ^. stateExpr)) (state ^. statePath)
+  $ pathChild (state ^. stateExpr) (state ^. statePath)
 
   | KeyPress mod keyCode <- inputEvent
   , keyCode == KeyCode.ArrowLeft || keyLetter 'h' keyCode
   = return
   $ updatePath
-  $ withDiscard
-      (if Shift `elem` mod then pathNeighbourL else pathSiblingL)
-      (state ^. statePath)
+  $ (if Shift `elem` mod then pathNeighbourL else pathSiblingL)
+    (state ^. statePath)
 
   | KeyPress mod keyCode <- inputEvent
   , keyCode == KeyCode.ArrowRight || keyLetter 'l' keyCode
   = return
   $ updatePath
-  $ withDiscard
-      (if Shift `elem` mod then pathNeighbourR else pathSiblingR)
-      (state ^. statePath)
+  $ (if Shift `elem` mod then pathNeighbourR else pathSiblingR)
+    (state ^. statePath)
 
   | PointerMotion x y <- inputEvent
   = return . Just
@@ -353,116 +342,82 @@ react' _asyncReact layout inputEvent state
   = return Nothing
 
   where
-    updatePath :: Maybe (Discard PathExpr) -> Maybe (State Int Int)
+    updatePath :: Maybe Path -> Maybe (State Int Int)
     updatePath mpath = set statePath <$> mpath ?? state
 
     keyLetter c keyCode = fmap toLower (keyChar keyCode) == Just c
 
-pathNormalize :: Op1 (Discard (Path p))
-pathNormalize (Discard path) = fromMaybe (Discard path) (pathSumUp path)
+pathUp :: Path -> Maybe Path
+pathUp = preview (_Path . _Snoc . _1 . from _Path)
 
-pathUp :: Path p q -> Maybe (Discard (Path p))
-pathUp path = pathNormalize <$> pathProductUp path
+pathUps :: Path -> NonEmpty Path
+pathUps path = path :| maybe [] (toList . pathUps) (pathUp path)
 
-pathUps :: Path p q -> NonEmpty (Discard (Path p))
-pathUps path = Discard path :| maybe [] (toList . withDiscard pathUps) (pathUp path)
-
-pathSumUp :: Path p q -> Maybe (Discard (Path p))
-pathSumUp = \case
-  (r :@> Here) -> Just (Discard (withSingI (sRelationSumLabel r) Here))
-  (r :@> p1) -> withDiscard (\p1' -> Discard (r :@> p1')) <$> pathSumUp p1
-  (r :@- p1) -> withDiscard (\p1' -> Discard (r :@- p1')) <$> pathSumUp p1
-  Here -> Nothing
-
-pathProductUp :: Path p q -> Maybe (Discard (Path p))
-pathProductUp = \case
-  (r :@- Here) -> Just (Discard (withSingI (sRelationProductLabel r) Here))
-  (r :@- p1) -> withDiscard (\p1' -> Discard (r :@- p1')) <$> pathProductUp p1
-  (r :@> p1) -> withDiscard (\p1' -> Discard (r :@> p1')) <$> pathProductUp p1
-  Here -> Nothing
-
-pathSumDown :: Path p q -> [Discard (Path p)]
-pathSumDown path = case pathTarget path of
-  SLabelSum l -> case l of
-    SExpr ->
-      [ Discard (path -@- pExprConst)
-      , Discard (path -@- pExprVar)
-      , Discard (path -@- pExprLam)
-      , Discard (path -@- pExprPi)
-      , Discard (path -@- pExprApp)
-      , Discard (path -@- pExprEmbed) ]
-  _ -> []
-
-pathProductDown :: Path p q -> [Discard (Path p)]
-pathProductDown path = case pathTarget path of
-  SLabelProduct l -> case l of
-    SLam ->
-      [ Discard (path -@- pLamExpr2)
-      , Discard (path -@- pLamExpr1)
-      , Discard (path -@- pLamArg) ]
-    SPi ->
-      [ Discard (path -@- pPiExpr2)
-      , Discard (path -@- pPiExpr1)
-      , Discard (path -@- pPiArg) ]
-    SApp ->
-      [ Discard (path -@- pAppExpr2)
-      , Discard (path -@- pAppExpr1) ]
-  _ -> []
-
-pathChild :: Node p -> Path p q -> Maybe (Discard (Path p))
+pathChild :: Node -> Path -> Maybe Path
 pathChild node path = pathChildren node path ^? _head
 
-pathChildren :: Node p -> Path p q -> [Discard (Path p)]
+pathChildren :: Node -> Path -> [Path]
 pathChildren node path = do
-  Discard path'  <- pathSumDown path
-  Discard path'' <- pathProductDown path'
-  guard $ notNullOf (atPath path'') node
-  return (Discard path'')
+  l <- case path ^? _Path . _last of
+    Nothing -> [node ^. nodeLabel]
+    Just r -> slaveLabels r
+  r <- slaveRelations l
+  let path' = path <> rp r
+  guard $ notNullOf (atPath path') node
+  return path'
+
+slaveRelations :: Label -> [Relation]
+slaveRelations = \case
+  Lam -> [LamExpr2, LamExpr1, LamArg]
+  Pi  -> [PiExpr2, PiExpr1, PiArg]
+  App -> [AppExpr1, AppExpr2]
+  _   -> []
 
 data Direction = L | R
 
 newtype CyclicStep = CyclicStep Bool
 
-pathSibling' :: Direction -> Path p q -> Compose Maybe ((,) CyclicStep) (Discard (Path p))
-pathSibling' direction = \case
-  (r :@- Here) -> Compose . Just $ case (direction, r) of
-    (L, SLamArg)   -> (CyclicStep True,  Discard pLamExpr2)
-    (R, SLamArg)   -> (CyclicStep False, Discard pLamExpr1)
-    (L, SLamExpr1) -> (CyclicStep False, Discard pLamArg)
-    (R, SLamExpr1) -> (CyclicStep False, Discard pLamExpr2)
-    (L, SLamExpr2) -> (CyclicStep False, Discard pLamExpr1)
-    (R, SLamExpr2) -> (CyclicStep True,  Discard pLamArg)
-    (L, SPiArg)    -> (CyclicStep True,  Discard pPiExpr2)
-    (R, SPiArg)    -> (CyclicStep False, Discard pPiExpr1)
-    (L, SPiExpr1)  -> (CyclicStep False, Discard pPiArg)
-    (R, SPiExpr1)  -> (CyclicStep False, Discard pPiExpr2)
-    (L, SPiExpr2)  -> (CyclicStep False, Discard pPiExpr1)
-    (R, SPiExpr2)  -> (CyclicStep True,  Discard pPiArg)
-    (L, SAppExpr1) -> (CyclicStep True,  Discard pAppExpr2)
-    (R, SAppExpr1) -> (CyclicStep False, Discard pAppExpr2)
-    (L, SAppExpr2) -> (CyclicStep False, Discard pAppExpr1)
-    (R, SAppExpr2) -> (CyclicStep True,  Discard pAppExpr1)
-  (r :@- p1) -> withDiscard (\p1' -> Discard (r :@- p1')) <$> pathSibling' direction p1
-  (r :@> p1) -> withDiscard (\p1' -> Discard (r :@> p1')) <$> pathSibling' direction p1
-  Here -> Compose Nothing
+pathSibling' :: Direction -> Path -> Compose Maybe ((,) CyclicStep) Path
+pathSibling' direction path = case path ^? _Path . _Snoc of
+  Nothing -> Compose Nothing
+  Just (rs, r) ->
+    let
+      p = case (direction, r) of
+        (L, LamArg)   -> (CyclicStep True,  LamExpr2)
+        (R, LamArg)   -> (CyclicStep False, LamExpr1)
+        (L, LamExpr1) -> (CyclicStep False, LamArg)
+        (R, LamExpr1) -> (CyclicStep False, LamExpr2)
+        (L, LamExpr2) -> (CyclicStep False, LamExpr1)
+        (R, LamExpr2) -> (CyclicStep True,  LamArg)
+        (L, PiArg)    -> (CyclicStep True,  PiExpr2)
+        (R, PiArg)    -> (CyclicStep False, PiExpr1)
+        (L, PiExpr1)  -> (CyclicStep False, PiArg)
+        (R, PiExpr1)  -> (CyclicStep False, PiExpr2)
+        (L, PiExpr2)  -> (CyclicStep False, PiExpr1)
+        (R, PiExpr2)  -> (CyclicStep True,  PiArg)
+        (L, AppExpr1) -> (CyclicStep True,  AppExpr2)
+        (R, AppExpr1) -> (CyclicStep False, AppExpr2)
+        (L, AppExpr2) -> (CyclicStep False, AppExpr1)
+        (R, AppExpr2) -> (CyclicStep True,  AppExpr1)
+    in review _Path . snoc rs <$> Compose (Just p)
 
-pathSiblingL', pathSiblingR' :: Path p q -> Maybe (CyclicStep, Discard (Path p))
+pathSiblingL', pathSiblingR' :: Path -> Maybe (CyclicStep, Path)
 pathSiblingL' = getCompose . pathSibling' L
 pathSiblingR' = getCompose . pathSibling' R
 
 nonCyclic :: (CyclicStep, a) -> Maybe a
 nonCyclic (CyclicStep cyclic, a) = pure a <* guard (not cyclic)
 
-pathSiblingL, pathSiblingR :: Path p q -> Maybe (Discard (Path p))
+pathSiblingL, pathSiblingR :: Path -> Maybe Path
 pathSiblingL path = snd <$> pathSiblingL' path
 pathSiblingR path = snd <$> pathSiblingR' path
 
-pathNeighbourL :: Path p q -> Maybe (Discard (Path p))
+pathNeighbourL :: Path -> Maybe Path
 pathNeighbourL path =
   (getFirst . foldMap First)
-  (withDiscard (nonCyclic <=< pathSiblingL') <$> pathUps path)
+  ((nonCyclic <=< pathSiblingL') <$> pathUps path)
 
-pathNeighbourR :: Path p q -> Maybe (Discard (Path p))
+pathNeighbourR :: Path -> Maybe Path
 pathNeighbourR path =
   (getFirst . foldMap First)
-  (withDiscard (nonCyclic <=< pathSiblingR') <$> pathUps path)
+  ((nonCyclic <=< pathSiblingR') <$> pathUps path)
