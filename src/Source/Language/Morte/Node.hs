@@ -132,6 +132,11 @@ onApp f = \case
   N.Node App m -> f (m Map.! AppExpr1) (m Map.! AppExpr2)
   _ -> error "onApp: not an App"
 
+fillHole :: (() -> Node) -> Node -> Maybe Node
+fillHole onHole = \case
+  N.Hole h -> Just (onHole h)
+  _        -> Nothing
+
 onExpr
   :: (()   -> r)
   -> (Node -> r)

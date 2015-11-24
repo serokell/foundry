@@ -297,7 +297,7 @@ layout' viewport state = do
       -> Path
       -> Node
       -> CollageDraw' Int Int
-    layoutArg hook path = onArg layoutHole (sel path . hook . text)
+    layoutArg hook path = sel path . hook . onArg layoutHole text
 
 react'
   :: ((State Int Int -> State Int Int) -> IO ())
@@ -323,14 +323,14 @@ react' _asyncReact layout inputEvent state
   , keyCode == KeyCode.ArrowLeft || keyLetter 'h' keyCode
   = return
   $ updatePath
-  $ (if Shift `elem` mod then pathNeighbourL else pathSiblingL)
+  $ (if Control `elem` mod then pathNeighbourL else pathSiblingL)
     (state ^. statePath)
 
   | KeyPress mod keyCode <- inputEvent
   , keyCode == KeyCode.ArrowRight || keyLetter 'l' keyCode
   = return
   $ updatePath
-  $ (if Shift `elem` mod then pathNeighbourR else pathSiblingR)
+  $ (if Control `elem` mod then pathNeighbourR else pathSiblingR)
     (state ^. statePath)
 
   | KeyPress _ keyCode <- inputEvent
@@ -339,6 +339,21 @@ react' _asyncReact layout inputEvent state
   $ state & failover
       (stateExpr . atPath (state ^. statePath))
       (\_ -> mkHole ())
+
+  | KeyPress _ keyCode <- inputEvent
+  , keyLetter 'L' keyCode
+  = return
+  $ updateHole Lam (\_ -> let h = mkHole() in mkLam h h h)
+
+  | KeyPress _ keyCode <- inputEvent
+  , keyLetter 'P' keyCode
+  = return
+  $ updateHole Pi (\_ -> let h = mkHole() in mkPi h h h)
+
+  | KeyPress _ keyCode <- inputEvent
+  , keyLetter 'A' keyCode
+  = return
+  $ updateHole App (\_ -> let h = mkHole() in mkApp h h)
 
   | PointerMotion x y <- inputEvent
   = return . Just
@@ -356,7 +371,15 @@ react' _asyncReact layout inputEvent state
     updatePath :: Maybe Path -> Maybe (State Int Int)
     updatePath mpath = set statePath <$> mpath ?? state
 
-    keyLetter c keyCode = fmap toLower (keyChar keyCode) == Just c
+    updateHole :: Label -> (() -> Node) -> Maybe (State Int Int)
+    updateHole l onHole = do
+      case state ^? statePath . _Path . _last of
+        Nothing -> guard (l `elem` exprLabels)
+        Just  r -> guard (l `elem` slaveLabels r)
+      state & (stateExpr . atPath (state ^. statePath))
+              (fillHole onHole)
+
+    keyLetter c keyCode = keyChar keyCode == Just c
 
 pathUp :: Path -> Maybe Path
 pathUp = preview (_Path . _Snoc . _1 . from _Path)
