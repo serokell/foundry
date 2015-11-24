@@ -6,7 +6,5 @@ packages:
     commit: a3bfd6927b7010dab50c66adba6b64bd6acaef03
   subdirs:
     - lib
-extra-deps:
-- singletons-2.0.0.2
-- morte-1.3.1
-resolver: lts-3.10
+resolver: nightly-2015-11-23
+extra-deps: []
