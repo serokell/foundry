@@ -6,7 +6,6 @@ module Source.Language.Morte
 
 import Control.Lens
 import Control.Monad
-import Data.Char (toLower)
 import Data.Functor.Compose
 import Data.Foldable
 import Data.Monoid
@@ -14,6 +13,8 @@ import Data.Biapplicative
 import Data.String (fromString)
 import Data.Function
 import Data.List.NonEmpty (NonEmpty(..))
+import Data.Text (Text)
+import qualified Data.Text as Text
 import qualified Data.Text.Lazy as Text.Lazy
 import qualified Morte.Core as M
 import qualified Morte.Parser as M.P
@@ -26,13 +27,26 @@ import Source.Input
 import qualified Source.Input.KeyCode as KeyCode
 import Source.Language.Morte.Node
 
-data State n m = State
-  { _stateExpr :: Node
-  , _statePath :: Path
-  , _statePointer :: Offset n m
-  }
+data State n m
+  = NormalMode
+    { _stateExpr :: Node
+    , _statePath :: Path
+    , _statePointer :: Offset n m
+    , _stateError :: Maybe Text
+    }
+  | InsertMode
+    { _stateExpr :: Node
+    , _statePath :: Path
+    , _statePointer :: Offset n m
+    , _stateError :: Maybe Text
+    }
 
 makeLenses ''State
+
+intoInsertMode :: State n m -> Maybe (State n m)
+intoInsertMode state = case state of
+  NormalMode{..} -> Just InsertMode{..}
+  InsertMode{..} -> Just InsertMode{..}
 
 instance (n ~ Int, m ~ Int) => Syntax n m (CollageDraw' n m) (State n m) where
   blank = blank'
@@ -49,7 +63,8 @@ blank' = do
   let
     _statePath = mempty
     _statePointer = (0, 0)
-  return State{..}
+    _stateError = Nothing
+  return NormalMode{..}
 
 getExcess :: Integral n => n -> n -> (n, n)
 getExcess vacant actual =
@@ -157,7 +172,7 @@ hover
   -> Op1 (CollageDraw' n m)
 hover f o c = c <> maybe mempty id (activate obj o c)
   where
-    obj o e _ = offset o (f (phantom e))
+    obj o' e _ = offset o' (f (phantom e))
 
 instance DrawPhantom n m (Draw' n m) where
   drawPhantom e = Draw' (drawPhantom e)
@@ -183,18 +198,37 @@ draw' c = c >>= \case
 layout' :: Extents Int Int -> State Int Int -> IO (CollageDraw' Int Int)
 layout' viewport state = do
   return
+    $ (<> modeIndicator)
     $ hover (outline light1) (state ^. statePointer)
     $ background dark1
     $ center viewport
     $ layoutExpr (join pad (5, 5)) mempty (state ^. stateExpr)
   where
+    hexColor r g b = RGB (r / 0xFF) (g / 0xFF) (b / 0xFF)
     dark1 = RGB 0.2 0.2 0.2
     dark2 = RGB 0.3 0.3 0.3
     dark3 = RGB 0.25 0.25 0.25
     light1 = RGB 0.7 0.7 0.7
+    plum2 = hexColor 0x75 0x50 0x7b
     font = Font "Ubuntu" 12 (RGB 1 1 1) FontWeightNormal
     text = textline font
     punct = textline (font { fontColor = light1 })
+
+    modeIndicator :: CollageDraw' Int Int
+    modeIndicator
+      = background back
+      $ join pad (0, 4)
+      $ mappend (phantom (getExtents viewport & _2 .~ 0))
+      $ horizontal
+        [ text status
+        , errorMsg ]
+      where
+        (back, status) = case state of
+          NormalMode{} -> (dark3, "  normal  ")
+          InsertMode{} -> (plum2, "  insert  ")
+        errorMsg = case state ^. stateError of
+          Nothing  -> mempty
+          Just msg -> text ("[" <> msg <> "]")
 
     sel :: Path -> CollageDraw' Int Int -> CollageDraw' Int Int
     sel path
@@ -305,55 +339,78 @@ react'
   -> InputEvent Int Int
   -> State Int Int
   -> IO (Maybe (State Int Int))
-react' _asyncReact layout inputEvent state
+react' _asyncReact oldLayout inputEvent state
 
-  | KeyPress _ keyCode <- inputEvent
+  | isNormalMode
+  , KeyPress _ keyCode <- inputEvent
   , keyCode == KeyCode.ArrowUp || keyLetter 'k' keyCode
   = return
+  $ _Just . stateError .~ Nothing
   $ updatePath
   $ pathUp (state ^. statePath)
 
-  | KeyPress _ keyCode <- inputEvent
+  | isNormalMode
+  , KeyPress _ keyCode <- inputEvent
   , keyCode == KeyCode.ArrowDown || keyLetter 'j' keyCode
   = return
+  $ _Just . stateError .~ Nothing
   $ updatePath
   $ pathChild (state ^. stateExpr) (state ^. statePath)
 
-  | KeyPress mod keyCode <- inputEvent
+  | isNormalMode
+  , KeyPress modifier keyCode <- inputEvent
   , keyCode == KeyCode.ArrowLeft || keyLetter 'h' keyCode
   = return
+  $ _Just . stateError .~ Nothing
   $ updatePath
-  $ (if Control `elem` mod then pathNeighbourL else pathSiblingL)
+  $ (if Control `elem` modifier then pathNeighbourL else pathSiblingL)
     (state ^. statePath)
 
-  | KeyPress mod keyCode <- inputEvent
+  | isNormalMode
+  , KeyPress modifier keyCode <- inputEvent
   , keyCode == KeyCode.ArrowRight || keyLetter 'l' keyCode
   = return
+  $ _Just . stateError .~ Nothing
   $ updatePath
-  $ (if Control `elem` mod then pathNeighbourR else pathSiblingR)
+  $ (if Control `elem` modifier then pathNeighbourR else pathSiblingR)
     (state ^. statePath)
 
-  | KeyPress _ keyCode <- inputEvent
+  | isNormalMode
+  , KeyPress _ keyCode <- inputEvent
   , keyCode == KeyCode.Delete || keyLetter 'x' keyCode
   = return
+  $ _Just . stateError .~ Nothing
   $ state & failover
       (stateExpr . atPath (state ^. statePath))
       (\_ -> mkHole ())
 
-  | KeyPress _ keyCode <- inputEvent
+  | isNormalMode
+  , KeyPress _ keyCode <- inputEvent
   , keyLetter 'L' keyCode
   = return
+  $ _Just . stateError .~ Nothing
   $ updateHole Lam (\_ -> let h = mkHole() in mkLam h h h)
 
-  | KeyPress _ keyCode <- inputEvent
+  | isNormalMode
+  , KeyPress _ keyCode <- inputEvent
   , keyLetter 'P' keyCode
   = return
+  $ _Just . stateError .~ Nothing
   $ updateHole Pi (\_ -> let h = mkHole() in mkPi h h h)
 
-  | KeyPress _ keyCode <- inputEvent
+  | isNormalMode
+  , KeyPress _ keyCode <- inputEvent
   , keyLetter 'A' keyCode
   = return
+  $ _Just . stateError .~ Nothing
   $ updateHole App (\_ -> let h = mkHole() in mkApp h h)
+
+  | isNormalMode
+  , KeyPress _ keyCode <- inputEvent
+  , keyLetter 'i' keyCode
+  = return
+  $ _Just . stateError .~ Nothing
+  $ intoInsertMode state
 
   | PointerMotion x y <- inputEvent
   = return . Just
@@ -361,13 +418,21 @@ react' _asyncReact layout inputEvent state
 
   | ButtonPress <- inputEvent
   = return
+  $ _Just . stateError .~ Nothing
   $ updatePath
-  $ activate (\_ _ p -> p) (state ^. statePointer) layout
+  $ activate (\_ _ p -> p) (state ^. statePointer) oldLayout
 
   | otherwise
-  = return Nothing
+  = return . Just
+  $ state & stateError .~ Just ("Unknown input event: " <> (Text.pack . show) inputEvent)
 
   where
+
+    isNormalMode :: Bool
+    isNormalMode = case state of
+      NormalMode{} -> True
+      _            -> False
+
     updatePath :: Maybe Path -> Maybe (State Int Int)
     updatePath mpath = set statePath <$> mpath ?? state
 
