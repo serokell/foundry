@@ -14,6 +14,9 @@ data Node rep rel label
     { _nodeLabel :: label
     , _nodeSlaves :: Map rel (Node rep rel label)
     }
+  | Hole
+    { _nodeHole :: ()
+    }
   deriving (Eq)
 
 makeLenses ''Node

@@ -212,6 +212,7 @@ layout' viewport state = do
       = sel path
       . hook
       . onExpr
+          layoutHole
           layoutConst
           layoutVar
           (layoutLam path)
@@ -219,13 +220,16 @@ layout' viewport state = do
           (layoutApp path)
           layoutEmbed
 
+    layoutHole :: () -> CollageDraw' Int Int
+    layoutHole () = punct "_"
+
     layoutConst :: Node -> CollageDraw' Int Int
-    layoutConst = onConst $ \case
+    layoutConst = onConst layoutHole $ \case
       M.Star -> punct "★"
       M.Box  -> punct "□"
 
     layoutVar :: Node -> CollageDraw' Int Int
-    layoutVar = onVar $ \(M.V txt n) ->
+    layoutVar = onVar layoutHole $ \(M.V txt n) ->
       let
         -- TODO: subscript
         i = if n == 0 then "" else "@" <> fromString (show n)
@@ -293,7 +297,7 @@ layout' viewport state = do
       -> Path
       -> Node
       -> CollageDraw' Int Int
-    layoutArg hook path = onArg (sel path . hook . text)
+    layoutArg hook path = onArg layoutHole (sel path . hook . text)
 
 react'
   :: ((State Int Int -> State Int Int) -> IO ())
@@ -329,6 +333,13 @@ react' _asyncReact layout inputEvent state
   $ (if Shift `elem` mod then pathNeighbourR else pathSiblingR)
     (state ^. statePath)
 
+  | KeyPress _ keyCode <- inputEvent
+  , keyCode == KeyCode.Delete || keyLetter 'x' keyCode
+  = return
+  $ state & failover
+      (stateExpr . atPath (state ^. statePath))
+      (\_ -> mkHole ())
+
   | PointerMotion x y <- inputEvent
   = return . Just
   $ state & statePointer .~ (x, y)
@@ -359,7 +370,7 @@ pathChild node path = pathChildren node path ^? _head
 pathChildren :: Node -> Path -> [Path]
 pathChildren node path = do
   l <- case path ^? _Path . _last of
-    Nothing -> [node ^. nodeLabel]
+    Nothing -> node ^.. nodeLabel
     Just r -> slaveLabels r
   r <- slaveRelations l
   let path' = path <> rp r

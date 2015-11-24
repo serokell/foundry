@@ -52,7 +52,7 @@ slaveLabels = \case
   AppExpr1 -> exprLabels
   AppExpr2 -> exprLabels
 
-nodeLabel :: Lens' Node Label
+nodeLabel :: Traversal' Node Label
 nodeLabel = N.nodeLabel
 
 _Path :: Iso' Path [Relation]
@@ -63,6 +63,9 @@ atPath = N.atPath
 
 rp :: Relation -> Path
 rp r = N.Path [r]
+
+mkHole :: () -> Node
+mkHole = N.Hole
 
 mkLam :: Node -> Node -> Node -> Node
 mkLam arg expr1 expr2
@@ -88,23 +91,29 @@ mkApp expr1 expr2
     ] & Map.fromList
 
 onConst
-  :: (M.Const -> r)
-  -> (Node -> r)
-onConst f = \case
+  :: (()      -> r)
+  -> (M.Const -> r)
+  -> (Node    -> r)
+onConst onHole f = \case
+  N.Hole h -> onHole h
   N.Rep Const (RepConst c) -> f c
   _ -> error "onConst: not a Const"
 
 onVar
-  :: (M.Var -> r)
-  -> (Node -> r)
-onVar f = \case
+  :: (()    -> r)
+  -> (M.Var -> r)
+  -> (Node  -> r)
+onVar onHole f = \case
+  N.Hole h -> onHole h
   N.Rep Var (RepVar v) -> f v
   _ -> error "onVar: not a Var"
 
 onArg
-  :: (Text -> r)
+  :: (()   -> r)
+  -> (Text -> r)
   -> (Node -> r)
-onArg f = \case
+onArg onHole f = \case
+  N.Hole h -> onHole h
   N.Rep Arg (RepArg a) -> f a
   _ -> error "onArg: not an Arg"
 
@@ -124,23 +133,24 @@ onApp f = \case
   _ -> error "onApp: not an App"
 
 onExpr
-  :: (Node -> r)
+  :: (()   -> r)
   -> (Node -> r)
   -> (Node -> r)
   -> (Node -> r)
   -> (Node -> r)
   -> (Node -> r)
   -> (Node -> r)
-onExpr onConst onVar onLam onPi onApp onEmbed node =
-  (case node ^. N.nodeLabel of
-    Const -> onConst
-    Var   -> onVar
-    Lam   -> onLam
-    Pi    -> onPi
-    App   -> onApp
-    Embed -> onEmbed
-    _     -> error "onExpr: not an Expr"
-  ) node
+  -> (Node -> r)
+onExpr onHole onConst onVar onLam onPi onApp onEmbed node =
+  case node ^? N.nodeLabel of
+    Just Const -> onConst node
+    Just Var   -> onVar   node
+    Just Lam   -> onLam   node
+    Just Pi    -> onPi    node
+    Just App   -> onApp   node
+    Just Embed -> onEmbed node
+    Nothing    -> maybe (error "onHole: impossible") onHole (node ^? N.nodeHole)
+    _          -> error "onExpr: not an Expr"
 
 nodeImportArg :: Text.Lazy.Text -> Node
 nodeImportArg t = (N.Rep Arg . RepArg) (Text.Lazy.toStrict t)
