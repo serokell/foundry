@@ -710,9 +710,9 @@ instance
         [ handlePointerMotion
         , handleButtonPress
         , handleCtrl_h
+        , handleRedirectExpr
         , handle_u
         , handleCtrl_r
-        , handleRedirectExpr
         ]
       handlePointerMotion = do
         case inputEvent of
