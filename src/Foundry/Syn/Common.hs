@@ -40,13 +40,14 @@ keyCodeLetter kc c = \case
   KeyPress [] keyCode -> keyCode == kc || keyLetter c keyCode
   _ -> False
 
-data family Sel :: * -> *
+data family SEL :: label -> *
+data family SYN :: label -> *
 
 data SomeSel where
   SomeSel
-    :: ( Typeable syn
-       , Show (Sel syn)
-       ) => Sel syn -> SomeSel
+    :: ( Typeable (SEL label)
+       , Show (SEL label)
+       ) => SEL label -> SomeSel
 
 instance Show SomeSel where
   showsPrec n (SomeSel sel) = showsPrec n sel

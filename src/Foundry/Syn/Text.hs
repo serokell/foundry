@@ -18,31 +18,41 @@ import Source.Draw
 import Source.Input
 import qualified Source.Input.KeyCode as KeyCode
 import Foundry.Syn.Common
+import Foundry.Syn.TH
 
-data SynText = SynText
+data TEXT
+
+data instance SYN TEXT = SynText
   { _synTextContent  :: Text
   , _synTextPosition :: Int
   , _synTextEditMode :: Bool
   } deriving (Eq, Ord, Show)
 
-makeLenses ''SynText
+makeLensesDataInst ''SYN ''TEXT
 
-splitSynText :: SynText -> (Text, Text)
+instance Monoid (SYN TEXT) where
+  mempty = SynText "" 0 True
+  mappend syn1 syn2 = syn1
+    & synTextContent  %~ mappend (syn2 ^. synTextContent)
+    & synTextPosition %~ max     (syn2 ^. synTextPosition)
+    & synTextEditMode %~ (&&)    (syn2 ^. synTextEditMode)
+
+splitSynText :: SYN TEXT -> (Text, Text)
 splitSynText syn = Text.splitAt (syn ^. synTextPosition) (syn ^. synTextContent)
 
-insertSynText :: Text -> SynText -> SynText
+insertSynText :: Text -> SYN TEXT -> SYN TEXT
 insertSynText t syn =
   let (before, after) = splitSynText syn
   in syn & synTextContent .~ before <> t <> after
 
-normalizeSynText :: SynText -> SynText
+normalizeSynText :: SYN TEXT -> SYN TEXT
 normalizeSynText syn = syn & synTextPosition %~ normalizePosition
   where
     normalizePosition :: Int -> Int
     normalizePosition = max 0 . min (views synTextContent Text.length syn)
 instance
   ( n ~ Int, m ~ Int
-  ) => SyntaxLayout n m (CollageDraw' n m) LayoutCtx SynText where
+  ) => SyntaxLayout n m (CollageDraw' n m) LayoutCtx (SYN TEXT) where
 
   layout lctx syn
     | lctx ^. lctxSelected, syn ^. synTextEditMode =
@@ -57,21 +67,23 @@ instance
 
 instance
   ( n ~ Int, m ~ Int
-  ) => SyntaxReact n m (CollageDraw' n m) SynText where
+  ) => SyntaxReact n m (CollageDraw' n m) (SYN TEXT) where
 
   react asyncReact _oldLayout inputEvent = do
     asum handlers
     modify normalizeSynText
     where
-      handlers :: [StateT SynText (ExceptT () IO) ()]
+      handlers :: [StateT (SYN TEXT) (ExceptT () IO) ()]
       handlers =
         [ handle_i
         , handleEscape
+        , handleEnter
         , handleBackspace
         , handleDelete
         , handleArrowLeft
         , handleArrowRight
         , handleControl_v
+        , handle_x
         , handleLetter
         ]
       handle_i = do
@@ -83,6 +95,11 @@ instance
       handleEscape = do
         case inputEvent of
           KeyPress [] KeyCode.Escape
+            -> synTextEditMode .= False
+          _ -> mzero
+      handleEnter = do
+        case inputEvent of
+          KeyPress [] KeyCode.Enter
             -> synTextEditMode .= False
           _ -> mzero
       handleBackspace = do
@@ -124,6 +141,10 @@ instance
                 $ over synTextPosition (+length str)
                 . insertSynText (Text.pack str)
           _ -> mzero
+      handle_x = do
+        guard =<< uses synTextEditMode not
+        guard $ keyCodeLetter KeyCode.Delete 'x' inputEvent
+        put mempty
       handleLetter = do
         guard =<< use synTextEditMode
         case inputEvent of

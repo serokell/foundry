@@ -8,6 +8,7 @@ executable foundry
   other-modules:       Foundry.Syn
                        Foundry.Syn.Text
                        Foundry.Syn.Common
+                       Foundry.Syn.TH
 
   build-depends:       base
                ,       containers
@@ -19,6 +20,7 @@ executable foundry
                ,       lens
                ,       gtk3
                ,       morte
+               ,       template-haskell
                ,       source
 
   hs-source-dirs:      src

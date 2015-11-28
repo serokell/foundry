@@ -1,5 +1,5 @@
+{-# OPTIONS -fno-warn-unticked-promoted-constructors #-}
 {-# LANGUAGE TemplateHaskell #-}
-{-# LANGUAGE TypeSynonymInstances #-}
 {-# LANGUAGE FlexibleInstances #-}
 {-# LANGUAGE FlexibleContexts #-}
 module Foundry.Syn where
@@ -23,106 +23,123 @@ import Source.Input
 import qualified Source.Input.KeyCode as KeyCode
 import Foundry.Syn.Text
 import Foundry.Syn.Common
+import Foundry.Syn.TH
 
 import qualified Morte.Core as M
 import qualified Morte.Parser as M.P
 import qualified Morte.Import as M.I
 
-data instance Sel (SynHole syn) = SelHole (Sel syn)
+data INT
+data EXPR_K = LAM | PI | APP | CONST | EMBED | VAR
+data ARG
+data EXPR
+data TOP (n :: *) (m :: *)
+data HOLE sub
 
-data SynHole syn = SynSolid syn | SynHollow
+data instance SEL (HOLE sub) = SelHole (SEL sub)
   deriving (Eq, Ord, Show)
 
-data instance Sel SynLam = SelLamArg | SelLamExpr1 | SelLamExpr2
+data instance SEL LAM = SelLamArg | SelLamExpr1 | SelLamExpr2
   deriving (Eq, Ord, Show)
 
-data SynLam = SynLam
-  { _synLamArg   :: SynArg
-  , _synLamExpr1 :: SynHole SynExpr
-  , _synLamExpr2 :: SynHole SynExpr
-  , _synLamSel   :: Maybe (Sel SynLam)
+data instance SEL PI = SelPiArg | SelPiExpr1 | SelPiExpr2
+  deriving (Eq, Ord, Show)
+
+data instance SEL APP = SelAppExpr1 | SelAppExpr2
+  deriving (Eq, Ord, Show)
+
+data instance SEL CONST = SelConst { unSelConst :: Void }
+  deriving (Eq, Ord, Show)
+
+data instance SEL EMBED = SelEmbed { unSelEmbed :: Void }
+  deriving (Eq, Ord, Show)
+
+data instance SEL ARG = SelArg { unSelArg :: Void }
+  deriving (Eq, Ord, Show)
+
+data instance SEL VAR = SelVar { unSelVar :: Void }
+  deriving (Eq, Ord, Show)
+
+declarePrisms
+  [d|
+    data instance SYN (HOLE sub) = SynSolid (SYN sub) | SynHollow
+      deriving (Eq, Ord, Show)
+  |]
+
+data instance SYN LAM = SynLam
+  { _synLamArg   :: SYN ARG
+  , _synLamExpr1 :: SYN (HOLE EXPR)
+  , _synLamExpr2 :: SYN (HOLE EXPR)
+  , _synLamSel   :: Maybe (SEL LAM)
   } deriving (Eq, Ord, Show)
 
-data instance Sel SynPi = SelPiArg | SelPiExpr1 | SelPiExpr2
-  deriving (Eq, Ord, Show)
-
-data SynPi = SynPi
-  { _synPiArg   :: SynArg
-  , _synPiExpr1 :: SynHole SynExpr
-  , _synPiExpr2 :: SynHole SynExpr
-  , _synPiSel   :: Maybe (Sel SynPi)
+data instance SYN PI = SynPi
+  { _synPiArg   :: SYN ARG
+  , _synPiExpr1 :: SYN (HOLE EXPR)
+  , _synPiExpr2 :: SYN (HOLE EXPR)
+  , _synPiSel   :: Maybe (SEL PI)
   } deriving (Eq, Ord, Show)
 
-data instance Sel SynApp = SelAppExpr1 | SelAppExpr2
-  deriving (Eq, Ord, Show)
-
-data SynApp = SynApp
-  { _synAppExpr1 :: SynHole SynExpr
-  , _synAppExpr2 :: SynHole SynExpr
-  , _synAppSel   :: Maybe (Sel SynApp)
+data instance SYN APP = SynApp
+  { _synAppExpr1 :: SYN (HOLE EXPR)
+  , _synAppExpr2 :: SYN (HOLE EXPR)
+  , _synAppSel   :: Maybe (SEL APP)
   } deriving (Eq, Ord, Show)
 
-data instance Sel SynConst = SelConst { unSelConst :: Void }
-
-data SynConst = SynConstStar | SynConstBox
+data instance SYN CONST = SynConstStar | SynConstBox
   deriving (Eq, Ord, Show)
 
-data instance Sel SynEmbed = SelEmbed { unSelEmbed :: Void }
-
-data SynEmbed
-  = SynEmbedFilePath SynText
-  | SynEmbedURL SynText
+data instance SYN EMBED
+  = SynEmbedFilePath (SYN TEXT)
+  | SynEmbedURL (SYN TEXT)
   deriving (Eq, Ord, Show)
 
-data instance Sel SynArg = SelArg { unSelArg :: Void }
-
-newtype SynArg = SynArg SynText
+newtype instance SYN ARG = SynArg (SYN TEXT)
   deriving (Eq, Ord, Show)
 
-data instance Sel SynVar = SelVar { unSelVar :: Void }
-
-data SynVar = SynVar
-  { _synVarName  :: SynText
-  , _synVarIndex :: SynInt
+data instance SYN VAR = SynVar
+  { _synVarName  :: SYN TEXT
+  , _synVarIndex :: SYN INT
   } deriving (Eq, Ord, Show)
 
-newtype SynInt = SynInt Int
+newtype instance SYN INT = SynInt Int
   deriving (Eq, Ord, Show)
 
-data instance Sel SynExpr
-  = SelExprLam (Sel SynLam)
-  | SelExprPi  (Sel SynPi)
-  | SelExprApp (Sel SynApp)
+data instance SEL EXPR
+  = SelExprLam (SEL LAM)
+  | SelExprPi  (SEL PI)
+  | SelExprApp (SEL APP)
   deriving (Eq, Ord, Show)
 
-data SynExpr
-  = SynExprLam   SynLam
-  | SynExprPi    SynPi
-  | SynExprApp   SynApp
-  | SynExprConst SynConst
-  | SynExprVar   SynVar
-  | SynExprEmbed SynEmbed
+data instance SYN EXPR
+  = SynExprLam   (SYN LAM)
+  | SynExprPi    (SYN PI)
+  | SynExprApp   (SYN APP)
+  | SynExprConst (SYN CONST)
+  | SynExprVar   (SYN VAR)
+  | SynExprEmbed (SYN EMBED)
   deriving (Eq, Ord, Show)
 
-data Syn n m = Syn
-  { _synExpr            :: SynHole SynExpr
-  , _synPointer         :: Offset n m
-  , _synHoverBarEnabled :: Bool
-  , _synUndo            :: [SynHole SynExpr]
-  , _synRedo            :: [SynHole SynExpr]
-  } deriving (Eq, Ord, Show)
+declareLenses
+  [d|
+      data instance SYN (TOP n m) = SynTop
+        { synExpr            :: SYN (HOLE EXPR)
+        , synPointer         :: Offset n m
+        , synHoverBarEnabled :: Bool
+        , synUndo            :: [SYN (HOLE EXPR)]
+        , synRedo            :: [SYN (HOLE EXPR)]
+        } deriving (Eq, Ord, Show)
+  |]
 
-makePrisms ''SynInt
-makeLenses ''SynVar
-makePrisms ''SynArg
-makeLenses ''SynLam
-makeLenses ''SynPi
-makeLenses ''SynApp
-makePrisms ''SynExpr
-makePrisms ''SynHole
-makeLenses ''Syn
+makePrismsDataInst ''SYN ''INT
+makeLensesDataInst ''SYN 'VAR
+makePrismsDataInst ''SYN ''ARG
+makeLensesDataInst ''SYN 'LAM
+makeLensesDataInst ''SYN 'PI
+makeLensesDataInst ''SYN 'APP
+makePrismsDataInst ''SYN ''EXPR
 
-synImportExpr :: M.Expr M.X -> SynExpr
+synImportExpr :: M.Expr M.X -> SYN EXPR
 synImportExpr =
   let
     synImportText t =
@@ -156,29 +173,28 @@ synImportExpr =
     M.App f a -> SynExprApp $ synImportApp f a
     M.Embed e -> M.absurd e
 
-
 class SynSelection a where
-  synSelection :: a -> Maybe (Sel a)
+  synSelection :: SYN a -> Maybe (SEL a)
   synSelection = const Nothing
 
-synSelectionSelf :: SynSelection a => a -> Bool
+synSelectionSelf :: SynSelection a => SYN a -> Bool
 synSelectionSelf = isNothing . synSelection
 
-instance SynSelection SynLam where
+instance SynSelection LAM where
   synSelection = view synLamSel
 
-instance SynSelection SynPi where
+instance SynSelection PI where
   synSelection = view synPiSel
 
-instance SynSelection SynApp where
+instance SynSelection APP where
   synSelection = view synAppSel
 
-instance SynSelection SynArg
-instance SynSelection SynConst
-instance SynSelection SynVar
-instance SynSelection SynEmbed
+instance SynSelection ARG
+instance SynSelection CONST
+instance SynSelection VAR
+instance SynSelection EMBED
 
-instance SynSelection SynExpr where
+instance SynSelection EXPR where
   synSelection = \case
     SynExprLam   a -> SelExprLam <$> synSelection a
     SynExprPi    a -> SelExprPi  <$> synSelection a
@@ -187,7 +203,7 @@ instance SynSelection SynExpr where
     SynExprVar   a -> absurd . unSelVar   <$> synSelection a
     SynExprEmbed a -> absurd . unSelEmbed <$> synSelection a
 
-instance SynSelection syn => SynSelection (SynHole syn) where
+instance SynSelection sub => SynSelection (HOLE sub) where
   synSelection = \case
     SynHollow -> Nothing
     SynSolid syn -> SelHole <$> synSelection syn
@@ -197,7 +213,7 @@ instance SynSelection syn => SynSelection (SynHole syn) where
 
 instance
   ( n ~ Int, m ~ Int
-  ) => SyntaxLayout n m (CollageDraw' n m) LayoutCtx SynArg where
+  ) => SyntaxLayout n m (CollageDraw' n m) LayoutCtx (SYN ARG) where
 
   layout lctx (SynArg t) = layout lctx t
 
@@ -205,7 +221,7 @@ instance
 
 instance
   ( n ~ Int, m ~ Int
-  ) => SyntaxReact n m (CollageDraw' n m) SynArg where
+  ) => SyntaxReact n m (CollageDraw' n m) (SYN ARG) where
 
   react asyncReact oldLayout inputEvent = zoom _SynArg $ do
     react (asyncReact . over _SynArg) oldLayout inputEvent
@@ -216,7 +232,7 @@ instance
 
 instance
   ( n ~ Int, m ~ Int
-  ) => SyntaxLayout n m (CollageDraw' n m) LayoutCtx SynLam where
+  ) => SyntaxLayout n m (CollageDraw' n m) LayoutCtx (SYN LAM) where
 
   layout lctx syn =
     let
@@ -239,11 +255,11 @@ instance
 
 instance
   ( n ~ Int, m ~ Int
-  ) => SyntaxReact n m (CollageDraw' n m) SynLam where
+  ) => SyntaxReact n m (CollageDraw' n m) (SYN LAM) where
 
   react asyncReact oldLayout inputEvent = asum handlers
     where
-      handlers :: [StateT SynLam (ExceptT () IO) ()]
+      handlers :: [StateT (SYN LAM) (ExceptT () IO) ()]
       handlers =
         [ handleSelRedirect
         , handleArrowLeft
@@ -277,7 +293,7 @@ instance
           delegate
             :: forall syn
              . SyntaxReact n m (CollageDraw' n m) syn
-            => Lens' SynLam syn -> StateT SynLam (ExceptT () IO) ()
+            => Lens' (SYN LAM) syn -> StateT (SYN LAM) (ExceptT () IO) ()
           delegate p = zoom p $ do
             react (asyncReact . over p) oldLayout inputEvent
         selection <- gets synSelection
@@ -287,12 +303,12 @@ instance
           Just SelLamExpr1 -> delegate synLamExpr1
           Just SelLamExpr2 -> delegate synLamExpr2
 
-instance SyntaxBlank SynLam where
+instance SyntaxBlank (SYN LAM) where
   blank = return SynLam
-    { _synLamArg   = SynArg (SynText "_" 0 False)
+    { _synLamArg   = SynArg mempty
     , _synLamExpr1 = SynHollow
     , _synLamExpr2 = SynHollow
-    , _synLamSel   = Nothing
+    , _synLamSel   = Just SelLamArg
     }
 
 
@@ -301,7 +317,7 @@ instance SyntaxBlank SynLam where
 
 instance
   ( n ~ Int, m ~ Int
-  ) => SyntaxLayout n m (CollageDraw' n m) LayoutCtx SynPi where
+  ) => SyntaxLayout n m (CollageDraw' n m) LayoutCtx (SYN PI) where
 
   layout lctx syn =
     let
@@ -324,11 +340,11 @@ instance
 
 instance
   ( n ~ Int, m ~ Int
-  ) => SyntaxReact n m (CollageDraw' n m) SynPi where
+  ) => SyntaxReact n m (CollageDraw' n m) (SYN PI) where
 
   react asyncReact oldLayout inputEvent = asum handlers
     where
-      handlers :: [StateT SynPi (ExceptT () IO) ()]
+      handlers :: [StateT (SYN PI) (ExceptT () IO) ()]
       handlers =
         [ handleSelRedirect
         , handleArrowLeft
@@ -362,7 +378,7 @@ instance
           delegate
             :: forall syn
              . SyntaxReact n m (CollageDraw' n m) syn
-            => Lens' SynPi syn -> StateT SynPi (ExceptT () IO) ()
+            => Lens' (SYN PI) syn -> StateT (SYN PI) (ExceptT () IO) ()
           delegate p = zoom p $ do
             react (asyncReact . over p) oldLayout inputEvent
         selection <- gets synSelection
@@ -372,12 +388,12 @@ instance
           Just SelPiExpr1 -> delegate synPiExpr1
           Just SelPiExpr2 -> delegate synPiExpr2
 
-instance SyntaxBlank SynPi where
+instance SyntaxBlank (SYN PI) where
   blank = return SynPi
-    { _synPiArg   = SynArg (SynText "_" 0 False)
+    { _synPiArg   = SynArg mempty
     , _synPiExpr1 = SynHollow
     , _synPiExpr2 = SynHollow
-    , _synPiSel   = Nothing
+    , _synPiSel   = Just SelPiArg
     }
 
 
@@ -386,7 +402,7 @@ instance SyntaxBlank SynPi where
 
 instance
   ( n ~ Int, m ~ Int
-  ) => SyntaxLayout n m (CollageDraw' n m) LayoutCtx SynApp where
+  ) => SyntaxLayout n m (CollageDraw' n m) LayoutCtx (SYN APP) where
 
   layout lctx syn =
         [ selLayout lctx (SelAppExpr1, view synAppExpr1) (join pad (5, 5)) syn
@@ -401,11 +417,11 @@ instance
 
 instance
   ( n ~ Int, m ~ Int
-  ) => SyntaxReact n m (CollageDraw' n m) SynApp where
+  ) => SyntaxReact n m (CollageDraw' n m) (SYN APP) where
 
   react asyncReact oldLayout inputEvent = asum handlers
     where
-      handlers :: [StateT SynApp (ExceptT () IO) ()]
+      handlers :: [StateT (SYN APP) (ExceptT () IO) ()]
       handlers =
         [ handleSelRedirect
         , handleArrowLeft
@@ -436,7 +452,7 @@ instance
           delegate
             :: forall syn
              . SyntaxReact n m (CollageDraw' n m) syn
-            => Lens' SynApp syn -> StateT SynApp (ExceptT () IO) ()
+            => Lens' (SYN APP) syn -> StateT (SYN APP) (ExceptT () IO) ()
           delegate p = zoom p $ do
             react (asyncReact . over p) oldLayout inputEvent
         selection <- gets synSelection
@@ -445,11 +461,11 @@ instance
           Just SelAppExpr1 -> delegate synAppExpr1
           Just SelAppExpr2 -> delegate synAppExpr2
 
-instance SyntaxBlank SynApp where
+instance SyntaxBlank (SYN APP) where
   blank = return SynApp
     { _synAppExpr1 = SynHollow
     , _synAppExpr2 = SynHollow
-    , _synAppSel   = Nothing
+    , _synAppSel   = Just SelAppExpr1
     }
 
 
@@ -458,7 +474,7 @@ instance SyntaxBlank SynApp where
 
 instance
   ( n ~ Int, m ~ Int
-  ) => SyntaxLayout n m (CollageDraw' n m) LayoutCtx SynConst where
+  ) => SyntaxLayout n m (CollageDraw' n m) LayoutCtx (SYN CONST) where
 
   layout _ = \case
     SynConstStar -> punct "★"
@@ -468,30 +484,41 @@ instance
 
 instance
   ( n ~ Int, m ~ Int
-  ) => SyntaxReact n m (CollageDraw' n m) SynConst where
+  ) => SyntaxReact n m (CollageDraw' n m) (SYN CONST) where
 
 ---       Var       ---
 ---    instances    ---
 
 instance
   ( n ~ Int, m ~ Int
-  ) => SyntaxLayout n m (CollageDraw' n m) () SynInt where
+  ) => SyntaxLayout n m (CollageDraw' n m) () (SYN INT) where
 
-  layout () (SynInt n) = (text . Text.pack . show) n
+  layout () = text . Text.map toSub . Text.pack . show . view _SynInt
+    where
+      toSub :: Char -> Char
+      toSub = \case
+        '0' -> '₀'
+        '1' -> '₁'
+        '2' -> '₂'
+        '3' -> '₃'
+        '4' -> '₄'
+        '5' -> '₅'
+        '6' -> '₆'
+        '7' -> '₇'
+        '8' -> '₈'
+        '9' -> '₉'
+        c   -> c
 
   draw _ = draw'
 
 instance
   ( n ~ Int, m ~ Int
-  ) => SyntaxLayout n m (CollageDraw' n m) LayoutCtx SynVar where
+  ) => SyntaxLayout n m (CollageDraw' n m) LayoutCtx (SYN VAR) where
 
   layout lctx v =
     [ layout lctx (v ^. synVarName)
     , if (v ^. synVarIndex . _SynInt) > 0
-      then
-        [ text "@"
-        , layout () (v ^. synVarIndex)
-        ] & horizontal
+      then layout () (v ^. synVarIndex)
       else
         mempty
     ] & horizontal
@@ -500,11 +527,11 @@ instance
 
 instance
   ( n ~ Int, m ~ Int
-  ) => SyntaxReact n m (CollageDraw' n m) SynVar where
+  ) => SyntaxReact n m (CollageDraw' n m) (SYN VAR) where
 
   react asyncReact oldLayout inputEvent = asum handlers
     where
-      handlers :: [StateT SynVar (ExceptT () IO) ()]
+      handlers :: [StateT (SYN VAR) (ExceptT () IO) ()]
       handlers =
         [ handleShiftUp
         , handleShiftDown
@@ -523,15 +550,15 @@ instance
       handleRedirect = zoom synVarName $ do
         react (asyncReact . over synVarName) oldLayout inputEvent
 
-instance SyntaxBlank SynVar where
-  blank = return $ SynVar (SynText "" 0 True) (SynInt 0)
+instance SyntaxBlank (SYN VAR) where
+  blank = return $ SynVar mempty (SynInt 0)
 
 ---      Embed      ---
 ---    instances    ---
 
 instance
   ( n ~ Int, m ~ Int
-  ) => SyntaxLayout n m (CollageDraw' n m) LayoutCtx SynEmbed where
+  ) => SyntaxLayout n m (CollageDraw' n m) LayoutCtx (SYN EMBED) where
 
   layout _ _ = text "Embed"
 
@@ -539,14 +566,14 @@ instance
 
 instance
   ( n ~ Int, m ~ Int
-  ) => SyntaxReact n m (CollageDraw' n m) SynEmbed where
+  ) => SyntaxReact n m (CollageDraw' n m) (SYN EMBED) where
 
 ---       Expr      ---
 ---    instances    ---
 
 instance
   ( n ~ Int, m ~ Int
-  ) => SyntaxLayout n m (CollageDraw' n m) LayoutCtx SynExpr where
+  ) => SyntaxLayout n m (CollageDraw' n m) LayoutCtx (SYN EXPR) where
 
   layout lctx = \case
     SynExprLam   a -> layout lctx a
@@ -560,13 +587,13 @@ instance
 
 instance
   ( n ~ Int, m ~ Int
-  ) => SyntaxReact n m (CollageDraw' n m) SynExpr where
+  ) => SyntaxReact n m (CollageDraw' n m) (SYN EXPR) where
 
   react asyncReact oldLayout inputEvent =
     let
       delegate
         :: SyntaxReact n m (CollageDraw' n m) syn
-        => Prism' SynExpr syn -> StateT SynExpr (ExceptT () IO) ()
+        => Prism' (SYN EXPR) syn -> StateT (SYN EXPR) (ExceptT () IO) ()
       delegate p =
         let asyncReact' = asyncReact . over p
         in do
@@ -583,7 +610,7 @@ instance
 
   subreact _asyncReact _oldLayout inputEvent = asum handlers
     where
-      handlers :: [ExceptT () IO SynExpr]
+      handlers :: [ExceptT () IO (SYN EXPR)]
       handlers =
         [ handleShift_L
         , handleShift_P
@@ -630,8 +657,8 @@ instance
 
 instance
   ( n ~ Int, m ~ Int
-  , SyntaxLayout n m (CollageDraw' n m) lctx syn
-  ) => SyntaxLayout n m (CollageDraw' n m) lctx (SynHole syn) where
+  , SyntaxLayout n m (CollageDraw' n m) lctx (SYN sub)
+  ) => SyntaxLayout n m (CollageDraw' n m) lctx (SYN (HOLE sub)) where
 
   layout lctx = \case
     SynHollow    -> punct "⦿"
@@ -641,12 +668,12 @@ instance
 
 instance
   ( n ~ Int, m ~ Int
-  , SyntaxReact n m (CollageDraw' n m) syn
-  ) => SyntaxReact n m (CollageDraw' n m) (SynHole syn) where
+  , SyntaxReact n m (CollageDraw' n m) (SYN sub)
+  ) => SyntaxReact n m (CollageDraw' n m) (SYN (HOLE sub)) where
 
   react asyncReact oldLayout inputEvent = asum handlers
     where
-      handlers :: [StateT (SynHole syn) (ExceptT () IO) ()]
+      handlers :: [StateT (SYN (HOLE sub)) (ExceptT () IO) ()]
       handlers =
         [ handleRedirectHollow
         , handleRedirectSolid
@@ -669,7 +696,7 @@ instance
         guard $ keyCodeLetter KeyCode.Delete 'x' inputEvent
         put SynHollow
 
-instance SyntaxBlank (SynHole syn) where
+instance SyntaxBlank (SYN (HOLE sub)) where
   blank = return SynHollow
 
 
@@ -678,7 +705,7 @@ instance SyntaxBlank (SynHole syn) where
 
 instance
   ( n ~ Int, m ~ Int
-  ) => SyntaxLayout n m (CollageDraw' n m) (Extents n m) (Syn n m) where
+  ) => SyntaxLayout n m (CollageDraw' n m) (Extents n m) (SYN (TOP n m)) where
 
   layout viewport syn =
     let
@@ -699,11 +726,11 @@ instance
 
 instance
   ( n ~ Int, m ~ Int
-  ) => SyntaxReact n m (CollageDraw' n m) (Syn n m) where
+  ) => SyntaxReact n m (CollageDraw' n m) (SYN (TOP n m)) where
 
   react asyncReact oldLayout inputEvent = asum handlers
     where
-      handlers :: [StateT (Syn n m) (ExceptT () IO) ()]
+      handlers :: [StateT (SYN (TOP n m)) (ExceptT () IO) ()]
       handlers =
         [ handlePointerMotion
         , handleButtonPress
@@ -760,10 +787,15 @@ instance
             (asyncReact . over synExpr)
             oldLayout
             inputEvent
-        synUndo %= (expr:)
-        synRedo .= []
+        expr' <- use synExpr
+        when (diffUndoExpr expr expr') $ do
+          synUndo %= (expr:)
+          synRedo .= []
 
-updateExprPath :: Path -> SynHole SynExpr -> SynHole SynExpr
+diffUndoExpr :: SYN (HOLE EXPR) -> SYN (HOLE EXPR) -> Bool
+diffUndoExpr _ _ = True
+
+updateExprPath :: Path -> SYN (HOLE EXPR) -> SYN (HOLE EXPR)
 updateExprPath path = \case
   SynHollow -> SynHollow
   SynSolid e -> SynSolid $ case e of
@@ -774,7 +806,7 @@ updateExprPath path = \case
     SynExprVar   _ -> e
     SynExprEmbed _ -> e
 
-updateLamPath :: Path -> SynLam -> SynLam
+updateLamPath :: Path -> SYN LAM -> SYN LAM
 updateLamPath path e =
   case uncons path of
     Nothing -> e & synLamSel .~ Nothing
@@ -787,7 +819,7 @@ updateLamPath path e =
           Just SelLamExpr2 -> synLamExpr2 %~ updateExprPath someSels
           _ -> id
 
-updatePiPath :: Path -> SynPi -> SynPi
+updatePiPath :: Path -> SYN PI -> SYN PI
 updatePiPath path e =
   case uncons path of
     Nothing -> e & synPiSel .~ Nothing
@@ -800,7 +832,7 @@ updatePiPath path e =
           Just SelPiExpr2 -> synPiExpr2 %~ updateExprPath someSels
           _ -> id
 
-updateAppPath :: Path -> SynApp -> SynApp
+updateAppPath :: Path -> SYN APP -> SYN APP
 updateAppPath path e =
   case uncons path of
     Nothing -> e & synAppSel .~ Nothing
@@ -813,13 +845,13 @@ updateAppPath path e =
           Just SelAppExpr1 -> synAppExpr1 %~ updateExprPath someSels
           Just SelAppExpr2 -> synAppExpr2 %~ updateExprPath someSels
 
-instance (n ~ Int, m ~ Int) => SyntaxBlank (Syn n m) where
+instance (n ~ Int, m ~ Int) => SyntaxBlank (SYN (TOP n m)) where
   blank = do
     let et = "λ(x : ∀(Nat : *) → ∀(Succ : Nat → Nat) → ∀(Zero : Nat) → Nat) → x (∀(Bool : *) → ∀(True : Bool) → ∀(False : Bool) → Bool) (λ(x : ∀(Bool : *) → ∀(True : Bool) → ∀(False : Bool) → Bool) → x (∀(Bool : *) → ∀(True : Bool) → ∀(False : Bool) → Bool) (λ(Bool : *) → λ(True : Bool) → λ(False : Bool) → False) (λ(Bool : *) → λ(True : Bool) → λ(False : Bool) → True)) (λ(Bool : *) → λ(True : Bool) → λ(False : Bool) → True)"
     expr <- synImportExpr <$> case M.P.exprFromText et of
       Left  _ -> return $ M.Const M.Star
       Right e -> M.I.load e
-    return $ Syn (SynSolid expr) (0, 0) False [] []
+    return $ SynTop (SynSolid expr) (0, 0) False [] []
 
 
 ---  helpers  ---

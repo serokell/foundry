@@ -1,9 +1,10 @@
 module Main where
 
 import Source
-import Foundry.Syn as Morte
+import Foundry.Syn (TOP)
+import Foundry.Syn.Common (SYN)
 
 main :: IO ()
 main = do
-    _ :: Morte.Syn Int Int <- runGUI
+    _ :: SYN (TOP Int Int) <- runGUI
     return ()
