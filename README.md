@@ -8,7 +8,7 @@ Implementation status:
 
 * [x] rendering expressions
 * [x] basic navigation
-* [ ] editing expressions
+* [x] editing expressions
 * [ ] interactive evaluation
 * [ ] auto-completion
 * [ ] local storage

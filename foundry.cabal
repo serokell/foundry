@@ -5,17 +5,19 @@ cabal-version:       >=1.10
 
 executable foundry
   main-is:             Main.hs
-  other-modules:       Data.Node
-                       Source.Language.Morte
-                       Source.Language.Morte.Node
+  other-modules:       Source.Language.Morte.Syn
+                       Source.Language.Morte.Syn.Text
+                       Source.Language.Morte.Syn.Common
 
   build-depends:       base
                ,       containers
                ,       transformers
+               ,       mtl
                ,       bifunctors
                ,       semigroups
                ,       text
                ,       lens
+               ,       gtk3
                ,       morte
                ,       source
 

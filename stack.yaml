@@ -3,8 +3,9 @@ packages:
 - '.'
 - location:
     git: https://github.com/int-index/source
-    commit: a3bfd6927b7010dab50c66adba6b64bd6acaef03
+    commit: b2e4d814d49c98af95dbc91c4d84e649bd68f585
   subdirs:
     - lib
 resolver: nightly-2015-11-23
-extra-deps: []
+extra-deps:
+- stable-memo-0.3.1
