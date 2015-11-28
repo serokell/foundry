@@ -2,7 +2,7 @@
 {-# LANGUAGE TypeSynonymInstances #-}
 {-# LANGUAGE FlexibleInstances #-}
 {-# LANGUAGE FlexibleContexts #-}
-module Source.Language.Morte.Syn where
+module Foundry.Syn where
 
 import Data.Text (Text)
 import qualified Data.Text as Text
@@ -23,8 +23,8 @@ import Source.Syntax
 import Source.Draw
 import Source.Input
 import qualified Source.Input.KeyCode as KeyCode
-import Source.Language.Morte.Syn.Text
-import Source.Language.Morte.Syn.Common
+import Foundry.Syn.Text
+import Foundry.Syn.Common
 
 import qualified Morte.Core as M
 import qualified Morte.Parser as M.P

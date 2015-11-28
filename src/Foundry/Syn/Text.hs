@@ -1,7 +1,7 @@
 {-# LANGUAGE TemplateHaskell #-}
 {-# LANGUAGE FlexibleInstances #-}
 {-# LANGUAGE FlexibleContexts #-}
-module Source.Language.Morte.Syn.Text where
+module Foundry.Syn.Text where
 
 import Data.Text (Text)
 import qualified Data.Text as Text
@@ -17,7 +17,7 @@ import Source.Syntax
 import Source.Draw
 import Source.Input
 import qualified Source.Input.KeyCode as KeyCode
-import Source.Language.Morte.Syn.Common
+import Foundry.Syn.Common
 
 data SynText = SynText
   { _synTextContent  :: Text

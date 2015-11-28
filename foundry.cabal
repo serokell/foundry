@@ -5,9 +5,9 @@ cabal-version:       >=1.10
 
 executable foundry
   main-is:             Main.hs
-  other-modules:       Source.Language.Morte.Syn
-                       Source.Language.Morte.Syn.Text
-                       Source.Language.Morte.Syn.Common
+  other-modules:       Foundry.Syn
+                       Foundry.Syn.Text
+                       Foundry.Syn.Common
 
   build-depends:       base
                ,       containers

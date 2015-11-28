@@ -1,7 +1,7 @@
 {-# LANGUAGE TemplateHaskell #-}
 {-# LANGUAGE FlexibleInstances #-}
 {-# LANGUAGE FlexibleContexts #-}
-module Source.Language.Morte.Syn.Common where
+module Foundry.Syn.Common where
 
 import Data.Text (Text)
 import qualified Data.Text as Text

@@ -1,7 +1,7 @@
 module Main where
 
 import Source
-import Source.Language.Morte.Syn as Morte
+import Foundry.Syn as Morte
 
 main :: IO ()
 main = do
