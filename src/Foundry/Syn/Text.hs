@@ -59,7 +59,7 @@ instance
   ( n ~ Int, m ~ Int
   ) => SyntaxReact n m (CollageDraw' n m) SynText where
 
-  react asyncReact oldLayout inputEvent = do
+  react asyncReact _oldLayout inputEvent = do
     asum handlers
     modify normalizeSynText
     where

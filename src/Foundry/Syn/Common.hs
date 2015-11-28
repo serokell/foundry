@@ -4,14 +4,8 @@
 module Foundry.Syn.Common where
 
 import Data.Text (Text)
-import qualified Data.Text as Text
-import qualified Data.Text.Lazy as Text.Lazy
 import Data.Sequence (Seq)
-import Data.Foldable
-import Data.Function
-import Data.Maybe
 import Data.Biapplicative
-import Data.Void
 import Data.Monoid
 import Data.Typeable
 
@@ -22,7 +16,6 @@ import Source.Syntax
 import Source.Draw
 import Source.Style
 import Source.Input
-import qualified Source.Input.KeyCode as KeyCode
 
 dark1, dark2, dark3, light1 :: Color
 dark1  = RGB 0.20 0.20 0.20

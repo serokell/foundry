@@ -4,10 +4,8 @@
 {-# LANGUAGE FlexibleContexts #-}
 module Foundry.Syn where
 
-import Data.Text (Text)
 import qualified Data.Text as Text
 import qualified Data.Text.Lazy as Text.Lazy
-import Data.Sequence (Seq)
 import qualified Data.Sequence as Seq
 import Data.Foldable
 import Data.Function
@@ -291,7 +289,7 @@ instance
 
 instance SyntaxBlank SynLam where
   blank = return SynLam
-    { _synLamArg   = SynArg (SynText "_" 1 False)
+    { _synLamArg   = SynArg (SynText "_" 0 False)
     , _synLamExpr1 = SynHollow
     , _synLamExpr2 = SynHollow
     , _synLamSel   = Nothing
@@ -376,7 +374,7 @@ instance
 
 instance SyntaxBlank SynPi where
   blank = return SynPi
-    { _synPiArg   = SynArg (SynText "_" 1 False)
+    { _synPiArg   = SynArg (SynText "_" 0 False)
     , _synPiExpr1 = SynHollow
     , _synPiExpr2 = SynHollow
     , _synPiSel   = Nothing
