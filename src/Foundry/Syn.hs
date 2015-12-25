@@ -17,6 +17,7 @@ import Control.Monad.State
 import Control.Monad.Except
 import Control.Lens
 
+import Source.Collage.Builder (horizontal, vertical)
 import Source.Syntax
 import Source.Draw
 import Source.Input
@@ -29,7 +30,6 @@ import qualified Morte.Core as M
 import qualified Morte.Parser as M.P
 import qualified Morte.Import as M.I
 
-data INT
 data EXPR_K = LAM | PI | APP | CONST | EMBED | VAR
 data ARG
 data EXPR
@@ -99,11 +99,8 @@ newtype instance SYN ARG = SynArg (SYN TEXT)
 
 data instance SYN VAR = SynVar
   { _synVarName  :: SYN TEXT
-  , _synVarIndex :: SYN INT
+  , _synVarIndex :: Int
   } deriving (Eq, Ord, Show)
-
-newtype instance SYN INT = SynInt Int
-  deriving (Eq, Ord, Show)
 
 data instance SEL EXPR
   = SelExprLam (SEL LAM)
@@ -131,7 +128,6 @@ declareLenses
         } deriving (Eq, Ord, Show)
   |]
 
-makePrismsDataInst ''SYN ''INT
 makeLensesDataInst ''SYN 'VAR
 makePrismsDataInst ''SYN ''ARG
 makeLensesDataInst ''SYN 'LAM
@@ -145,11 +141,10 @@ synImportExpr =
     synImportText t =
       let t' = Text.Lazy.toStrict t
       in SynText t' (Text.length t') False
-    synImportInt n = SynInt n
     synImportConst = \case
       M.Star -> SynConstStar
       M.Box  -> SynConstBox
-    synImportVar (M.V t n) = SynVar (synImportText t) (synImportInt n)
+    synImportVar (M.V t n) = SynVar (synImportText t) n
     synImportArg t = SynArg (synImportText t)
     synImportLam x _A  b = SynLam
       (synImportArg x)
@@ -211,6 +206,9 @@ instance SynSelection sub => SynSelection (HOLE sub) where
 ---       Arg       ---
 ---    instances    ---
 
+instance UndoEq (SYN ARG) where
+  undoEq (SynArg s1) (SynArg s2) = undoEq s1 s2
+
 instance
   ( n ~ Int, m ~ Int
   ) => SyntaxLayout n m (CollageDraw' n m) LayoutCtx (SYN ARG) where
@@ -223,12 +221,27 @@ instance
   ( n ~ Int, m ~ Int
   ) => SyntaxReact n m (CollageDraw' n m) (SYN ARG) where
 
-  react asyncReact oldLayout inputEvent = zoom _SynArg $ do
-    react (asyncReact . over _SynArg) oldLayout inputEvent
+  react asyncReact oldLayout inputEvent = asum handlers
+    where
+      handlers =
+        [ handleRedirect
+        , handle_x
+        ]
+      handleRedirect = zoom _SynArg $ do
+        react (asyncReact . over _SynArg) oldLayout inputEvent
+      handle_x = do
+        guard $ keyCodeLetter KeyCode.Delete 'x' inputEvent
+        _SynArg .= mempty
 
 
 ---       Lam       ---
 ---    instances    ---
+
+instance UndoEq (SYN LAM) where
+  undoEq s1 s2
+     = on undoEq (view synLamArg)   s1 s2
+    && on undoEq (view synLamExpr1) s1 s2
+    && on undoEq (view synLamExpr2) s1 s2
 
 instance
   ( n ~ Int, m ~ Int
@@ -315,6 +328,12 @@ instance SyntaxBlank (SYN LAM) where
 ---        Pi       ---
 ---    instances    ---
 
+instance UndoEq (SYN PI) where
+  undoEq s1 s2
+     = on undoEq (view synPiArg)   s1 s2
+    && on undoEq (view synPiExpr1) s1 s2
+    && on undoEq (view synPiExpr2) s1 s2
+
 instance
   ( n ~ Int, m ~ Int
   ) => SyntaxLayout n m (CollageDraw' n m) LayoutCtx (SYN PI) where
@@ -400,6 +419,11 @@ instance SyntaxBlank (SYN PI) where
 ---       App       ---
 ---    instances    ---
 
+instance UndoEq (SYN APP) where
+  undoEq s1 s2
+     = on undoEq (view synAppExpr1) s1 s2
+    && on undoEq (view synAppExpr2) s1 s2
+
 instance
   ( n ~ Int, m ~ Int
   ) => SyntaxLayout n m (CollageDraw' n m) LayoutCtx (SYN APP) where
@@ -472,6 +496,9 @@ instance SyntaxBlank (SYN APP) where
 ---      Const      ---
 ---    instances    ---
 
+instance UndoEq (SYN CONST) where
+  undoEq = (==)
+
 instance
   ( n ~ Int, m ~ Int
   ) => SyntaxLayout n m (CollageDraw' n m) LayoutCtx (SYN CONST) where
@@ -489,12 +516,24 @@ instance
 ---       Var       ---
 ---    instances    ---
 
+instance UndoEq (SYN VAR) where
+  undoEq s1 s2
+     = on undoEq (view synVarName)  s1 s2
+    && on (==)   (view synVarIndex) s1 s2
+
 instance
   ( n ~ Int, m ~ Int
-  ) => SyntaxLayout n m (CollageDraw' n m) () (SYN INT) where
+  ) => SyntaxLayout n m (CollageDraw' n m) LayoutCtx (SYN VAR) where
 
-  layout () = text . Text.map toSub . Text.pack . show . view _SynInt
+  layout lctx v =
+    [ layout lctx (v ^. synVarName)
+    , if (v ^. synVarIndex) > 0
+      then layoutIndex (v ^. synVarIndex)
+      else
+        mempty
+    ] & horizontal
     where
+      layoutIndex = text . Text.map toSub . Text.pack . show
       toSub :: Char -> Char
       toSub = \case
         '0' -> '₀'
@@ -513,20 +552,6 @@ instance
 
 instance
   ( n ~ Int, m ~ Int
-  ) => SyntaxLayout n m (CollageDraw' n m) LayoutCtx (SYN VAR) where
-
-  layout lctx v =
-    [ layout lctx (v ^. synVarName)
-    , if (v ^. synVarIndex . _SynInt) > 0
-      then layout () (v ^. synVarIndex)
-      else
-        mempty
-    ] & horizontal
-
-  draw _ = draw'
-
-instance
-  ( n ~ Int, m ~ Int
   ) => SyntaxReact n m (CollageDraw' n m) (SYN VAR) where
 
   react asyncReact oldLayout inputEvent = asum handlers
@@ -540,21 +565,26 @@ instance
       handleShiftUp =
         case inputEvent of
           KeyPress [Shift] keyCode | keyLetter 'U' keyCode
-            -> synVarIndex . _SynInt += 1
+            -> synVarIndex += 1
           _ -> throwError ()
       handleShiftDown =
         case inputEvent of
           KeyPress [Shift] keyCode | keyLetter 'D' keyCode
-            -> synVarIndex . _SynInt %= max 0 . subtract 1
+            -> synVarIndex %= max 0 . subtract 1
           _ -> throwError ()
       handleRedirect = zoom synVarName $ do
         react (asyncReact . over synVarName) oldLayout inputEvent
 
 instance SyntaxBlank (SYN VAR) where
-  blank = return $ SynVar mempty (SynInt 0)
+  blank = return $ SynVar mempty 0
 
 ---      Embed      ---
 ---    instances    ---
+
+instance UndoEq (SYN EMBED) where
+  undoEq (SynEmbedFilePath t1) (SynEmbedFilePath t2) = undoEq t1 t2
+  undoEq (SynEmbedURL      t1) (SynEmbedURL      t2) = undoEq t1 t2
+  undoEq  _                     _                    = False
 
 instance
   ( n ~ Int, m ~ Int
@@ -570,6 +600,15 @@ instance
 
 ---       Expr      ---
 ---    instances    ---
+
+instance UndoEq (SYN EXPR) where
+  undoEq (SynExprLam   a1) (SynExprLam   a2) = undoEq a1 a2
+  undoEq (SynExprPi    a1) (SynExprPi    a2) = undoEq a1 a2
+  undoEq (SynExprApp   a1) (SynExprApp   a2) = undoEq a1 a2
+  undoEq (SynExprConst a1) (SynExprConst a2) = undoEq a1 a2
+  undoEq (SynExprVar   a1) (SynExprVar   a2) = undoEq a1 a2
+  undoEq (SynExprEmbed a1) (SynExprEmbed a2) = undoEq a1 a2
+  undoEq  _                 _                = False
 
 instance
   ( n ~ Int, m ~ Int
@@ -654,6 +693,11 @@ instance
 
 ---       Hole      ---
 ---    instances    ---
+
+instance UndoEq (SYN sub) => UndoEq (SYN (HOLE sub)) where
+  undoEq (SynSolid s1) (SynSolid s2) = undoEq s1 s2
+  undoEq  SynHollow     SynHollow    = True
+  undoEq  _             _            = False
 
 instance
   ( n ~ Int, m ~ Int
@@ -788,12 +832,9 @@ instance
             oldLayout
             inputEvent
         expr' <- use synExpr
-        when (diffUndoExpr expr expr') $ do
+        unless (undoEq expr expr') $ do
           synUndo %= (expr:)
           synRedo .= []
-
-diffUndoExpr :: SYN (HOLE EXPR) -> SYN (HOLE EXPR) -> Bool
-diffUndoExpr _ _ = True
 
 updateExprPath :: Path -> SYN (HOLE EXPR) -> SYN (HOLE EXPR)
 updateExprPath path = \case

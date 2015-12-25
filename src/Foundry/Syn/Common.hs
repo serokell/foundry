@@ -12,6 +12,7 @@ import Data.Typeable
 import Control.Lens
 import Control.Monad
 
+import qualified Source.Collage.Builder as CB
 import Source.Syntax
 import Source.Draw
 import Source.Style
@@ -59,7 +60,7 @@ data Draw' n m
   | ActiveZone (Extents n m) Path
 
 active :: (Num n, Ord n, Num m, Ord m) => Path -> Op1 (CollageDraw' n m)
-active p c = pure (ActiveZone (getExtents c) p) `mappend` c
+active p c = (CB.collageBuilder . pure) (ActiveZone (getExtents c) p) `mappend` c
 
 activate
   :: forall n m r
@@ -68,7 +69,7 @@ activate
   -> Offset n m
   -> CollageDraw' n m
   -> Maybe r
-activate f o = getLast . foldMap (Last . uncurry check) . view _Collage
+activate f o = getLast . foldMap (Last . uncurry check) . getCollage . CB.buildCollage
   where
     within :: (Ord a, Num a) => a -> a -> a -> Bool
     within a zoneOffset zoneExtents
@@ -90,7 +91,7 @@ hover
   -> Op1 (CollageDraw' n m)
 hover f o c = c <> maybe mempty id (activate obj o c)
   where
-    obj o' e _ = offset o' (f (phantom e))
+    obj o' e _ = CB.offset o' (f (phantom e))
 
 instance DrawPhantom n m (Draw' n m) where
   drawPhantom e = Draw' (drawPhantom e)
@@ -101,15 +102,15 @@ instance DrawRectangle n m (Draw' n m) where
 instance (Integral n, Integral m) => DrawText n m (Draw' n m) where
   drawText f t = Draw' (drawText f t)
 
-instance HasExtents n m (Draw' n m) where
+instance (Num n, Num m, Ord n, Ord m) => HasExtents n m (Draw' n m) where
   getExtents = \case
     Draw' d -> getExtents d
     ActiveZone e _ -> e
 
-type CollageDraw' n m = Collage n m (Draw' n m)
+type CollageDraw' n m = CB.CollageBuilder n m (Draw' n m)
 
-draw' :: (Num n, Num m) => CollageDraw' n m -> CollageDraw n m
-draw' c = c >>= \case
+draw' :: (Num n, Num m, Ord n, Ord m) => CollageDraw' n m -> CollageDraw n m
+draw' c = CB.buildCollage c >>= \case
   Draw' d -> pure d
   _       -> mempty
 
@@ -126,3 +127,6 @@ sel lctx
   . if lctx ^. lctxSelected
     then outline dark2 . background dark3
     else id
+
+class UndoEq a where
+  undoEq :: a -> a -> Bool

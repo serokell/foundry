@@ -6,6 +6,7 @@ module Foundry.Syn.Text where
 import Data.Text (Text)
 import qualified Data.Text as Text
 import Data.Foldable
+import Data.Function
 import Data.Monoid
 
 import Control.Monad.State
@@ -13,6 +14,7 @@ import Control.Monad.Except
 import Control.Lens
 import qualified Graphics.UI.Gtk as Gtk
 
+import Source.Collage.Builder (horizontal)
 import Source.Syntax
 import Source.Draw
 import Source.Input
@@ -50,6 +52,10 @@ normalizeSynText syn = syn & synTextPosition %~ normalizePosition
   where
     normalizePosition :: Int -> Int
     normalizePosition = max 0 . min (views synTextContent Text.length syn)
+
+instance UndoEq (SYN TEXT) where
+  undoEq = (==) `on` view synTextContent
+
 instance
   ( n ~ Int, m ~ Int
   ) => SyntaxLayout n m (CollageDraw' n m) LayoutCtx (SYN TEXT) where
@@ -83,7 +89,6 @@ instance
         , handleArrowLeft
         , handleArrowRight
         , handleControl_v
-        , handle_x
         , handleLetter
         ]
       handle_i = do
@@ -141,10 +146,6 @@ instance
                 $ over synTextPosition (+length str)
                 . insertSynText (Text.pack str)
           _ -> mzero
-      handle_x = do
-        guard =<< uses synTextEditMode not
-        guard $ keyCodeLetter KeyCode.Delete 'x' inputEvent
-        put mempty
       handleLetter = do
         guard =<< use synTextEditMode
         case inputEvent of

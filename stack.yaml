@@ -6,9 +6,7 @@ packages:
     commit: 6941b841129c79ac64e25917ca5b0c41ba3e01c7
 - location:
     git: https://github.com/int-index/source
-    commit: b2e4d814d49c98af95dbc91c4d84e649bd68f585
+    commit: 79b35d6f6dda5e936929d54c48812764252128b1
   subdirs:
     - lib
-resolver: nightly-2015-11-29
-extra-deps:
-- stable-memo-0.3.1
+resolver: lts-3.16
