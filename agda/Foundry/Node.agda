@@ -202,7 +202,6 @@ _>->_ : ∀{p q q'} → Path p q → Path q q' → Path p q'
 
 infixr 9 _>->_
 
-{-# TERMINATING #-}
 ↟ : ∀{l'} → Node' l' → String
 ↟ = ↟Node
 

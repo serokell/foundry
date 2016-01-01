@@ -21,11 +21,8 @@ module Syn
 
   Field : {lk : LabelKind} → Label lk → Set
 
-  record Node (lk : LabelKind) (l : Label lk) : Set where
-    inductive
-    constructor node
-    field
-      node-field : Field l
+  data Node (lk : LabelKind) (l : Label lk) : Set where
+    node : Field l → Node lk l
 
   Node' : ∃ Label → Set
   Node' (lk , l) = Node lk l
