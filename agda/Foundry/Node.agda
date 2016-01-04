@@ -13,10 +13,7 @@ open import Relation.Binary.PropositionalEquality
 open import Function
 
 open import Source.Node
-open import Foundry.Lens
-
-Endo : ∀{n} → Set n → Set n
-Endo s = s → s
+open import Source.Lens
 
 data Label : LabelKind → Set where
   ⌝Lam ⌝Pi ⌝App : Label Π-lk
@@ -76,8 +73,6 @@ record Var : Set where
   ; ⌝Embed → ⊥
   ; ⌝Arg → Arg
   }
-
-open Syn Label Relation slave Ω-Field public
 
 -- TODO: derive?
 _≟rel_ : ∀{rk l} → Decidable {A = Relation rk l} _≡_
@@ -140,13 +135,7 @@ _≟rel_ Expr>Embed Expr>Pi = no λ()
 _≟rel_ Expr>Embed Expr>App = no λ()
 _≟rel_ Expr>Embed Expr>Embed = yes refl
 
-override : ∀{l} → (r : Relation Π-rk l) → Endo slave⟦ r ⟧ → Endo ⟦ l ⟧
-override {l} r f (node get) = node (f' ˢ get)
-  where
-    f' : (r₁ : Relation Π-rk l) → Endo slave⟦ r₁ ⟧
-    f' r₁ with r ≟rel r₁
-    f' .r | yes refl = f
-    f' r₁ | no _ = id
+open Syn Label Relation _≟rel_ slave Ω-Field public
 
 mkLam : ⟦ ⌝Arg ⟧ ⟦ ⌝Expr ⟧ ⟦ ⌝Expr ⟧ ⟦ ⌝Lam ⟧ < < <
 mkLam arg expr1 expr2 = node λ
@@ -185,23 +174,6 @@ onExpr onConst onVar onLam onPi onApp onEmbed (r node> n) with r
 ... | Expr>App   = onApp   n
 ... | Expr>Embed = onEmbed n
 
-data Path : (p q : ∃ Label) → Set where
-  <> : {p : ∃ Label} → Path p p
-  _∶_>_
-    : (rk : RelationKind)
-    → ∀{p q}
-    → (r : Relation rk p)
-    → Path (slave r) q
-    → Path (, p) q
-
-pattern ⟪_⟫ r = _ ∶ r > <>
-
-_>->_ : ∀{p q q'} → Path p q → Path q q' → Path p q'
-<> >-> path₂ = path₂
-(r ∶ rk > path₁) >-> path₂ = r ∶ rk > (path₁ >-> path₂)
-
-infixr 9 _>->_
-
 ↟ : ∀{l'} → Node' l' → String
 ↟ = ↟Node
 
@@ -238,12 +210,3 @@ infixr 9 _>->_
        = "(" ++ ↟Node (get App-Expr₁)
       ++ "|" ++ ↟Node (get App-Expr₂)
       ++ ")"
-
-locate : ∀{p q} → Path p q → Traversal' (Node' p) (Node' q)
-locate <> f n = f n
-locate (Π-rk ∶ r > path) f (node get)
-  = pure (λ a → override r (const a) (node get)) <*> locate path f (get r)
-locate (Σ-rk ∶ r > path) f (r₁ node> n) with r ≟rel r₁
-locate (Σ-rk ∶ r > path) f (.r node> n)
-  | yes refl = pure (λ n₁ → r node> n₁) <*> locate path f n
-locate (Σ-rk ∶ r > path) f (r₁ node> n) | no _ = pure (r₁ node> n)

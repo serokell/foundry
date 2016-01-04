@@ -4,7 +4,7 @@ open import Data.Maybe
 open import Relation.Binary.PropositionalEquality
 open import Function
 
-open import Foundry.Lens
+open import Source.Lens
 open import Foundry.Node
 
 path₀ : _ -- Path (, ⌝Expr) (, ⌝Const)

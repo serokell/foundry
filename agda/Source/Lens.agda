@@ -1,4 +1,4 @@
-module Foundry.Lens where
+module Source.Lens where
 
 open import Data.Maybe
 open import Function
