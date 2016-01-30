@@ -14,51 +14,28 @@ open Applicative{{...}} public
 
 private
 
-  data Preview (e : Set) (a : Set) : Set where
-    veil : Preview e a
-    preview : e → Preview e a
-
-  preview-to-maybe : ∀{a e} → Preview e a → Maybe e
-  preview-to-maybe veil = nothing
-  preview-to-maybe (preview x) = just x
-
-  data Identity (a : Set) : Set where
-    identity : a → Identity a
-
-  identity-to-content : ∀{a} → Identity a → a
-  identity-to-content (identity a) = a
-
-  Identity-Applicative : Applicative Identity
+  Identity-Applicative : Applicative {zero} id
   Identity-Applicative = record
-    { _<*>_ = _<*>-identity_
-    ; pure = pure-identity
+    { _<*>_ = λ f a → f a
+    ; pure = λ a → a
+    }
+
+  Maybe-Applicative : ∀{e} → Applicative {zero} (const (Maybe e))
+  Maybe-Applicative = record
+    { _<*>_ = _<*>-maybe_
+    ; pure = const nothing
     } where
 
-      pure-identity : ∀{a} → a → Identity a
-      pure-identity = identity
-
-      _<*>-identity_ : ∀{a b} → Identity (a → b) → Identity a → Identity b
-      identity f <*>-identity identity x = identity (f x)
-
-  Preview-Applicative : ∀{e} → Applicative (Preview e)
-  Preview-Applicative = record
-    { _<*>_ = _<*>-preview_
-    ; pure = pure-preview
-    } where
-
-      pure-preview : ∀{a e} → a → Preview e a
-      pure-preview _ = veil
-
-      _<*>-preview_ : ∀{a b e} → Preview e (a → b) → Preview e a → Preview e b
-      veil <*>-preview veil = veil
-      veil <*>-preview preview x = preview x
-      preview x <*>-preview _ = preview x
+      _<*>-maybe_ : ∀{e} → Maybe e → Maybe e → Maybe e
+      nothing <*>-maybe nothing = nothing
+      nothing <*>-maybe just x = just x
+      just x <*>-maybe _ = just x
 
 Traversal' : Set → Set → Set _
 Traversal' s a = ({F : Set → Set} → {{app : Applicative F}} → (a → F a) → s → F s)
 
 view? : ∀{s a} → Traversal' s a → s → Maybe a
-view? l = preview-to-maybe ∘ l {{Preview-Applicative}} preview
+view? l = l {{Maybe-Applicative}} just
 
 over : ∀{s a} → Traversal' s a → (a → a) → (s → s)
-over l f = identity-to-content ∘ l {{Identity-Applicative}} (identity ∘ f)
+over l = l {{Identity-Applicative}}

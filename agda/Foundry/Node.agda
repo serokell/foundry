@@ -137,21 +137,21 @@ _≟rel_ Expr>Embed Expr>Embed = yes refl
 
 open Syn Label Relation _≟rel_ slave Ω-Field public
 
-mkLam : ⟦ ⌝Arg ⟧ ⟦ ⌝Expr ⟧ ⟦ ⌝Expr ⟧ ⟦ ⌝Lam ⟧ < < <
+mkLam : ∀{h} → ⟦ ⌝Arg ∣ h ⟧ → ⟦ ⌝Expr ∣ h ⟧ → ⟦ ⌝Expr ∣ h ⟧ → ⟦ ⌝Lam ∣ h ⟧
 mkLam arg expr1 expr2 = node λ
   { Lam-Arg → arg
   ; Lam-Expr₁ → expr1
   ; Lam-Expr₂ → expr2
   }
 
-mkPi : ⟦ ⌝Arg ⟧ ⟦ ⌝Expr ⟧ ⟦ ⌝Expr ⟧ ⟦ ⌝Pi ⟧ < < <
+mkPi : ∀{h} → ⟦ ⌝Arg ∣ h ⟧ → ⟦ ⌝Expr ∣ h ⟧ → ⟦ ⌝Expr ∣ h ⟧ → ⟦ ⌝Pi ∣ h ⟧
 mkPi arg expr1 expr2 = node λ
   { Pi-Arg → arg
   ; Pi-Expr₁ → expr1
   ; Pi-Expr₂ → expr2
   }
 
-mkApp : ⟦ ⌝Expr ⟧ ⟦ ⌝Expr ⟧ ⟦ ⌝App ⟧ < <
+mkApp : ∀{h} → ⟦ ⌝Expr ∣ h ⟧ → ⟦ ⌝Expr ∣ h ⟧ → ⟦ ⌝App ∣ h ⟧
 mkApp expr1 expr2 = node λ
   { App-Expr₁ → expr1
   ; App-Expr₂ → expr2
@@ -159,13 +159,14 @@ mkApp expr1 expr2 = node λ
 
 onExpr
   : ∀{n} {r : Set n}
-  → ⟦ ⌝Const ⟧ r <
-  → ⟦ ⌝Var   ⟧ r <
-  → ⟦ ⌝Lam   ⟧ r <
-  → ⟦ ⌝Pi    ⟧ r <
-  → ⟦ ⌝App   ⟧ r <
-  → ⟦ ⌝Embed ⟧ r <
-  → ⟦ ⌝Expr  ⟧ r <
+  → (⟦ ⌝Const ∣ ⊥ ⟧ → r)
+  → (⟦ ⌝Var   ∣ ⊥ ⟧ → r)
+  → (⟦ ⌝Lam   ∣ ⊥ ⟧ → r)
+  → (⟦ ⌝Pi    ∣ ⊥ ⟧ → r)
+  → (⟦ ⌝App   ∣ ⊥ ⟧ → r)
+  → (⟦ ⌝Embed ∣ ⊥ ⟧ → r)
+  → (⟦ ⌝Expr  ∣ ⊥ ⟧ → r)
+onExpr _ _ _ _ _ _ (hole h) = ⊥-elim h
 onExpr onConst onVar onLam onPi onApp onEmbed (r node> n) with r
 ... | Expr>Const = onConst n
 ... | Expr>Var   = onVar   n
@@ -174,7 +175,7 @@ onExpr onConst onVar onLam onPi onApp onEmbed (r node> n) with r
 ... | Expr>App   = onApp   n
 ... | Expr>Embed = onEmbed n
 
-↟ : ∀{l'} → Node' l' → String
+↟ : ∀{l'} → Node' l' ⊥ → String
 ↟ = ↟Node
 
   where
@@ -192,7 +193,8 @@ onExpr onConst onVar onLam onPi onApp onEmbed (r node> n) with r
     ↟Var : Var → String
     ↟Var (Variable n arg) = ↟Arg arg ++ ↟ℕ-index n
 
-    ↟Node : ∀{l'} → Node' l' → String
+    ↟Node : ∀{l'} → Node' l' ⊥ → String
+    ↟Node (hole h) = ⊥-elim h
     ↟Node {_ , ⌝Const} (node c) = ↟Const c
     ↟Node {_ , ⌝Var} (node v) = ↟Var v
     ↟Node {_ , ⌝Embed} (node ())
