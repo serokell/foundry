@@ -31,11 +31,19 @@ private
       nothing <*>-maybe just x = just x
       just x <*>-maybe _ = just x
 
+_<$>_
+  : ∀ {ℓ} {F : Set ℓ → Set ℓ} {{app : Applicative {ℓ} F}}
+  → ∀{A B} → (A → B) → F A → F B
+f <$> a = pure f <*> a
+
+Traversal : Set → Set → Set → Set → Set _
+Traversal s s' a a' = {F : Set → Set} → {{app : Applicative F}} → (a → F a') → s → F s'
+
 Traversal' : Set → Set → Set _
-Traversal' s a = ({F : Set → Set} → {{app : Applicative F}} → (a → F a) → s → F s)
+Traversal' s a = Traversal s s a a
 
 view? : ∀{s a} → Traversal' s a → s → Maybe a
 view? l = l {{Maybe-Applicative}} just
 
-over : ∀{s a} → Traversal' s a → (a → a) → (s → s)
+over : ∀{s s' a a'} → Traversal s s' a a' → (a → a') → (s → s')
 over l = l {{Identity-Applicative}}

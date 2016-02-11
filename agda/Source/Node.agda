@@ -21,6 +21,12 @@ pattern Σ-lk = rk-lk Σ-rk
 Endo : ∀{n} → Set n → Set n
 Endo s = s → s
 
+Traverse-Relation : (R : Set) → (G : R → Set) → Set₁
+Traverse-Relation R G
+  = ∀ {F} {{appF : Applicative F}}
+  → ((r : R) → F (G r))
+  → F ((r : R) → G r)
+
 module Syn
   (Label : LabelKind → Set)
   (Relation : (rk : RelationKind) → Label (rk-lk rk) → Set)
@@ -59,11 +65,23 @@ module Syn
       f' .r | yes refl = f
       f' r₁ | no _ = id
 
-  mapHole : ∀{lk l h h'} → (h → h') → Node lk l h → Node lk l h'
-  mapHole f (hole h) = hole (f h)
-  mapHole {lk = Π-lk} f (node get) = node (λ r → mapHole f (get r))
-  mapHole {lk = Σ-lk} f (r node> n) = r node> (mapHole f n)
-  mapHole {lk = Ω-lk} f (node a) = node a
+  module TraverseHole
+    (traverse-Relation
+       : ∀{l h}
+       → Traverse-Relation
+           (Relation Π-rk l)
+           (λ r → slave⟦ r ∣ h ⟧))
+    where
+
+    traverseHole : ∀{lk l h h'} → Traversal (Node lk l h) (Node lk l h') h h'
+    traverseHole {lk = Π-lk} f (node get)
+      = node <$> traverse-Relation (λ r → traverseHole f (get r))
+    traverseHole {lk = Σ-lk} f (r node> n) = _node>_ r <$> traverseHole f n
+    traverseHole {lk = Ω-lk} _ (node a) = pure (node a)
+    traverseHole f (hole x) = hole <$> (f x)
+
+    mapHole : ∀{lk l h h'} → (h → h') → Node lk l h → Node lk l h'
+    mapHole = over traverseHole
 
   data Path : (p q : ∃ Label) → Set where
     <> : {p : ∃ Label} → Path p p

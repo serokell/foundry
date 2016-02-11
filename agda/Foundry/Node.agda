@@ -137,25 +137,32 @@ _≟rel_ Expr>Embed Expr>Embed = yes refl
 
 open Syn Label Relation _≟rel_ slave Ω-Field public
 
-mkLam : ∀{h} → ⟦ ⌝Arg ∣ h ⟧ → ⟦ ⌝Expr ∣ h ⟧ → ⟦ ⌝Expr ∣ h ⟧ → ⟦ ⌝Lam ∣ h ⟧
-mkLam arg expr1 expr2 = node λ
+mkLam : ∀{h} → ⟦ ⌝Arg ∣ h ⟧ → ⟦ ⌝Expr ∣ h ⟧ → ⟦ ⌝Expr ∣ h ⟧ → Field ⌝Lam h
+mkLam arg expr1 expr2 = λ
   { Lam-Arg → arg
   ; Lam-Expr₁ → expr1
   ; Lam-Expr₂ → expr2
   }
 
-mkPi : ∀{h} → ⟦ ⌝Arg ∣ h ⟧ → ⟦ ⌝Expr ∣ h ⟧ → ⟦ ⌝Expr ∣ h ⟧ → ⟦ ⌝Pi ∣ h ⟧
-mkPi arg expr1 expr2 = node λ
+mkPi : ∀{h} → ⟦ ⌝Arg ∣ h ⟧ → ⟦ ⌝Expr ∣ h ⟧ → ⟦ ⌝Expr ∣ h ⟧ → Field ⌝Pi h
+mkPi arg expr1 expr2 = λ
   { Pi-Arg → arg
   ; Pi-Expr₁ → expr1
   ; Pi-Expr₂ → expr2
   }
 
-mkApp : ∀{h} → ⟦ ⌝Expr ∣ h ⟧ → ⟦ ⌝Expr ∣ h ⟧ → ⟦ ⌝App ∣ h ⟧
-mkApp expr1 expr2 = node λ
+mkApp : ∀{h} → ⟦ ⌝Expr ∣ h ⟧ → ⟦ ⌝Expr ∣ h ⟧ → Field ⌝App h
+mkApp expr1 expr2 = λ
   { App-Expr₁ → expr1
   ; App-Expr₂ → expr2
   }
+
+traverse-Relation : ∀{l h} → Traverse-Relation (Relation Π-rk l) (λ r → slave⟦ r ∣ h ⟧)
+traverse-Relation {⌝Lam} f = pure mkLam <*> f Lam-Arg   <*> f Lam-Expr₁ <*> f Lam-Expr₂
+traverse-Relation {⌝Pi}  f = pure mkPi  <*> f Pi-Arg    <*> f Pi-Expr₁  <*> f Pi-Expr₂
+traverse-Relation {⌝App} f = pure mkApp <*> f App-Expr₁ <*> f App-Expr₂
+
+open TraverseHole traverse-Relation public
 
 onExpr
   : ∀{n} {r : Set n}

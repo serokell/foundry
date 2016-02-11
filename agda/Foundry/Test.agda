@@ -3,6 +3,7 @@ module Foundry.Test where
 open import Data.Maybe
 open import Relation.Binary.PropositionalEquality
 open import Function
+open import Data.Empty
 
 open import Source.Lens
 open import Foundry.Node
@@ -10,15 +11,15 @@ open import Foundry.Node
 path₀ : _ -- Path (, ⌝Expr) (, ⌝Const)
 path₀ = ⟪ Expr>Lam ⟫ >-> ⟪ Lam-Expr₁ ⟫ >-> ⟪ Expr>Const ⟫ >-> <>
 
-expr₀ : ⟦ ⌝Expr ⟧
+expr₀ : ⟦ ⌝Expr ∣ ⊥ ⟧
 expr₀ =
-  Expr>Lam node> mkLam
+  Expr>Lam node> node (mkLam
     (node (Argument "star"))
     (Expr>Const node> node Star)
-    (Expr>App node> mkApp
+    (Expr>App node> node (mkApp
       (Expr>Var node> node (Variable 0 (Argument "star")))
-      (Expr>Const node> node Star)
-    )
+      (Expr>Const node> node Star))
+    ))
 
 expr₁ : _ -- ⟦ ⌝Expr ⟧
 expr₁ = over (locate path₀) (const (node Box)) expr₀
