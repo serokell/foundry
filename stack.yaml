@@ -2,11 +2,8 @@ flags: {}
 packages:
 - '.'
 - location:
-    git: https://github.com/int-index/Haskell-Morte-Library
-    commit: 6941b841129c79ac64e25917ca5b0c41ba3e01c7
-- location:
     git: https://github.com/int-index/source
     commit: 873acf7aafbd7008df92f1217bb4f4acd70c8599
   subdirs:
     - lib
-resolver: lts-3.19
+resolver: nightly-2016-02-11
