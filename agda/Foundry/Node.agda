@@ -137,44 +137,60 @@ _≟rel_ Expr>Embed Expr>Embed = yes refl
 
 open Syn Label Relation _≟rel_ slave Ω-Field public
 
-mkLam : ∀{h} → ⟦ ⌝Arg ∣ h ⟧ → ⟦ ⌝Expr ∣ h ⟧ → ⟦ ⌝Expr ∣ h ⟧ → Field ⌝Lam h
+mkLam
+  : ∀{h} {ann : ∀{lk₁} → Label lk₁ → Set}
+  → ⟦ ⌝Arg  ∣ h ∣ ann ⟧
+  → ⟦ ⌝Expr ∣ h ∣ ann ⟧
+  → ⟦ ⌝Expr ∣ h ∣ ann ⟧
+  → Field ⌝Lam h ann
 mkLam arg expr1 expr2 = λ
   { Lam-Arg → arg
   ; Lam-Expr₁ → expr1
   ; Lam-Expr₂ → expr2
   }
 
-mkPi : ∀{h} → ⟦ ⌝Arg ∣ h ⟧ → ⟦ ⌝Expr ∣ h ⟧ → ⟦ ⌝Expr ∣ h ⟧ → Field ⌝Pi h
+mkPi
+  : ∀{h} {ann : ∀{lk₁} → Label lk₁ → Set}
+  → ⟦ ⌝Arg  ∣ h ∣ ann ⟧
+  → ⟦ ⌝Expr ∣ h ∣ ann ⟧
+  → ⟦ ⌝Expr ∣ h ∣ ann ⟧
+  → Field ⌝Pi h ann
 mkPi arg expr1 expr2 = λ
   { Pi-Arg → arg
   ; Pi-Expr₁ → expr1
   ; Pi-Expr₂ → expr2
   }
 
-mkApp : ∀{h} → ⟦ ⌝Expr ∣ h ⟧ → ⟦ ⌝Expr ∣ h ⟧ → Field ⌝App h
+mkApp
+  : ∀{h} {ann : ∀{lk₁} → Label lk₁ → Set}
+  → ⟦ ⌝Expr ∣ h ∣ ann ⟧
+  → ⟦ ⌝Expr ∣ h ∣ ann ⟧
+  → Field ⌝App h ann
 mkApp expr1 expr2 = λ
   { App-Expr₁ → expr1
   ; App-Expr₂ → expr2
   }
 
-traverse-Relation : ∀{l h} → Traverse-Relation (Relation Π-rk l) (λ r → slave⟦ r ∣ h ⟧)
-traverse-Relation {⌝Lam} f = pure mkLam <*> f Lam-Arg   <*> f Lam-Expr₁ <*> f Lam-Expr₂
-traverse-Relation {⌝Pi}  f = pure mkPi  <*> f Pi-Arg    <*> f Pi-Expr₁  <*> f Pi-Expr₂
-traverse-Relation {⌝App} f = pure mkApp <*> f App-Expr₁ <*> f App-Expr₂
+traverse-Relation
+  : ∀{l h} {ann : ∀{lk₁} → Label lk₁ → Set}
+  → Traverse-Relation (Relation Π-rk l) (λ r → slave⟦ r ∣ h ∣ ann ⟧)
+traverse-Relation {⌝Lam} f = mkLam <$> f Lam-Arg   <*> f Lam-Expr₁ <*> f Lam-Expr₂
+traverse-Relation {⌝Pi}  f = mkPi  <$> f  Pi-Arg   <*> f  Pi-Expr₁ <*> f  Pi-Expr₂
+traverse-Relation {⌝App} f = mkApp <$> f App-Expr₁ <*> f App-Expr₂
 
-open TraverseHole traverse-Relation public
+open TraverseSyn traverse-Relation public
 
 onExpr
   : ∀{n} {r : Set n}
-  → (⟦ ⌝Const ∣ ⊥ ⟧ → r)
-  → (⟦ ⌝Var   ∣ ⊥ ⟧ → r)
-  → (⟦ ⌝Lam   ∣ ⊥ ⟧ → r)
-  → (⟦ ⌝Pi    ∣ ⊥ ⟧ → r)
-  → (⟦ ⌝App   ∣ ⊥ ⟧ → r)
-  → (⟦ ⌝Embed ∣ ⊥ ⟧ → r)
-  → (⟦ ⌝Expr  ∣ ⊥ ⟧ → r)
+  → (⟦ ⌝Const ∣ ⊥ ∣ const ⊤ ⟧ → r)
+  → (⟦ ⌝Var   ∣ ⊥ ∣ const ⊤ ⟧ → r)
+  → (⟦ ⌝Lam   ∣ ⊥ ∣ const ⊤ ⟧ → r)
+  → (⟦ ⌝Pi    ∣ ⊥ ∣ const ⊤ ⟧ → r)
+  → (⟦ ⌝App   ∣ ⊥ ∣ const ⊤ ⟧ → r)
+  → (⟦ ⌝Embed ∣ ⊥ ∣ const ⊤ ⟧ → r)
+  → (⟦ ⌝Expr  ∣ ⊥ ∣ const ⊤ ⟧ → r)
 onExpr _ _ _ _ _ _ (hole h) = ⊥-elim h
-onExpr onConst onVar onLam onPi onApp onEmbed (r node> n) with r
+onExpr onConst onVar onLam onPi onApp onEmbed (r node> n ∣ tt) with r
 ... | Expr>Const = onConst n
 ... | Expr>Var   = onVar   n
 ... | Expr>Lam   = onLam   n
@@ -182,7 +198,7 @@ onExpr onConst onVar onLam onPi onApp onEmbed (r node> n) with r
 ... | Expr>App   = onApp   n
 ... | Expr>Embed = onEmbed n
 
-↟ : ∀{l'} → Node' l' ⊥ → String
+↟ : ∀{l'} → Node' l' ⊥ (const ⊤) → String
 ↟ = ↟Node
 
   where
@@ -200,22 +216,22 @@ onExpr onConst onVar onLam onPi onApp onEmbed (r node> n) with r
     ↟Var : Var → String
     ↟Var (Variable n arg) = ↟Arg arg ++ ↟ℕ-index n
 
-    ↟Node : ∀{l'} → Node' l' ⊥ → String
+    ↟Node : ∀{l'} → Node' l' ⊥ (const ⊤) → String
     ↟Node (hole h) = ⊥-elim h
-    ↟Node {_ , ⌝Const} (node c) = ↟Const c
-    ↟Node {_ , ⌝Var} (node v) = ↟Var v
-    ↟Node {_ , ⌝Embed} (node ())
-    ↟Node {_ , ⌝Arg} (node arg) = ↟Arg arg
-    ↟Node {_ , ⌝Expr} (_ node> n) = ↟Node n
-    ↟Node {_ , ⌝Lam} (node get)
+    ↟Node {_ , ⌝Const} (node c tt) = ↟Const c
+    ↟Node {_ , ⌝Var} (node v tt) = ↟Var v
+    ↟Node {_ , ⌝Embed} (node () tt)
+    ↟Node {_ , ⌝Arg} (node arg tt) = ↟Arg arg
+    ↟Node {_ , ⌝Expr} (_ node> n ∣ tt) = ↟Node n
+    ↟Node {_ , ⌝Lam} (node get tt)
        = "λ" ++ ↟Node (get Lam-Arg)
       ++ ":" ++ ↟Node (get Lam-Expr₁)
       ++ "→" ++ ↟Node (get Lam-Expr₂)
-    ↟Node {_ , ⌝Pi} (node get)
+    ↟Node {_ , ⌝Pi} (node get tt)
        = "Π" ++ ↟Node (get Pi-Arg)
       ++ ":" ++ ↟Node (get Pi-Expr₁)
       ++ "→" ++ ↟Node (get Pi-Expr₂)
-    ↟Node {_ , ⌝App} (node get)
+    ↟Node {_ , ⌝App} (node get tt)
        = "(" ++ ↟Node (get App-Expr₁)
       ++ "|" ++ ↟Node (get App-Expr₂)
       ++ ")"

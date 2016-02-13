@@ -4,6 +4,7 @@ open import Relation.Nullary
 open import Relation.Binary.Core
 open import Data.Product
 open import Data.Empty
+open import Data.Unit
 open import Function
 
 open import Source.Lens
@@ -35,52 +36,63 @@ module Syn
   (Ω-Field : Label Ω-lk → Set)
   where
 
-  Field : {lk : LabelKind} → Label lk → Set → Set
+  Field : {lk : LabelKind} → Label lk → Set → (∀{lk₁} → Label lk₁ → Set) → Set
 
-  data Node (lk : LabelKind) (l : Label lk) (h : Set) : Set where
-    node : Field l h → Node lk l h
-    hole : h → Node lk l h
+  -- TODO: h : ∃ Label → Set
+  data Node (lk : LabelKind) (l : Label lk) (h : Set) (ann : ∀{lk₁} → Label lk₁ → Set) : Set where
+    node : Field l h ann → ann l → Node lk l h ann
+    hole : h → Node lk l h ann
 
-  Node' : ∃ Label → Set → Set
+  Node' : ∃ Label → Set → (∀{lk₁} → Label lk₁ → Set) → Set
   Node' (lk , l) = Node lk l
 
-  slave⟦_∣_⟧ : ∀{rk l} → (r : Relation rk l) → Set → Set
-  slave⟦ r ∣ h ⟧ = Node' (slave r) h
+  slave⟦_∣_∣_⟧ : ∀{rk l} → (r : Relation rk l) → Set → (∀{lk₁} → Label lk₁ → Set) → Set
+  slave⟦ r ∣ h ∣ ann ⟧ = Node' (slave r) h ann
 
-  Field {lk = Π-lk} l h = (r : Relation Π-rk l) → slave⟦ r ∣ h ⟧
-  Field {lk = Σ-lk} l h = Σ (Relation Σ-rk l) (λ r → slave⟦ r ∣ h ⟧)
-  Field {lk = Ω-lk} l h = Ω-Field l
+  Field {lk = Π-lk} l h ann = (r : Relation Π-rk l) → slave⟦ r ∣ h ∣ ann ⟧
+  Field {lk = Σ-lk} l h ann = Σ (Relation Σ-rk l) (λ r → slave⟦ r ∣ h ∣ ann ⟧)
+  Field {lk = Ω-lk} l h ann = Ω-Field l
 
-  ⟦_∣_⟧ : ∀{lk} → Label lk → Set → Set
-  ⟦_∣_⟧ {lk} l h = Node lk l h
+  ⟦_∣_∣_⟧ : ∀{lk} → Label lk → Set → (∀{lk₁} → Label lk₁ → Set) → Set
+  ⟦_∣_∣_⟧ {lk} = Node lk
 
-  pattern _node>_ r n = node (r , n)
+  pattern _node>_∣_ r n a = node (r , n) a
 
-  override : ∀{l h} → (r : Relation Π-rk l) → Endo slave⟦ r ∣ h ⟧ → Endo ⟦ l ∣ h ⟧
-  override         _ _ (hole h)   = hole h
-  override {l} {h} r f (node get) = node (f' ˢ get)
+  override
+    : ∀{l h} {ann : ∀{lk₁} → Label lk₁ → Set}
+    → (r : Relation Π-rk l)
+    → Endo slave⟦ r ∣ h ∣ ann ⟧
+    → Endo      ⟦ l ∣ h ∣ ann ⟧
+  override               _ _ (hole h)     = hole h
+  override {l} {h} {ann} r f (node get a) = node (f' ˢ get) a
     where
-      f' : (r₁ : Relation Π-rk l) → Endo slave⟦ r₁ ∣ h ⟧
+      f' : (r₁ : Relation Π-rk l) → Endo slave⟦ r₁ ∣ h ∣ ann ⟧
       f' r₁ with r ≟rel r₁
       f' .r | yes refl = f
       f' r₁ | no _ = id
 
-  module TraverseHole
+  module TraverseSyn
     (traverse-Relation
-       : ∀{l h}
+       : ∀{l h} {ann : ∀{lk₁} → Label lk₁ → Set}
        → Traverse-Relation
            (Relation Π-rk l)
-           (λ r → slave⟦ r ∣ h ⟧))
+           (λ r → slave⟦ r ∣ h ∣ ann ⟧))
     where
 
-    traverseHole : ∀{lk l h h'} → Traversal (Node lk l h) (Node lk l h') h h'
-    traverseHole {lk = Π-lk} f (node get)
-      = node <$> traverse-Relation (λ r → traverseHole f (get r))
-    traverseHole {lk = Σ-lk} f (r node> n) = _node>_ r <$> traverseHole f n
-    traverseHole {lk = Ω-lk} _ (node a) = pure (node a)
-    traverseHole f (hole x) = hole <$> (f x)
+    traverseHole
+      : ∀{lk l h h'} {ann : ∀{lk₁} → Label lk₁ → Set}
+      → Traversal (Node lk l h ann) (Node lk l h' ann) h h'
+    traverseHole {lk = Π-lk} f (node get a)
+      = (λ get₁ → node get₁ a) <$> traverse-Relation (λ r → traverseHole f (get r))
+    traverseHole {lk = Σ-lk} f (r node> n ∣ a) = (λ n₁ → r node> n₁ ∣ a) <$> traverseHole f n
+    traverseHole {lk = Ω-lk} _ (node x a) = pure (node x a)
+    traverseHole f (hole x) = hole <$> f x
 
-    mapHole : ∀{lk l h h'} → (h → h') → Node lk l h → Node lk l h'
+    mapHole
+      : ∀{lk l h h'} {ann : ∀{lk₁} → Label lk₁ → Set}
+      → (h → h')
+      → Node lk l h  ann
+      → Node lk l h' ann
     mapHole = over traverseHole
 
   data Path : (p q : ∃ Label) → Set where
@@ -100,12 +112,15 @@ module Syn
 
   infixr 9 _>->_
 
-  locate : ∀{p q} → Path p q → Traversal' (Node' p ⊥) (Node' q ⊥)
+  locate
+    : ∀{p q h} {ann : ∀{lk₁} → Label lk₁ → Set}
+    → Path p q
+    → Traversal' (Node' p h ann) (Node' q h ann)
   locate <> f n = f n
   locate (_ ∶ _ > _) f (hole h) = pure (hole h)
-  locate (Π-rk ∶ r > path) f (node get)
-    = pure (λ a → override r (const a) (node get)) <*> locate path f (get r)
-  locate (Σ-rk ∶ r > path) f (r₁ node> n) with r ≟rel r₁
-  locate (Σ-rk ∶ r > path) f (.r node> n)
-    | yes refl = pure (λ n₁ → r node> n₁) <*> locate path f n
-  locate (Σ-rk ∶ r > path) f (r₁ node> n) | no _ = pure (r₁ node> n)
+  locate (Π-rk ∶ r > path) f (node get a)
+    = pure (λ x → override r (const x) (node get a)) <*> locate path f (get r)
+  locate (Σ-rk ∶ r > path) f (r₁ node> n ∣ a) with r ≟rel r₁
+  locate (Σ-rk ∶ r > path) f (.r node> n ∣ a)
+    | yes refl = pure (λ n₁ → r node> n₁ ∣ a) <*> locate path f n
+  locate (Σ-rk ∶ r > path) f (r₁ node> n ∣ a) | no _ = pure (r₁ node> n ∣ a)

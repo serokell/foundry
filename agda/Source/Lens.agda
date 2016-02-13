@@ -15,10 +15,7 @@ open Applicative{{...}} public
 private
 
   Identity-Applicative : Applicative {zero} id
-  Identity-Applicative = record
-    { _<*>_ = λ f a → f a
-    ; pure = λ a → a
-    }
+  Identity-Applicative = record { _<*>_ = id ; pure = id }
 
   Maybe-Applicative : ∀{e} → Applicative {zero} (const (Maybe e))
   Maybe-Applicative = record
