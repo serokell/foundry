@@ -705,7 +705,7 @@ instance
   ) => SyntaxLayout n m (CollageDraw' n m) lctx (SYN (HOLE sub)) where
 
   layout lctx = \case
-    SynHollow    -> punct "⦿"
+    SynHollow    -> punct "_"
     SynSolid syn -> layout lctx syn
 
   draw _ = draw'

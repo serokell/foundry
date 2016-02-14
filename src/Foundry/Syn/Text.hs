@@ -16,7 +16,6 @@ import qualified Graphics.UI.Gtk as Gtk
 
 import Source.Collage.Builder (horizontal)
 import Source.Syntax
-import Source.Draw
 import Source.Input
 import qualified Source.Input.KeyCode as KeyCode
 import Foundry.Syn.Common
@@ -54,7 +53,10 @@ normalizeSynText syn = syn & synTextPosition %~ normalizePosition
     normalizePosition = max 0 . min (views synTextContent Text.length syn)
 
 instance UndoEq (SYN TEXT) where
-  undoEq = (==) `on` view synTextContent
+  undoEq syn1 syn2
+    | view synTextEditMode syn1 = True
+    | view synTextEditMode syn2 = False
+    | otherwise = on (==) (view synTextContent) syn1 syn2
 
 instance
   ( n ~ Int, m ~ Int
