@@ -138,7 +138,7 @@ _≟rel_ Expr>Embed Expr>Embed = yes refl
 open Syn Label Relation _≟rel_ slave Ω-Field public
 
 mkLam
-  : ∀{h} {ann : ∀{lk₁} → Label lk₁ → Set}
+  : {h ann : ∀{lk₁} → Label lk₁ → Set}
   → ⟦ ⌝Arg  ∣ h ∣ ann ⟧
   → ⟦ ⌝Expr ∣ h ∣ ann ⟧
   → ⟦ ⌝Expr ∣ h ∣ ann ⟧
@@ -150,7 +150,7 @@ mkLam arg expr1 expr2 = λ
   }
 
 mkPi
-  : ∀{h} {ann : ∀{lk₁} → Label lk₁ → Set}
+  : {h ann : ∀{lk₁} → Label lk₁ → Set}
   → ⟦ ⌝Arg  ∣ h ∣ ann ⟧
   → ⟦ ⌝Expr ∣ h ∣ ann ⟧
   → ⟦ ⌝Expr ∣ h ∣ ann ⟧
@@ -162,7 +162,7 @@ mkPi arg expr1 expr2 = λ
   }
 
 mkApp
-  : ∀{h} {ann : ∀{lk₁} → Label lk₁ → Set}
+  : {h ann : ∀{lk₁} → Label lk₁ → Set}
   → ⟦ ⌝Expr ∣ h ∣ ann ⟧
   → ⟦ ⌝Expr ∣ h ∣ ann ⟧
   → Field ⌝App h ann
@@ -172,7 +172,7 @@ mkApp expr1 expr2 = λ
   }
 
 traverse-Relation
-  : ∀{l h} {ann : ∀{lk₁} → Label lk₁ → Set}
+  : ∀{l} {h ann : ∀{lk₁} → Label lk₁ → Set}
   → Traverse-Relation (Relation Π-rk l) (λ r → slave⟦ r ∣ h ∣ ann ⟧)
 traverse-Relation {⌝Lam} f = mkLam <$> f Lam-Arg   <*> f Lam-Expr₁ <*> f Lam-Expr₂
 traverse-Relation {⌝Pi}  f = mkPi  <$> f  Pi-Arg   <*> f  Pi-Expr₁ <*> f  Pi-Expr₂
@@ -182,13 +182,13 @@ open TraverseSyn traverse-Relation public
 
 onExpr
   : ∀{n} {r : Set n}
-  → (⟦ ⌝Const ∣ ⊥ ∣ const ⊤ ⟧ → r)
-  → (⟦ ⌝Var   ∣ ⊥ ∣ const ⊤ ⟧ → r)
-  → (⟦ ⌝Lam   ∣ ⊥ ∣ const ⊤ ⟧ → r)
-  → (⟦ ⌝Pi    ∣ ⊥ ∣ const ⊤ ⟧ → r)
-  → (⟦ ⌝App   ∣ ⊥ ∣ const ⊤ ⟧ → r)
-  → (⟦ ⌝Embed ∣ ⊥ ∣ const ⊤ ⟧ → r)
-  → (⟦ ⌝Expr  ∣ ⊥ ∣ const ⊤ ⟧ → r)
+  → (⟦ ⌝Const ∣ const ⊥ ∣ const ⊤ ⟧ → r)
+  → (⟦ ⌝Var   ∣ const ⊥ ∣ const ⊤ ⟧ → r)
+  → (⟦ ⌝Lam   ∣ const ⊥ ∣ const ⊤ ⟧ → r)
+  → (⟦ ⌝Pi    ∣ const ⊥ ∣ const ⊤ ⟧ → r)
+  → (⟦ ⌝App   ∣ const ⊥ ∣ const ⊤ ⟧ → r)
+  → (⟦ ⌝Embed ∣ const ⊥ ∣ const ⊤ ⟧ → r)
+  → (⟦ ⌝Expr  ∣ const ⊥ ∣ const ⊤ ⟧ → r)
 onExpr _ _ _ _ _ _ (hole h) = ⊥-elim h
 onExpr onConst onVar onLam onPi onApp onEmbed (r node> n ∣ tt) with r
 ... | Expr>Const = onConst n
@@ -198,7 +198,7 @@ onExpr onConst onVar onLam onPi onApp onEmbed (r node> n ∣ tt) with r
 ... | Expr>App   = onApp   n
 ... | Expr>Embed = onEmbed n
 
-↟ : ∀{l'} → Node' l' ⊥ (const ⊤) → String
+↟ : ∀{l'} → Node' l' (const ⊥) (const ⊤) → String
 ↟ = ↟Node
 
   where
@@ -216,7 +216,7 @@ onExpr onConst onVar onLam onPi onApp onEmbed (r node> n ∣ tt) with r
     ↟Var : Var → String
     ↟Var (Variable n arg) = ↟Arg arg ++ ↟ℕ-index n
 
-    ↟Node : ∀{l'} → Node' l' ⊥ (const ⊤) → String
+    ↟Node : ∀{l'} → Node' l' (const ⊥) (const ⊤) → String
     ↟Node (hole h) = ⊥-elim h
     ↟Node {_ , ⌝Const} (node c tt) = ↟Const c
     ↟Node {_ , ⌝Var} (node v tt) = ↟Var v

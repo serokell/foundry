@@ -12,7 +12,7 @@ open import Foundry.Node
 path₀ : _ -- Path (, ⌝Expr) (, ⌝Const)
 path₀ = ⟪ Expr>Lam ⟫ >-> ⟪ Lam-Expr₁ ⟫ >-> ⟪ Expr>Const ⟫ >-> <>
 
-expr₀ : ⟦ ⌝Expr ∣ ⊥ ∣ const ⊤ ⟧
+expr₀ : ⟦ ⌝Expr ∣ const ⊥ ∣ const ⊤ ⟧
 expr₀ =
   Expr>Lam node> node (mkLam
     (node (Argument "star") tt)
@@ -22,7 +22,7 @@ expr₀ =
       (Expr>Const node> node Star tt ∣ tt)) tt ∣ tt
     )) tt ∣ tt
 
-expr₁ : _ -- ⟦ ⌝Expr ⟧
+expr₁ : _ -- ⟦ ⌝Expr ∣ const ⊥ ∣ const ⊤ ⟧
 expr₁ = over (locate path₀) (const (node Box tt)) expr₀
 
 locate-set-get-test₁ : view? (locate path₀) expr₁ ≡ just (node Box tt)

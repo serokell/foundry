@@ -12,21 +12,19 @@ record Applicative {ℓ} (F : Set ℓ → Set ℓ) : Set (suc ℓ) where
 
 open Applicative{{...}} public
 
-private
+Identity-Applicative : Applicative {zero} id
+Identity-Applicative = record { _<*>_ = id ; pure = id }
 
-  Identity-Applicative : Applicative {zero} id
-  Identity-Applicative = record { _<*>_ = id ; pure = id }
+Maybe-Applicative : ∀{e} → Applicative {zero} (const (Maybe e))
+Maybe-Applicative = record
+  { _<*>_ = _<*>-maybe_
+  ; pure = const nothing
+  } where
 
-  Maybe-Applicative : ∀{e} → Applicative {zero} (const (Maybe e))
-  Maybe-Applicative = record
-    { _<*>_ = _<*>-maybe_
-    ; pure = const nothing
-    } where
-
-      _<*>-maybe_ : ∀{e} → Maybe e → Maybe e → Maybe e
-      nothing <*>-maybe nothing = nothing
-      nothing <*>-maybe just x = just x
-      just x <*>-maybe _ = just x
+    _<*>-maybe_ : ∀{e} → Maybe e → Maybe e → Maybe e
+    nothing <*>-maybe nothing = nothing
+    nothing <*>-maybe just x = just x
+    just x <*>-maybe _ = just x
 
 _<$>_
   : ∀ {ℓ} {F : Set ℓ → Set ℓ} {{app : Applicative {ℓ} F}}

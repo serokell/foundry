@@ -36,30 +36,29 @@ module Syn
   (Ω-Field : Label Ω-lk → Set)
   where
 
-  Field : {lk : LabelKind} → Label lk → Set → (∀{lk₁} → Label lk₁ → Set) → Set
+  Field : {lk : LabelKind} → Label lk → (h ann : ∀{lk₁} → Label lk₁ → Set) → Set
 
-  -- TODO: h : ∃ Label → Set
-  data Node (lk : LabelKind) (l : Label lk) (h : Set) (ann : ∀{lk₁} → Label lk₁ → Set) : Set where
+  data Node (lk : LabelKind) (l : Label lk) (h ann : ∀{lk₁} → Label lk₁ → Set) : Set where
     node : Field l h ann → ann l → Node lk l h ann
-    hole : h → Node lk l h ann
+    hole : h l → Node lk l h ann
 
-  Node' : ∃ Label → Set → (∀{lk₁} → Label lk₁ → Set) → Set
+  Node' : ∃ Label → (h ann : ∀{lk₁} → Label lk₁ → Set) → Set
   Node' (lk , l) = Node lk l
 
-  slave⟦_∣_∣_⟧ : ∀{rk l} → (r : Relation rk l) → Set → (∀{lk₁} → Label lk₁ → Set) → Set
+  slave⟦_∣_∣_⟧ : ∀{rk l} → (r : Relation rk l) → (h ann : ∀{lk₁} → Label lk₁ → Set) → Set
   slave⟦ r ∣ h ∣ ann ⟧ = Node' (slave r) h ann
 
   Field {lk = Π-lk} l h ann = (r : Relation Π-rk l) → slave⟦ r ∣ h ∣ ann ⟧
   Field {lk = Σ-lk} l h ann = Σ (Relation Σ-rk l) (λ r → slave⟦ r ∣ h ∣ ann ⟧)
   Field {lk = Ω-lk} l h ann = Ω-Field l
 
-  ⟦_∣_∣_⟧ : ∀{lk} → Label lk → Set → (∀{lk₁} → Label lk₁ → Set) → Set
+  ⟦_∣_∣_⟧ : ∀{lk} → Label lk → (h ann : ∀{lk₁} → Label lk₁ → Set) → Set
   ⟦_∣_∣_⟧ {lk} = Node lk
 
   pattern _node>_∣_ r n a = node (r , n) a
 
   override
-    : ∀{l h} {ann : ∀{lk₁} → Label lk₁ → Set}
+    : ∀{l} {h ann : ∀{lk₁} → Label lk₁ → Set}
     → (r : Relation Π-rk l)
     → Endo slave⟦ r ∣ h ∣ ann ⟧
     → Endo      ⟦ l ∣ h ∣ ann ⟧
@@ -73,27 +72,31 @@ module Syn
 
   module TraverseSyn
     (traverse-Relation
-       : ∀{l h} {ann : ∀{lk₁} → Label lk₁ → Set}
+       : ∀{l} {h ann : ∀{lk₁} → Label lk₁ → Set}
        → Traverse-Relation
            (Relation Π-rk l)
            (λ r → slave⟦ r ∣ h ∣ ann ⟧))
     where
 
+    -- TODO: Express the type as a `Traversal`
     traverseHole
-      : ∀{lk l h h'} {ann : ∀{lk₁} → Label lk₁ → Set}
-      → Traversal (Node lk l h ann) (Node lk l h' ann) h h'
+      : ∀{lk l} {h h' ann : ∀{lk₁} → Label lk₁ → Set}
+      → {F : Set → Set} {{app : Applicative F}}
+      → (∀{lk₂} {l₂ : Label lk₂} → h l₂ → F (h' l₂))
+      → (Node lk l h ann) → F (Node lk l h' ann)
     traverseHole {lk = Π-lk} f (node get a)
       = (λ get₁ → node get₁ a) <$> traverse-Relation (λ r → traverseHole f (get r))
     traverseHole {lk = Σ-lk} f (r node> n ∣ a) = (λ n₁ → r node> n₁ ∣ a) <$> traverseHole f n
     traverseHole {lk = Ω-lk} _ (node x a) = pure (node x a)
     traverseHole f (hole x) = hole <$> f x
 
+    -- TODO: Express the term via `over`
     mapHole
-      : ∀{lk l h h'} {ann : ∀{lk₁} → Label lk₁ → Set}
-      → (h → h')
+      : ∀{lk l} {h h' ann : ∀{lk₁} → Label lk₁ → Set}
+      → (∀{lk₂} {l₂ : Label lk₂} → h l₂  → h' l₂)
       → Node lk l h  ann
       → Node lk l h' ann
-    mapHole = over traverseHole
+    mapHole = traverseHole {{Identity-Applicative}}
 
   data Path : (p q : ∃ Label) → Set where
     <> : {p : ∃ Label} → Path p p
@@ -113,7 +116,7 @@ module Syn
   infixr 9 _>->_
 
   locate
-    : ∀{p q h} {ann : ∀{lk₁} → Label lk₁ → Set}
+    : ∀{p q} {h ann : ∀{lk₁} → Label lk₁ → Set}
     → Path p q
     → Traversal' (Node' p h ann) (Node' q h ann)
   locate <> f n = f n
