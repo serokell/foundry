@@ -60,7 +60,7 @@ instance UndoEq (SYN TEXT) where
 
 instance
   ( n ~ Int, m ~ Int
-  ) => SyntaxLayout n m (CollageDraw' n m) LayoutCtx (SYN TEXT) where
+  ) => SyntaxLayout n m ActiveZone LayoutCtx (SYN TEXT) where
 
   layout lctx syn
     | lctx ^. lctxSelected, syn ^. synTextEditMode =
@@ -71,11 +71,9 @@ instance
         in horizontal [text t1, punct "|", text t2]
     | otherwise = text (syn ^. synTextContent)
 
-  draw _ = draw'
-
 instance
   ( n ~ Int, m ~ Int
-  ) => SyntaxReact n m (CollageDraw' n m) (SYN TEXT) where
+  ) => SyntaxReact n m ActiveZone (SYN TEXT) where
 
   react asyncReact _oldLayout inputEvent = do
     asum handlers

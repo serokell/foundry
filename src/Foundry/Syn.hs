@@ -211,15 +211,13 @@ instance UndoEq (SYN ARG) where
 
 instance
   ( n ~ Int, m ~ Int
-  ) => SyntaxLayout n m (CollageDraw' n m) LayoutCtx (SYN ARG) where
+  ) => SyntaxLayout n m ActiveZone LayoutCtx (SYN ARG) where
 
   layout lctx (SynArg t) = layout lctx t
 
-  draw _ = draw'
-
 instance
   ( n ~ Int, m ~ Int
-  ) => SyntaxReact n m (CollageDraw' n m) (SYN ARG) where
+  ) => SyntaxReact n m ActiveZone (SYN ARG) where
 
   react asyncReact oldLayout inputEvent = asum handlers
     where
@@ -245,7 +243,7 @@ instance UndoEq (SYN LAM) where
 
 instance
   ( n ~ Int, m ~ Int
-  ) => SyntaxLayout n m (CollageDraw' n m) LayoutCtx (SYN LAM) where
+  ) => SyntaxLayout n m ActiveZone LayoutCtx (SYN LAM) where
 
   layout lctx syn =
     let
@@ -264,11 +262,9 @@ instance
       , body
       ] & vertical
 
-  draw _ = draw'
-
 instance
   ( n ~ Int, m ~ Int
-  ) => SyntaxReact n m (CollageDraw' n m) (SYN LAM) where
+  ) => SyntaxReact n m ActiveZone (SYN LAM) where
 
   react asyncReact oldLayout inputEvent = asum handlers
     where
@@ -305,7 +301,7 @@ instance
         let
           delegate
             :: forall syn
-             . SyntaxReact n m (CollageDraw' n m) syn
+             . SyntaxReact n m ActiveZone syn
             => Lens' (SYN LAM) syn -> StateT (SYN LAM) (ExceptT () IO) ()
           delegate p = zoom p $ do
             react (asyncReact . over p) oldLayout inputEvent
@@ -336,7 +332,7 @@ instance UndoEq (SYN PI) where
 
 instance
   ( n ~ Int, m ~ Int
-  ) => SyntaxLayout n m (CollageDraw' n m) LayoutCtx (SYN PI) where
+  ) => SyntaxLayout n m ActiveZone LayoutCtx (SYN PI) where
 
   layout lctx syn =
     let
@@ -355,11 +351,9 @@ instance
       , body
       ] & vertical
 
-  draw _ = draw'
-
 instance
   ( n ~ Int, m ~ Int
-  ) => SyntaxReact n m (CollageDraw' n m) (SYN PI) where
+  ) => SyntaxReact n m ActiveZone (SYN PI) where
 
   react asyncReact oldLayout inputEvent = asum handlers
     where
@@ -396,7 +390,7 @@ instance
         let
           delegate
             :: forall syn
-             . SyntaxReact n m (CollageDraw' n m) syn
+             . SyntaxReact n m ActiveZone syn
             => Lens' (SYN PI) syn -> StateT (SYN PI) (ExceptT () IO) ()
           delegate p = zoom p $ do
             react (asyncReact . over p) oldLayout inputEvent
@@ -426,7 +420,7 @@ instance UndoEq (SYN APP) where
 
 instance
   ( n ~ Int, m ~ Int
-  ) => SyntaxLayout n m (CollageDraw' n m) LayoutCtx (SYN APP) where
+  ) => SyntaxLayout n m ActiveZone LayoutCtx (SYN APP) where
 
   layout lctx syn =
         [ selLayout lctx (SelAppExpr1, view synAppExpr1) (join pad (5, 5)) syn
@@ -437,11 +431,9 @@ instance
               syn
         ] & horizontalCenter
 
-  draw _ = draw'
-
 instance
   ( n ~ Int, m ~ Int
-  ) => SyntaxReact n m (CollageDraw' n m) (SYN APP) where
+  ) => SyntaxReact n m ActiveZone (SYN APP) where
 
   react asyncReact oldLayout inputEvent = asum handlers
     where
@@ -475,7 +467,7 @@ instance
         let
           delegate
             :: forall syn
-             . SyntaxReact n m (CollageDraw' n m) syn
+             . SyntaxReact n m ActiveZone syn
             => Lens' (SYN APP) syn -> StateT (SYN APP) (ExceptT () IO) ()
           delegate p = zoom p $ do
             react (asyncReact . over p) oldLayout inputEvent
@@ -501,17 +493,15 @@ instance UndoEq (SYN CONST) where
 
 instance
   ( n ~ Int, m ~ Int
-  ) => SyntaxLayout n m (CollageDraw' n m) LayoutCtx (SYN CONST) where
+  ) => SyntaxLayout n m ActiveZone LayoutCtx (SYN CONST) where
 
   layout _ = \case
     SynConstStar -> punct "★"
     SynConstBox  -> punct "□"
 
-  draw _ = draw'
-
 instance
   ( n ~ Int, m ~ Int
-  ) => SyntaxReact n m (CollageDraw' n m) (SYN CONST) where
+  ) => SyntaxReact n m ActiveZone (SYN CONST) where
 
 ---       Var       ---
 ---    instances    ---
@@ -523,7 +513,7 @@ instance UndoEq (SYN VAR) where
 
 instance
   ( n ~ Int, m ~ Int
-  ) => SyntaxLayout n m (CollageDraw' n m) LayoutCtx (SYN VAR) where
+  ) => SyntaxLayout n m ActiveZone LayoutCtx (SYN VAR) where
 
   layout lctx v =
     [ layout lctx (v ^. synVarName)
@@ -548,11 +538,9 @@ instance
         '9' -> '₉'
         c   -> c
 
-  draw _ = draw'
-
 instance
   ( n ~ Int, m ~ Int
-  ) => SyntaxReact n m (CollageDraw' n m) (SYN VAR) where
+  ) => SyntaxReact n m ActiveZone (SYN VAR) where
 
   react asyncReact oldLayout inputEvent = asum handlers
     where
@@ -588,15 +576,13 @@ instance UndoEq (SYN EMBED) where
 
 instance
   ( n ~ Int, m ~ Int
-  ) => SyntaxLayout n m (CollageDraw' n m) LayoutCtx (SYN EMBED) where
+  ) => SyntaxLayout n m ActiveZone LayoutCtx (SYN EMBED) where
 
   layout _ _ = text "Embed"
 
-  draw _ = draw'
-
 instance
   ( n ~ Int, m ~ Int
-  ) => SyntaxReact n m (CollageDraw' n m) (SYN EMBED) where
+  ) => SyntaxReact n m ActiveZone (SYN EMBED) where
 
 ---       Expr      ---
 ---    instances    ---
@@ -612,7 +598,7 @@ instance UndoEq (SYN EXPR) where
 
 instance
   ( n ~ Int, m ~ Int
-  ) => SyntaxLayout n m (CollageDraw' n m) LayoutCtx (SYN EXPR) where
+  ) => SyntaxLayout n m ActiveZone LayoutCtx (SYN EXPR) where
 
   layout lctx = \case
     SynExprLam   a -> layout lctx a
@@ -622,16 +608,14 @@ instance
     SynExprVar   a -> layout lctx a
     SynExprEmbed a -> layout lctx a
 
-  draw _ = draw'
-
 instance
   ( n ~ Int, m ~ Int
-  ) => SyntaxReact n m (CollageDraw' n m) (SYN EXPR) where
+  ) => SyntaxReact n m ActiveZone (SYN EXPR) where
 
   react asyncReact oldLayout inputEvent =
     let
       delegate
-        :: SyntaxReact n m (CollageDraw' n m) syn
+        :: SyntaxReact n m ActiveZone syn
         => Prism' (SYN EXPR) syn -> StateT (SYN EXPR) (ExceptT () IO) ()
       delegate p =
         let asyncReact' = asyncReact . over p
@@ -701,19 +685,17 @@ instance UndoEq (SYN sub) => UndoEq (SYN (HOLE sub)) where
 
 instance
   ( n ~ Int, m ~ Int
-  , SyntaxLayout n m (CollageDraw' n m) lctx (SYN sub)
-  ) => SyntaxLayout n m (CollageDraw' n m) lctx (SYN (HOLE sub)) where
+  , SyntaxLayout n m ActiveZone lctx (SYN sub)
+  ) => SyntaxLayout n m ActiveZone lctx (SYN (HOLE sub)) where
 
   layout lctx = \case
     SynHollow    -> punct "_"
     SynSolid syn -> layout lctx syn
 
-  draw _ = draw'
-
 instance
   ( n ~ Int, m ~ Int
-  , SyntaxReact n m (CollageDraw' n m) (SYN sub)
-  ) => SyntaxReact n m (CollageDraw' n m) (SYN (HOLE sub)) where
+  , SyntaxReact n m ActiveZone (SYN sub)
+  ) => SyntaxReact n m ActiveZone (SYN (HOLE sub)) where
 
   react asyncReact oldLayout inputEvent = asum handlers
     where
@@ -749,7 +731,7 @@ instance SyntaxBlank (SYN (HOLE sub)) where
 
 instance
   ( n ~ Int, m ~ Int
-  ) => SyntaxLayout n m (CollageDraw' n m) (Extents n m) (SYN (TOP n m)) where
+  ) => SyntaxLayout n m ActiveZone (Extents n m) (SYN (TOP n m)) where
 
   layout viewport syn =
     let
@@ -766,11 +748,9 @@ instance
      . join pad (5, 5)
      $ layout lctx (syn ^. synExpr)
 
-  draw _ = draw'
-
 instance
   ( n ~ Int, m ~ Int
-  ) => SyntaxReact n m (CollageDraw' n m) (SYN (TOP n m)) where
+  ) => SyntaxReact n m ActiveZone (SYN (TOP n m)) where
 
   react asyncReact oldLayout inputEvent = asum handlers
     where

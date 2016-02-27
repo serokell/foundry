@@ -13,7 +13,6 @@ import Control.Lens
 import Control.Monad
 
 import qualified Source.Collage.Builder as CB
-import Source.Syntax
 import Source.Draw
 import Source.Style
 import Source.Input
@@ -55,29 +54,31 @@ instance Show SomeSel where
 
 type Path = Seq SomeSel
 
-data Draw' n m
-  = Draw' (Draw n m)
-  | ActiveZone (Extents n m) Path
+newtype ActiveZone = ActiveZone Path
+
+type CollageDraw' n m = CB.CollageBuilder n m (Draw n m ActiveZone)
 
 active :: (Num n, Ord n, Num m, Ord m) => Path -> Op1 (CollageDraw' n m)
-active p c = (CB.collageBuilder . pure) (ActiveZone (getExtents c) p) `mappend` c
+active p c = (CB.collageBuilder . pure) activeZone `mappend` c
+  where
+    activeZone = DrawEmbed (getExtents c) (ActiveZone p)
 
 activate
   :: forall n m r
    . (Ord n, Num n, Ord m, Num m)
   => (Offset n m -> Extents n m -> Path -> r)
   -> Offset n m
-  -> CollageDraw' n m
+  -> Collage n m (Draw n m ActiveZone)
   -> Maybe r
-activate f o = getLast . foldMap (Last . uncurry check) . getCollage . CB.buildCollage
+activate f o = getLast . foldMap (Last . uncurry check) . getCollage
   where
     within :: (Ord a, Num a) => a -> a -> a -> Bool
     within a zoneOffset zoneExtents
        = a >  zoneOffset
       && a < (zoneOffset + zoneExtents)
-    check :: Offset n m -> Draw' n m -> Maybe r
+    check :: Offset n m -> Draw n m ActiveZone -> Maybe r
     check o' d = do
-      ActiveZone e p <- Just d
+      DrawEmbed e (ActiveZone p) <- Just d
       guard
         $ uncurry (&&)
         $ biliftA3 within within o o' e
@@ -89,30 +90,9 @@ hover
   => Op1 (CollageDraw' n m)
   -> Offset n m
   -> Op1 (CollageDraw' n m)
-hover f o c = c <> maybe mempty id (activate obj o c)
+hover f o c = c <> maybe mempty id (activate obj o (CB.buildCollage c))
   where
     obj o' e _ = CB.offset o' (f (phantom e))
-
-instance DrawPhantom n m (Draw' n m) where
-  drawPhantom e = Draw' (drawPhantom e)
-
-instance DrawRectangle n m (Draw' n m) where
-  drawRectangle e o b = Draw' (drawRectangle e o b)
-
-instance (Integral n, Integral m) => DrawText n m (Draw' n m) where
-  drawText f t = Draw' (drawText f t)
-
-instance (Num n, Num m, Ord n, Ord m) => HasExtents n m (Draw' n m) where
-  getExtents = \case
-    Draw' d -> getExtents d
-    ActiveZone e _ -> e
-
-type CollageDraw' n m = CB.CollageBuilder n m (Draw' n m)
-
-draw' :: (Num n, Num m, Ord n, Ord m) => CollageDraw' n m -> CollageDraw n m
-draw' c = CB.buildCollage c >>= \case
-  Draw' d -> pure d
-  _       -> mempty
 
 data LayoutCtx = LayoutCtx
   { _lctxSelected :: Bool
