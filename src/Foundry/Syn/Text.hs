@@ -58,9 +58,7 @@ instance UndoEq (SYN TEXT) where
     | view synTextEditMode syn2 = False
     | otherwise = on (==) (view synTextContent) syn1 syn2
 
-instance
-  ( n ~ Int, m ~ Int
-  ) => SyntaxLayout n m ActiveZone LayoutCtx (SYN TEXT) where
+instance n ~ Int => SyntaxLayout n ActiveZone LayoutCtx (SYN TEXT) where
 
   layout lctx syn
     | lctx ^. lctxSelected, syn ^. synTextEditMode =
@@ -71,9 +69,7 @@ instance
         in horizontal [text t1, punct "|", text t2]
     | otherwise = text (syn ^. synTextContent)
 
-instance
-  ( n ~ Int, m ~ Int
-  ) => SyntaxReact n m ActiveZone (SYN TEXT) where
+instance n ~ Int => SyntaxReact n ActiveZone (SYN TEXT) where
 
   react asyncReact _oldLayout inputEvent = do
     asum handlers

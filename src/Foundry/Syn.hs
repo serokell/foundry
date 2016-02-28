@@ -17,7 +17,7 @@ import Control.Monad.State
 import Control.Monad.Except
 import Control.Lens
 
-import Source.Collage.Builder (horizontal, vertical)
+import Source.Collage.Builder (horizontal, vertical, getExtents)
 import Source.Syntax
 import Source.Draw
 import Source.Input
@@ -33,7 +33,7 @@ import qualified Morte.Import as M.I
 data EXPR_K = LAM | PI | APP | CONST | EMBED | VAR
 data ARG
 data EXPR
-data TOP (n :: *) (m :: *)
+data TOP (n :: *)
 data HOLE sub
 
 data instance SEL (HOLE sub) = SelHole (SEL sub)
@@ -119,9 +119,9 @@ data instance SYN EXPR
 
 declareLenses
   [d|
-      data instance SYN (TOP n m) = SynTop
+      data instance SYN (TOP n) = SynTop
         { synExpr            :: SYN (HOLE EXPR)
-        , synPointer         :: Offset n m
+        , synPointer         :: Offset n
         , synHoverBarEnabled :: Bool
         , synUndo            :: [SYN (HOLE EXPR)]
         , synRedo            :: [SYN (HOLE EXPR)]
@@ -209,16 +209,10 @@ instance SynSelection sub => SynSelection (HOLE sub) where
 instance UndoEq (SYN ARG) where
   undoEq (SynArg s1) (SynArg s2) = undoEq s1 s2
 
-instance
-  ( n ~ Int, m ~ Int
-  ) => SyntaxLayout n m ActiveZone LayoutCtx (SYN ARG) where
-
+instance n ~ Int => SyntaxLayout n ActiveZone LayoutCtx (SYN ARG) where
   layout lctx (SynArg t) = layout lctx t
 
-instance
-  ( n ~ Int, m ~ Int
-  ) => SyntaxReact n m ActiveZone (SYN ARG) where
-
+instance n ~ Int => SyntaxReact n ActiveZone (SYN ARG) where
   react asyncReact oldLayout inputEvent = asum handlers
     where
       handlers =
@@ -241,13 +235,11 @@ instance UndoEq (SYN LAM) where
     && on undoEq (view synLamExpr1) s1 s2
     && on undoEq (view synLamExpr2) s1 s2
 
-instance
-  ( n ~ Int, m ~ Int
-  ) => SyntaxLayout n m ActiveZone LayoutCtx (SYN LAM) where
+instance n ~ Int => SyntaxLayout n ActiveZone LayoutCtx (SYN LAM) where
 
   layout lctx syn =
     let
-      maxWidth = (max `on` fst.getExtents) header body
+      maxWidth = (max `on` fst . getExtents) header body
       header =
         [ extend (4, 0) (punct "λ")
         , [ selLayout lctx (SelLamArg, view synLamArg) (join pad (4, 0)) syn
@@ -262,9 +254,7 @@ instance
       , body
       ] & vertical
 
-instance
-  ( n ~ Int, m ~ Int
-  ) => SyntaxReact n m ActiveZone (SYN LAM) where
+instance n ~ Int => SyntaxReact n ActiveZone (SYN LAM) where
 
   react asyncReact oldLayout inputEvent = asum handlers
     where
@@ -301,7 +291,7 @@ instance
         let
           delegate
             :: forall syn
-             . SyntaxReact n m ActiveZone syn
+             . SyntaxReact n ActiveZone syn
             => Lens' (SYN LAM) syn -> StateT (SYN LAM) (ExceptT () IO) ()
           delegate p = zoom p $ do
             react (asyncReact . over p) oldLayout inputEvent
@@ -330,9 +320,7 @@ instance UndoEq (SYN PI) where
     && on undoEq (view synPiExpr1) s1 s2
     && on undoEq (view synPiExpr2) s1 s2
 
-instance
-  ( n ~ Int, m ~ Int
-  ) => SyntaxLayout n m ActiveZone LayoutCtx (SYN PI) where
+instance n ~ Int => SyntaxLayout n ActiveZone LayoutCtx (SYN PI) where
 
   layout lctx syn =
     let
@@ -351,9 +339,7 @@ instance
       , body
       ] & vertical
 
-instance
-  ( n ~ Int, m ~ Int
-  ) => SyntaxReact n m ActiveZone (SYN PI) where
+instance n ~ Int => SyntaxReact n ActiveZone (SYN PI) where
 
   react asyncReact oldLayout inputEvent = asum handlers
     where
@@ -390,7 +376,7 @@ instance
         let
           delegate
             :: forall syn
-             . SyntaxReact n m ActiveZone syn
+             . SyntaxReact n ActiveZone syn
             => Lens' (SYN PI) syn -> StateT (SYN PI) (ExceptT () IO) ()
           delegate p = zoom p $ do
             react (asyncReact . over p) oldLayout inputEvent
@@ -418,9 +404,7 @@ instance UndoEq (SYN APP) where
      = on undoEq (view synAppExpr1) s1 s2
     && on undoEq (view synAppExpr2) s1 s2
 
-instance
-  ( n ~ Int, m ~ Int
-  ) => SyntaxLayout n m ActiveZone LayoutCtx (SYN APP) where
+instance n ~ Int => SyntaxLayout n ActiveZone LayoutCtx (SYN APP) where
 
   layout lctx syn =
         [ selLayout lctx (SelAppExpr1, view synAppExpr1) (join pad (5, 5)) syn
@@ -431,9 +415,7 @@ instance
               syn
         ] & horizontalCenter
 
-instance
-  ( n ~ Int, m ~ Int
-  ) => SyntaxReact n m ActiveZone (SYN APP) where
+instance n ~ Int => SyntaxReact n ActiveZone (SYN APP) where
 
   react asyncReact oldLayout inputEvent = asum handlers
     where
@@ -467,7 +449,7 @@ instance
         let
           delegate
             :: forall syn
-             . SyntaxReact n m ActiveZone syn
+             . SyntaxReact n ActiveZone syn
             => Lens' (SYN APP) syn -> StateT (SYN APP) (ExceptT () IO) ()
           delegate p = zoom p $ do
             react (asyncReact . over p) oldLayout inputEvent
@@ -491,17 +473,13 @@ instance SyntaxBlank (SYN APP) where
 instance UndoEq (SYN CONST) where
   undoEq = (==)
 
-instance
-  ( n ~ Int, m ~ Int
-  ) => SyntaxLayout n m ActiveZone LayoutCtx (SYN CONST) where
+instance n ~ Int => SyntaxLayout n ActiveZone LayoutCtx (SYN CONST) where
 
   layout _ = \case
     SynConstStar -> punct "★"
     SynConstBox  -> punct "□"
 
-instance
-  ( n ~ Int, m ~ Int
-  ) => SyntaxReact n m ActiveZone (SYN CONST) where
+instance n ~ Int => SyntaxReact n ActiveZone (SYN CONST) where
 
 ---       Var       ---
 ---    instances    ---
@@ -511,9 +489,7 @@ instance UndoEq (SYN VAR) where
      = on undoEq (view synVarName)  s1 s2
     && on (==)   (view synVarIndex) s1 s2
 
-instance
-  ( n ~ Int, m ~ Int
-  ) => SyntaxLayout n m ActiveZone LayoutCtx (SYN VAR) where
+instance n ~ Int => SyntaxLayout n ActiveZone LayoutCtx (SYN VAR) where
 
   layout lctx v =
     [ layout lctx (v ^. synVarName)
@@ -538,9 +514,7 @@ instance
         '9' -> '₉'
         c   -> c
 
-instance
-  ( n ~ Int, m ~ Int
-  ) => SyntaxReact n m ActiveZone (SYN VAR) where
+instance n ~ Int => SyntaxReact n ActiveZone (SYN VAR) where
 
   react asyncReact oldLayout inputEvent = asum handlers
     where
@@ -574,15 +548,10 @@ instance UndoEq (SYN EMBED) where
   undoEq (SynEmbedURL      t1) (SynEmbedURL      t2) = undoEq t1 t2
   undoEq  _                     _                    = False
 
-instance
-  ( n ~ Int, m ~ Int
-  ) => SyntaxLayout n m ActiveZone LayoutCtx (SYN EMBED) where
-
+instance n ~ Int => SyntaxLayout n ActiveZone LayoutCtx (SYN EMBED) where
   layout _ _ = text "Embed"
 
-instance
-  ( n ~ Int, m ~ Int
-  ) => SyntaxReact n m ActiveZone (SYN EMBED) where
+instance n ~ Int => SyntaxReact n ActiveZone (SYN EMBED) where
 
 ---       Expr      ---
 ---    instances    ---
@@ -596,9 +565,7 @@ instance UndoEq (SYN EXPR) where
   undoEq (SynExprEmbed a1) (SynExprEmbed a2) = undoEq a1 a2
   undoEq  _                 _                = False
 
-instance
-  ( n ~ Int, m ~ Int
-  ) => SyntaxLayout n m ActiveZone LayoutCtx (SYN EXPR) where
+instance n ~ Int => SyntaxLayout n ActiveZone LayoutCtx (SYN EXPR) where
 
   layout lctx = \case
     SynExprLam   a -> layout lctx a
@@ -608,14 +575,12 @@ instance
     SynExprVar   a -> layout lctx a
     SynExprEmbed a -> layout lctx a
 
-instance
-  ( n ~ Int, m ~ Int
-  ) => SyntaxReact n m ActiveZone (SYN EXPR) where
+instance n ~ Int => SyntaxReact n ActiveZone (SYN EXPR) where
 
   react asyncReact oldLayout inputEvent =
     let
       delegate
-        :: SyntaxReact n m ActiveZone syn
+        :: SyntaxReact n ActiveZone syn
         => Prism' (SYN EXPR) syn -> StateT (SYN EXPR) (ExceptT () IO) ()
       delegate p =
         let asyncReact' = asyncReact . over p
@@ -684,18 +649,18 @@ instance UndoEq (SYN sub) => UndoEq (SYN (HOLE sub)) where
   undoEq  _             _            = False
 
 instance
-  ( n ~ Int, m ~ Int
-  , SyntaxLayout n m ActiveZone lctx (SYN sub)
-  ) => SyntaxLayout n m ActiveZone lctx (SYN (HOLE sub)) where
+  ( n ~ Int
+  , SyntaxLayout n ActiveZone lctx (SYN sub)
+  ) => SyntaxLayout n ActiveZone lctx (SYN (HOLE sub)) where
 
   layout lctx = \case
     SynHollow    -> punct "_"
     SynSolid syn -> layout lctx syn
 
 instance
-  ( n ~ Int, m ~ Int
-  , SyntaxReact n m ActiveZone (SYN sub)
-  ) => SyntaxReact n m ActiveZone (SYN (HOLE sub)) where
+  ( n ~ Int
+  , SyntaxReact n ActiveZone (SYN sub)
+  ) => SyntaxReact n ActiveZone (SYN (HOLE sub)) where
 
   react asyncReact oldLayout inputEvent = asum handlers
     where
@@ -729,9 +694,7 @@ instance SyntaxBlank (SYN (HOLE sub)) where
 ---       Syn       ---
 ---    instances    ---
 
-instance
-  ( n ~ Int, m ~ Int
-  ) => SyntaxLayout n m ActiveZone (Extents n m) (SYN (TOP n m)) where
+instance n ~ Int => SyntaxLayout n ActiveZone (Extents n) (SYN (TOP n)) where
 
   layout viewport syn =
     let
@@ -748,13 +711,11 @@ instance
      . join pad (5, 5)
      $ layout lctx (syn ^. synExpr)
 
-instance
-  ( n ~ Int, m ~ Int
-  ) => SyntaxReact n m ActiveZone (SYN (TOP n m)) where
+instance n ~ Int => SyntaxReact n ActiveZone (SYN (TOP n)) where
 
   react asyncReact oldLayout inputEvent = asum handlers
     where
-      handlers :: [StateT (SYN (TOP n m)) (ExceptT () IO) ()]
+      handlers :: [StateT (SYN (TOP n)) (ExceptT () IO) ()]
       handlers =
         [ handlePointerMotion
         , handleButtonPress
@@ -866,7 +827,7 @@ updateAppPath path e =
           Just SelAppExpr1 -> synAppExpr1 %~ updateExprPath someSels
           Just SelAppExpr2 -> synAppExpr2 %~ updateExprPath someSels
 
-instance (n ~ Int, m ~ Int) => SyntaxBlank (SYN (TOP n m)) where
+instance n ~ Int => SyntaxBlank (SYN (TOP n)) where
   blank = do
     let et = "λ(x : ∀(Nat : *) → ∀(Succ : Nat → Nat) → ∀(Zero : Nat) → Nat) → x (∀(Bool : *) → ∀(True : Bool) → ∀(False : Bool) → Bool) (λ(x : ∀(Bool : *) → ∀(True : Bool) → ∀(False : Bool) → Bool) → x (∀(Bool : *) → ∀(True : Bool) → ∀(False : Bool) → Bool) (λ(Bool : *) → λ(True : Bool) → λ(False : Bool) → False) (λ(Bool : *) → λ(True : Bool) → λ(False : Bool) → True)) (λ(Bool : *) → λ(True : Bool) → λ(False : Bool) → True)"
     expr <- synImportExpr <$> case M.P.exprFromText et of

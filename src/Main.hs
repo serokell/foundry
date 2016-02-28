@@ -6,5 +6,5 @@ import Foundry.Syn.Common (SYN)
 
 main :: IO ()
 main = do
-    _ :: SYN (TOP Int Int) <- runGUI
+    _ :: SYN (TOP Int) <- runGUI
     return ()
