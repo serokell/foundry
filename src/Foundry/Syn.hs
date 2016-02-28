@@ -125,7 +125,7 @@ declareLenses
         , synHoverBarEnabled :: Bool
         , synUndo            :: [SYN (HOLE EXPR)]
         , synRedo            :: [SYN (HOLE EXPR)]
-        } deriving (Eq, Ord, Show)
+        } deriving (Eq, Show)
   |]
 
 makeLensesDataInst ''SYN 'VAR
@@ -239,18 +239,26 @@ instance n ~ Int => SyntaxLayout n ActiveZone LayoutCtx (SYN LAM) where
 
   layout lctx syn =
     let
-      maxWidth = (max `on` fst . getExtents) header body
+      maxWidth = (max `on` view pointX . getExtents) header body
       header =
-        [ extend (4, 0) (punct "λ")
-        , [ selLayout lctx (SelLamArg, view synLamArg) (join pad (4, 0)) syn
-          , join pad (4, 0) (punct ":")
-          , selLayout lctx (SelLamExpr1, view synLamExpr1) (join pad (4, 0)) syn
+        [ extend (Point 4 0) (punct "λ")
+        , [ selLayout
+              lctx
+              (SelLamArg, view synLamArg)
+              (join pad (Point 4 0))
+              syn
+          , join pad (Point 4 0) (punct ":")
+          , selLayout
+              lctx
+              (SelLamExpr1, view synLamExpr1)
+              (join pad (Point 4 0))
+              syn
           ] & horizontal
         ] & horizontal
       body = selLayout lctx (SelLamExpr2, view synLamExpr2) id syn
     in
       [ header
-      , join pad (0, 4) (line light1 maxWidth)
+      , join pad (Point 0 4) (line light1 maxWidth)
       , body
       ] & vertical
 
@@ -324,18 +332,26 @@ instance n ~ Int => SyntaxLayout n ActiveZone LayoutCtx (SYN PI) where
 
   layout lctx syn =
     let
-      maxWidth = (max `on` fst.getExtents) header body
+      maxWidth = (max `on` view pointX . getExtents) header body
       header =
-        [ extend (4, 0) (punct "Π")
-        , [ selLayout lctx (SelPiArg, view synPiArg) (join pad (4, 0)) syn
-          , join pad (4, 0) (punct ":")
-          , selLayout lctx (SelPiExpr1, view synPiExpr1) (join pad (4, 0)) syn
+        [ extend (Point 4 0) (punct "Π")
+        , [ selLayout
+              lctx
+              (SelPiArg, view synPiArg)
+              (join pad (Point 4 0))
+              syn
+          , join pad (Point 4 0) (punct ":")
+          , selLayout
+              lctx
+              (SelPiExpr1, view synPiExpr1)
+              (join pad (Point 4 0))
+              syn
           ] & horizontal
         ] & horizontal
       body = selLayout lctx (SelPiExpr2, view synPiExpr2) id syn
     in
       [ header
-      , join pad (0, 4) (line light1 maxWidth)
+      , join pad (Point 0 4) (line light1 maxWidth)
       , body
       ] & vertical
 
@@ -407,11 +423,14 @@ instance UndoEq (SYN APP) where
 instance n ~ Int => SyntaxLayout n ActiveZone LayoutCtx (SYN APP) where
 
   layout lctx syn =
-        [ selLayout lctx (SelAppExpr1, view synAppExpr1) (join pad (5, 5)) syn
-        , join pad (5, 5)
+        [ selLayout lctx
+            (SelAppExpr1, view synAppExpr1)
+            (join pad (Point 5 5))
+            syn
+        , join pad (Point 5 5)
           $ selLayout lctx
               (SelAppExpr2, view synAppExpr2)
-              (outline dark2 . join pad (5, 5))
+              (outline dark2 . join pad (Point 5 5))
               syn
         ] & horizontalCenter
 
@@ -708,7 +727,7 @@ instance n ~ Int => SyntaxLayout n ActiveZone (Extents n) (SYN (TOP n)) where
      . background dark1
      . center viewport
      . sel (lctx & lctxSelected &&~ synSelectionSelf (syn ^. synExpr))
-     . join pad (5, 5)
+     . join pad (Point 5 5)
      $ layout lctx (syn ^. synExpr)
 
 instance n ~ Int => SyntaxReact n ActiveZone (SYN (TOP n)) where
@@ -727,7 +746,7 @@ instance n ~ Int => SyntaxReact n ActiveZone (SYN (TOP n)) where
       handlePointerMotion = do
         case inputEvent of
           PointerMotion x y
-            -> synPointer .= (x, y)
+            -> synPointer .= Point x y
           _ -> throwError ()
       handleButtonPress = do
         case inputEvent of
@@ -833,7 +852,7 @@ instance n ~ Int => SyntaxBlank (SYN (TOP n)) where
     expr <- synImportExpr <$> case M.P.exprFromText et of
       Left  _ -> return $ M.Const M.Star
       Right e -> M.I.load e
-    return $ SynTop (SynSolid expr) (0, 0) False [] []
+    return $ SynTop (SynSolid expr) (pure 0) False [] []
 
 
 ---  helpers  ---

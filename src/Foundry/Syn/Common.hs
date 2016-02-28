@@ -79,9 +79,8 @@ activate f o = getLast . foldMap (Last . check) . getCollage
     check :: Element n (Draw ActiveZone) -> Maybe r
     check (Element o' e d) = do
       DrawEmbed (ActiveZone p) <- Just d
-      guard
-        $ uncurry (&&)
-        $ biliftA3 within within o o' e
+      let Point okX okY = Point within within <*> o <*> o' <*> e
+      guard (okX && okY)
       Just (f o' e p)
 
 hover
