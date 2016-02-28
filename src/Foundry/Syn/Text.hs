@@ -10,7 +10,6 @@ import Data.Function
 import Data.Monoid
 
 import Control.Monad.State
-import Control.Monad.Except
 import Control.Lens
 import qualified Graphics.UI.Gtk as Gtk
 
@@ -59,7 +58,6 @@ instance UndoEq (SYN TEXT) where
     | otherwise = on (==) (view synTextContent) syn1 syn2
 
 instance n ~ Int => SyntaxLayout n ActiveZone LayoutCtx (SYN TEXT) where
-
   layout lctx syn
     | lctx ^. lctxSelected, syn ^. synTextEditMode =
         let
@@ -70,23 +68,10 @@ instance n ~ Int => SyntaxLayout n ActiveZone LayoutCtx (SYN TEXT) where
     | otherwise = text (syn ^. synTextContent)
 
 instance n ~ Int => SyntaxReact n ActiveZone (SYN TEXT) where
-
-  react asyncReact _oldLayout inputEvent = do
-    asum handlers
-    modify normalizeSynText
-    where
-      handlers :: [StateT (SYN TEXT) (ExceptT () IO) ()]
-      handlers =
-        [ handle_i
-        , handleEscape
-        , handleEnter
-        , handleBackspace
-        , handleDelete
-        , handleArrowLeft
-        , handleArrowRight
-        , handleControl_v
-        , handleLetter
-        ]
+  react = do
+    asyncReact <- view rctxAsyncReact
+    inputEvent <- view rctxInputEvent
+    let
       handle_i = do
         guard =<< uses synTextEditMode not
         case inputEvent of
@@ -149,3 +134,14 @@ instance n ~ Int => SyntaxReact n ActiveZone (SYN TEXT) where
             -> modify (insertSynText (Text.singleton c))
             >> synTextPosition %= succ
           _ -> mzero
+    asum
+      [ handle_i
+      , handleEscape
+      , handleEnter
+      , handleBackspace
+      , handleDelete
+      , handleArrowLeft
+      , handleArrowRight
+      , handleControl_v
+      , handleLetter ]
+    modify normalizeSynText

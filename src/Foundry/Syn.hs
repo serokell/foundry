@@ -213,15 +213,11 @@ instance n ~ Int => SyntaxLayout n ActiveZone LayoutCtx (SYN ARG) where
   layout lctx (SynArg t) = layout lctx t
 
 instance n ~ Int => SyntaxReact n ActiveZone (SYN ARG) where
-  react asyncReact oldLayout inputEvent = asum handlers
+  react = asum [handleRedirect, handle_x]
     where
-      handlers =
-        [ handleRedirect
-        , handle_x
-        ]
-      handleRedirect = zoom _SynArg $ do
-        react (asyncReact . over _SynArg) oldLayout inputEvent
+      handleRedirect = reactRedirect _SynArg
       handle_x = do
+        inputEvent <- view rctxInputEvent
         guard $ keyCodeLetter KeyCode.Delete 'x' inputEvent
         _SynArg .= mempty
 
@@ -236,7 +232,6 @@ instance UndoEq (SYN LAM) where
     && on undoEq (view synLamExpr2) s1 s2
 
 instance n ~ Int => SyntaxLayout n ActiveZone LayoutCtx (SYN LAM) where
-
   layout lctx syn =
     let
       maxWidth = (max `on` view pointX . getExtents) header body
@@ -264,16 +259,9 @@ instance n ~ Int => SyntaxLayout n ActiveZone LayoutCtx (SYN LAM) where
 
 instance n ~ Int => SyntaxReact n ActiveZone (SYN LAM) where
 
-  react asyncReact oldLayout inputEvent = asum handlers
-    where
-      handlers :: [StateT (SYN LAM) (ExceptT () IO) ()]
-      handlers =
-        [ handleSelRedirect
-        , handleArrowLeft
-        , handleArrowRight
-        , handleArrowUp
-        , handleArrowDown
-        ]
+  react = do
+    inputEvent <- view rctxInputEvent
+    let
       handleArrowUp = do
         guard $ keyCodeLetter KeyCode.ArrowUp 'k' inputEvent
         guard =<< gets (isJust . synSelection)
@@ -296,19 +284,18 @@ instance n ~ Int => SyntaxReact n ActiveZone (SYN LAM) where
           Just SelLamExpr1 -> synLamSel . _Just .= SelLamExpr2
           _ -> mzero
       handleSelRedirect = do
-        let
-          delegate
-            :: forall syn
-             . SyntaxReact n ActiveZone syn
-            => Lens' (SYN LAM) syn -> StateT (SYN LAM) (ExceptT () IO) ()
-          delegate p = zoom p $ do
-            react (asyncReact . over p) oldLayout inputEvent
         selection <- gets synSelection
         case selection of
           Nothing          -> throwError ()
-          Just SelLamArg   -> delegate synLamArg
-          Just SelLamExpr1 -> delegate synLamExpr1
-          Just SelLamExpr2 -> delegate synLamExpr2
+          Just SelLamArg   -> reactRedirect synLamArg
+          Just SelLamExpr1 -> reactRedirect synLamExpr1
+          Just SelLamExpr2 -> reactRedirect synLamExpr2
+    asum
+      [ handleSelRedirect
+      , handleArrowLeft
+      , handleArrowRight
+      , handleArrowUp
+      , handleArrowDown ]
 
 instance SyntaxBlank (SYN LAM) where
   blank = return SynLam
@@ -357,16 +344,9 @@ instance n ~ Int => SyntaxLayout n ActiveZone LayoutCtx (SYN PI) where
 
 instance n ~ Int => SyntaxReact n ActiveZone (SYN PI) where
 
-  react asyncReact oldLayout inputEvent = asum handlers
-    where
-      handlers :: [StateT (SYN PI) (ExceptT () IO) ()]
-      handlers =
-        [ handleSelRedirect
-        , handleArrowLeft
-        , handleArrowRight
-        , handleArrowUp
-        , handleArrowDown
-        ]
+  react = do
+    inputEvent <- view rctxInputEvent
+    let
       handleArrowUp = do
         guard $ keyCodeLetter KeyCode.ArrowUp 'k' inputEvent
         guard =<< gets (isJust . synSelection)
@@ -389,19 +369,18 @@ instance n ~ Int => SyntaxReact n ActiveZone (SYN PI) where
           Just SelPiExpr1 -> synPiSel . _Just .= SelPiExpr2
           _ -> mzero
       handleSelRedirect = do
-        let
-          delegate
-            :: forall syn
-             . SyntaxReact n ActiveZone syn
-            => Lens' (SYN PI) syn -> StateT (SYN PI) (ExceptT () IO) ()
-          delegate p = zoom p $ do
-            react (asyncReact . over p) oldLayout inputEvent
         selection <- gets synSelection
         case selection of
           Nothing         -> throwError ()
-          Just SelPiArg   -> delegate synPiArg
-          Just SelPiExpr1 -> delegate synPiExpr1
-          Just SelPiExpr2 -> delegate synPiExpr2
+          Just SelPiArg   -> reactRedirect synPiArg
+          Just SelPiExpr1 -> reactRedirect synPiExpr1
+          Just SelPiExpr2 -> reactRedirect synPiExpr2
+    asum
+      [ handleSelRedirect
+      , handleArrowLeft
+      , handleArrowRight
+      , handleArrowUp
+      , handleArrowDown ]
 
 instance SyntaxBlank (SYN PI) where
   blank = return SynPi
@@ -436,16 +415,9 @@ instance n ~ Int => SyntaxLayout n ActiveZone LayoutCtx (SYN APP) where
 
 instance n ~ Int => SyntaxReact n ActiveZone (SYN APP) where
 
-  react asyncReact oldLayout inputEvent = asum handlers
-    where
-      handlers :: [StateT (SYN APP) (ExceptT () IO) ()]
-      handlers =
-        [ handleSelRedirect
-        , handleArrowLeft
-        , handleArrowRight
-        , handleArrowUp
-        , handleArrowDown
-        ]
+  react = do
+    inputEvent <- view rctxInputEvent
+    let
       handleArrowUp = do
         guard $ keyCodeLetter KeyCode.ArrowUp 'k' inputEvent
         guard . isJust =<< gets synSelection
@@ -465,18 +437,17 @@ instance n ~ Int => SyntaxReact n ActiveZone (SYN APP) where
           Just SelAppExpr1 -> synAppSel . _Just .= SelAppExpr2
           _ -> mzero
       handleSelRedirect = do
-        let
-          delegate
-            :: forall syn
-             . SyntaxReact n ActiveZone syn
-            => Lens' (SYN APP) syn -> StateT (SYN APP) (ExceptT () IO) ()
-          delegate p = zoom p $ do
-            react (asyncReact . over p) oldLayout inputEvent
         selection <- gets synSelection
         case selection of
           Nothing          -> throwError ()
-          Just SelAppExpr1 -> delegate synAppExpr1
-          Just SelAppExpr2 -> delegate synAppExpr2
+          Just SelAppExpr1 -> reactRedirect synAppExpr1
+          Just SelAppExpr2 -> reactRedirect synAppExpr2
+    asum
+      [ handleSelRedirect
+      , handleArrowLeft
+      , handleArrowRight
+      , handleArrowUp
+      , handleArrowDown ]
 
 instance SyntaxBlank (SYN APP) where
   blank = return SynApp
@@ -535,14 +506,9 @@ instance n ~ Int => SyntaxLayout n ActiveZone LayoutCtx (SYN VAR) where
 
 instance n ~ Int => SyntaxReact n ActiveZone (SYN VAR) where
 
-  react asyncReact oldLayout inputEvent = asum handlers
-    where
-      handlers :: [StateT (SYN VAR) (ExceptT () IO) ()]
-      handlers =
-        [ handleShiftUp
-        , handleShiftDown
-        , handleRedirect
-        ]
+  react = do
+    inputEvent <- view rctxInputEvent
+    let
       handleShiftUp =
         case inputEvent of
           KeyPress [Shift] keyCode | keyLetter 'U' keyCode
@@ -553,8 +519,11 @@ instance n ~ Int => SyntaxReact n ActiveZone (SYN VAR) where
           KeyPress [Shift] keyCode | keyLetter 'D' keyCode
             -> synVarIndex %= max 0 . subtract 1
           _ -> throwError ()
-      handleRedirect = zoom synVarName $ do
-        react (asyncReact . over synVarName) oldLayout inputEvent
+      handleRedirect = reactRedirect synVarName
+    asum
+      [ handleShiftUp
+      , handleShiftDown
+      , handleRedirect ]
 
 instance SyntaxBlank (SYN VAR) where
   blank = return $ SynVar mempty 0
@@ -585,7 +554,6 @@ instance UndoEq (SYN EXPR) where
   undoEq  _                 _                = False
 
 instance n ~ Int => SyntaxLayout n ActiveZone LayoutCtx (SYN EXPR) where
-
   layout lctx = \case
     SynExprLam   a -> layout lctx a
     SynExprPi    a -> layout lctx a
@@ -596,37 +564,17 @@ instance n ~ Int => SyntaxLayout n ActiveZone LayoutCtx (SYN EXPR) where
 
 instance n ~ Int => SyntaxReact n ActiveZone (SYN EXPR) where
 
-  react asyncReact oldLayout inputEvent =
-    let
-      delegate
-        :: SyntaxReact n ActiveZone syn
-        => Prism' (SYN EXPR) syn -> StateT (SYN EXPR) (ExceptT () IO) ()
-      delegate p =
-        let asyncReact' = asyncReact . over p
-        in do
-          guard =<< gets (notNullOf p)
-          zoom p $ react asyncReact' oldLayout inputEvent
-    in asum
-     [ delegate _SynExprLam
-     , delegate _SynExprPi
-     , delegate _SynExprApp
-     , delegate _SynExprConst
-     , delegate _SynExprVar
-     , delegate _SynExprEmbed
-     ]
+  react = asum
+    [ reactRedirect _SynExprLam
+    , reactRedirect _SynExprPi
+    , reactRedirect _SynExprApp
+    , reactRedirect _SynExprConst
+    , reactRedirect _SynExprVar
+    , reactRedirect _SynExprEmbed ]
 
-  subreact _asyncReact _oldLayout inputEvent = asum handlers
-    where
-      handlers :: [ExceptT () IO (SYN EXPR)]
-      handlers =
-        [ handleShift_L
-        , handleShift_P
-        , handleShift_A
-        , handleShift_S
-        , handleShift_B
-        , handle_i
-        -- , handleShift_E
-        ]
+  subreact = do
+    inputEvent <- view rctxInputEvent
+    let
       handleShift_L = do
         case inputEvent of
           KeyPress [Shift] keyCode | keyLetter 'L' keyCode
@@ -657,6 +605,14 @@ instance n ~ Int => SyntaxReact n ActiveZone (SYN EXPR) where
           KeyPress [] keyCode | keyLetter 'i' keyCode
             -> SynExprVar <$> liftIO blank
           _ -> throwError ()
+    asum
+      [ handleShift_L
+      , handleShift_P
+      , handleShift_A
+      , handleShift_S
+      , handleShift_B
+      , handle_i
+      ] -- , handleShift_E
 
 
 ---       Hole      ---
@@ -681,30 +637,22 @@ instance
   , SyntaxReact n ActiveZone (SYN sub)
   ) => SyntaxReact n ActiveZone (SYN (HOLE sub)) where
 
-  react asyncReact oldLayout inputEvent = asum handlers
-    where
-      handlers :: [StateT (SYN (HOLE sub)) (ExceptT () IO) ()]
-      handlers =
-        [ handleRedirectHollow
-        , handleRedirectSolid
-        , handleDelete
-        ]
+  react = do
+    inputEvent <- view rctxInputEvent
+    let
       handleRedirectHollow = do
         synh <- get
-        let asyncReact' = asyncReact . over _SynSolid
         case synh of
-          SynHollow -> do
-            syn <- lift $ subreact asyncReact' oldLayout inputEvent
-            put (SynSolid syn)
+          SynHollow -> subreactRedirect _SynSolid
           _ -> throwError ()
-      handleRedirectSolid = do
-        guard =<< gets (notNullOf _SynSolid)
-        zoom _SynSolid $ do
-          let asyncReact' = asyncReact . over _SynSolid
-          react asyncReact' oldLayout inputEvent
+      handleRedirectSolid = reactRedirect _SynSolid
       handleDelete = do
         guard $ keyCodeLetter KeyCode.Delete 'x' inputEvent
         put SynHollow
+    asum
+      [ handleRedirectHollow
+      , handleRedirectSolid
+      , handleDelete ]
 
 instance SyntaxBlank (SYN (HOLE sub)) where
   blank = return SynHollow
@@ -714,7 +662,6 @@ instance SyntaxBlank (SYN (HOLE sub)) where
 ---    instances    ---
 
 instance n ~ Int => SyntaxLayout n ActiveZone (Extents n) (SYN (TOP n)) where
-
   layout viewport syn =
     let
       hoverBar = do
@@ -732,38 +679,37 @@ instance n ~ Int => SyntaxLayout n ActiveZone (Extents n) (SYN (TOP n)) where
 
 instance n ~ Int => SyntaxReact n ActiveZone (SYN (TOP n)) where
 
-  react asyncReact oldLayout inputEvent = asum handlers
+  react = do
+    asum
+      [ handlePointerMotion
+      , handleButtonPress
+      , handleCtrl_h
+      , handleRedirectExpr
+      , handle_u
+      , handleCtrl_r ]
     where
-      handlers :: [StateT (SYN (TOP n)) (ExceptT () IO) ()]
-      handlers =
-        [ handlePointerMotion
-        , handleButtonPress
-        , handleCtrl_h
-        , handleRedirectExpr
-        , handle_u
-        , handleCtrl_r
-        ]
       handlePointerMotion = do
-        case inputEvent of
+        view rctxInputEvent >>= \case
           PointerMotion x y
             -> synPointer .= Point x y
           _ -> throwError ()
       handleButtonPress = do
-        case inputEvent of
+        view rctxInputEvent >>= \case
           ButtonPress -> do
             pointer <- use synPointer
-            let mp = activate (\_ _ p -> p) pointer oldLayout
+            lastLayout <- view rctxLastLayout
+            let mp = activate (\_ _ p -> p) pointer lastLayout
             case mp of
               Nothing -> throwError ()
               Just p -> zoom synExpr $ modify (updateExprPath p)
           _ -> throwError ()
       handleCtrl_h = do
-        case inputEvent of
+        view rctxInputEvent >>= \case
           KeyPress [Control] keyCode | keyLetter 'h' keyCode
             -> synHoverBarEnabled %= not
           _ -> throwError ()
       handle_u = do
-        case inputEvent of
+        view rctxInputEvent >>= \case
           KeyPress [] keyCode | keyLetter 'u' keyCode -> do
             syn <- get
             case syn ^. synUndo of
@@ -774,7 +720,7 @@ instance n ~ Int => SyntaxReact n ActiveZone (SYN (TOP n)) where
                 synExpr .= u
           _ -> throwError ()
       handleCtrl_r = do
-        case inputEvent of
+        view rctxInputEvent >>= \case
           KeyPress [Control] keyCode | keyLetter 'r' keyCode -> do
             syn <- get
             case syn ^. synRedo of
@@ -786,11 +732,7 @@ instance n ~ Int => SyntaxReact n ActiveZone (SYN (TOP n)) where
           _ -> throwError ()
       handleRedirectExpr = do
         expr <- use synExpr
-        zoom synExpr $ do
-          react
-            (asyncReact . over synExpr)
-            oldLayout
-            inputEvent
+        reactRedirect synExpr
         expr' <- use synExpr
         unless (undoEq expr expr') $ do
           synUndo %= (expr:)

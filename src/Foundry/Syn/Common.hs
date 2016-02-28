@@ -5,7 +5,6 @@ module Foundry.Syn.Common where
 
 import Data.Text (Text)
 import Data.Sequence (Seq)
-import Data.Biapplicative
 import Data.Monoid
 import Data.Typeable
 
