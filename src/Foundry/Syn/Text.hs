@@ -68,80 +68,65 @@ instance n ~ Int => SyntaxLayout n ActiveZone LayoutCtx (SYN TEXT) where
     | otherwise = text (syn ^. synTextContent)
 
 instance n ~ Int => SyntaxReact n ActiveZone (SYN TEXT) where
-  react = do
-    asyncReact <- view rctxAsyncReact
-    inputEvent <- view rctxInputEvent
-    let
+  react = do asum handlers; modify normalizeSynText
+    where
+      handlers =
+        [ handle_i
+        , handleEscape
+        , handleEnter
+        , handleBackspace
+        , handleDelete
+        , handleArrowLeft
+        , handleArrowRight
+        , handleControl_v
+        , handleLetter ]
       handle_i = do
-        guard =<< uses synTextEditMode not
-        case inputEvent of
-          KeyPress [] keyCode | keyLetter 'i' keyCode
-            -> synTextEditMode .= True
-          _ -> mzero
+        False <- use synTextEditMode
+        KeyPress [] keyCode <- view rctxInputEvent
+        guard (keyLetter 'i' keyCode)
+        synTextEditMode .= True
       handleEscape = do
-        case inputEvent of
-          KeyPress [] KeyCode.Escape
-            -> synTextEditMode .= False
-          _ -> mzero
+        KeyPress [] KeyCode.Escape <- view rctxInputEvent
+        synTextEditMode .= False
       handleEnter = do
-        case inputEvent of
-          KeyPress [] KeyCode.Enter
-            -> synTextEditMode .= False
-          _ -> mzero
+        KeyPress [] KeyCode.Enter <- view rctxInputEvent
+        synTextEditMode .= False
       handleBackspace = do
-        guard =<< use synTextEditMode
-        case inputEvent of
-          KeyPress [] KeyCode.Backspace -> return ()
-          _ -> mzero
-        guard =<< uses synTextPosition (>0)
+        True <- use synTextEditMode
+        KeyPress [] KeyCode.Backspace <- view rctxInputEvent
+        True <- uses synTextPosition (>0)
         synTextPosition -= 1
         (before, after) <- gets splitSynText
         synTextContent .= before <> Text.drop 1 after
       handleDelete = do
-        guard =<< use synTextEditMode
-        case inputEvent of
-          KeyPress [] KeyCode.Delete -> return ()
-          _ -> mzero
+        True <- use synTextEditMode
+        KeyPress [] KeyCode.Delete <- view rctxInputEvent
         (before, after) <- gets splitSynText
         synTextContent .= before <> Text.drop 1 after
       handleArrowLeft = do
-        guard =<< use synTextEditMode
-        case inputEvent of
-          KeyPress [] KeyCode.ArrowLeft -> return ()
-          _ -> mzero
+        True <- use synTextEditMode
+        KeyPress [] KeyCode.ArrowLeft <- view rctxInputEvent
         synTextPosition -= 1
       handleArrowRight = do
-        guard =<< use synTextEditMode
-        case inputEvent of
-          KeyPress [] KeyCode.ArrowRight -> return ()
-          _ -> mzero
+        True <- use synTextEditMode
+        KeyPress [] KeyCode.ArrowRight <- view rctxInputEvent
         synTextPosition += 1
       handleControl_v = do
-        guard =<< use synTextEditMode
-        case inputEvent of
-          KeyPress [Control] keyCode | keyLetter 'v' keyCode -> do
-            clipboard <- liftIO $ Gtk.clipboardGet Gtk.selectionClipboard
-            liftIO $ Gtk.clipboardRequestText clipboard $ \case
-              Nothing -> return ()
-              Just str -> asyncReact
+        True <- use synTextEditMode
+        KeyPress [Control] keyCode <- view rctxInputEvent
+        guard (keyLetter 'v' keyCode)
+        asyncReact <- view rctxAsyncReact
+        liftIO $ do
+          clipboard <- Gtk.clipboardGet Gtk.selectionClipboard
+          Gtk.clipboardRequestText clipboard $ \case
+            Nothing -> return ()
+            Just str -> do
+              asyncReact
                 $ over synTextPosition (+length str)
                 . insertSynText (Text.pack str)
-          _ -> mzero
       handleLetter = do
-        guard =<< use synTextEditMode
-        case inputEvent of
-          KeyPress _ keyCode | Just c <- keyChar keyCode
-            -> modify (insertSynText (Text.singleton c))
-            >> synTextPosition %= succ
-          _ -> mzero
-    asum
-      [ handle_i
-      , handleEscape
-      , handleEnter
-      , handleBackspace
-      , handleDelete
-      , handleArrowLeft
-      , handleArrowRight
-      , handleControl_v
-      , handleLetter ]
-    modify normalizeSynText
+        True <- use synTextEditMode
+        KeyPress _ keyCode <- view rctxInputEvent
+        Just c <- pure (keyChar keyCode)
+        modify (insertSynText (Text.singleton c))
+        synTextPosition %= succ
