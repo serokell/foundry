@@ -1,5 +1,6 @@
 {-# OPTIONS -fno-warn-unticked-promoted-constructors #-}
 {-# LANGUAGE TemplateHaskell #-}
+{-# LANGUAGE DefaultSignatures #-}
 {-# LANGUAGE FlexibleInstances #-}
 {-# LANGUAGE FlexibleContexts #-}
 module Foundry.Syn where
@@ -36,9 +37,6 @@ data EXPR
 data TOP (n :: *)
 data HOLE sub
 
-data instance SEL (HOLE sub) = SelHole (SEL sub)
-  deriving (Eq, Ord, Show)
-
 data instance SEL LAM = SelLamArg | SelLamExpr1 | SelLamExpr2
   deriving (Eq, Ord, Show)
 
@@ -46,18 +44,6 @@ data instance SEL PI = SelPiArg | SelPiExpr1 | SelPiExpr2
   deriving (Eq, Ord, Show)
 
 data instance SEL APP = SelAppExpr1 | SelAppExpr2
-  deriving (Eq, Ord, Show)
-
-data instance SEL CONST = SelConst { unSelConst :: Void }
-  deriving (Eq, Ord, Show)
-
-data instance SEL EMBED = SelEmbed { unSelEmbed :: Void }
-  deriving (Eq, Ord, Show)
-
-data instance SEL ARG = SelArg { unSelArg :: Void }
-  deriving (Eq, Ord, Show)
-
-data instance SEL VAR = SelVar { unSelVar :: Void }
   deriving (Eq, Ord, Show)
 
 declarePrisms
@@ -101,12 +87,6 @@ data instance SYN VAR = SynVar
   { _synVarName  :: SYN TEXT
   , _synVarIndex :: Int
   } deriving (Eq, Ord, Show)
-
-data instance SEL EXPR
-  = SelExprLam (SEL LAM)
-  | SelExprPi  (SEL PI)
-  | SelExprApp (SEL APP)
-  deriving (Eq, Ord, Show)
 
 data instance SYN EXPR
   = SynExprLam   (SYN LAM)
@@ -168,40 +148,52 @@ synImportExpr =
     M.App f a -> SynExprApp $ synImportApp f a
     M.Embed e -> M.absurd e
 
-class SynSelection a where
+class SynSelectionSelf a where
+  synSelectionSelf :: SYN a -> Bool
+  default synSelectionSelf :: SynSelection a => SYN a -> Bool
+  synSelectionSelf = isNothing . synSelection
+
+class SynSelectionSelf a => SynSelection a where
   synSelection :: SYN a -> Maybe (SEL a)
   synSelection = const Nothing
 
-synSelectionSelf :: SynSelection a => SYN a -> Bool
-synSelectionSelf = isNothing . synSelection
-
+instance SynSelectionSelf LAM
 instance SynSelection LAM where
   synSelection = view synLamSel
 
+instance SynSelectionSelf PI
 instance SynSelection PI where
   synSelection = view synPiSel
 
+instance SynSelectionSelf APP
 instance SynSelection APP where
   synSelection = view synAppSel
 
-instance SynSelection ARG
-instance SynSelection CONST
-instance SynSelection VAR
-instance SynSelection EMBED
+instance SynSelectionSelf ARG where
+  synSelectionSelf _ = True
 
-instance SynSelection EXPR where
-  synSelection = \case
-    SynExprLam   a -> SelExprLam <$> synSelection a
-    SynExprPi    a -> SelExprPi  <$> synSelection a
-    SynExprApp   a -> SelExprApp <$> synSelection a
-    SynExprConst a -> absurd . unSelConst <$> synSelection a
-    SynExprVar   a -> absurd . unSelVar   <$> synSelection a
-    SynExprEmbed a -> absurd . unSelEmbed <$> synSelection a
+instance SynSelectionSelf CONST where
+  synSelectionSelf _ = True
 
-instance SynSelection sub => SynSelection (HOLE sub) where
-  synSelection = \case
-    SynHollow -> Nothing
-    SynSolid syn -> SelHole <$> synSelection syn
+instance SynSelectionSelf VAR where
+  synSelectionSelf _ = True
+
+instance SynSelectionSelf EMBED where
+  synSelectionSelf _ = True
+
+instance SynSelectionSelf EXPR where
+  synSelectionSelf = \case
+    SynExprLam   a -> synSelectionSelf a
+    SynExprPi    a -> synSelectionSelf a
+    SynExprApp   a -> synSelectionSelf a
+    SynExprConst a -> synSelectionSelf a
+    SynExprVar   a -> synSelectionSelf a
+    SynExprEmbed a -> synSelectionSelf a
+
+instance SynSelectionSelf sub => SynSelectionSelf (HOLE sub) where
+  synSelectionSelf = \case
+    SynHollow -> True
+    SynSolid syn -> synSelectionSelf syn
 
 ---       Arg       ---
 ---    instances    ---
@@ -693,15 +685,11 @@ instance n ~ Int => SyntaxReact n ActiveZone (SYN (TOP n)) where
           synRedo .= []
 
 updateExprPath :: Path -> SYN (HOLE EXPR) -> SYN (HOLE EXPR)
-updateExprPath path = \case
-  SynHollow -> SynHollow
-  SynSolid e -> SynSolid $ case e of
-    SynExprLam   a -> SynExprLam (updateLamPath path a)
-    SynExprPi    a -> SynExprPi  (updatePiPath  path a)
-    SynExprApp   a -> SynExprApp (updateAppPath path a)
-    SynExprConst _ -> e
-    SynExprVar   _ -> e
-    SynExprEmbed _ -> e
+updateExprPath path
+  = over _SynSolid
+  $ over _SynExprLam (updateLamPath path)
+  . over _SynExprPi  (updatePiPath  path)
+  . over _SynExprApp (updateAppPath path)
 
 updateLamPath :: Path -> SYN LAM -> SYN LAM
 updateLamPath path e =
