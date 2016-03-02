@@ -9,6 +9,7 @@ import Data.Foldable
 import Data.Function
 import Data.Monoid
 
+import Control.Monad.Reader
 import Control.Monad.State
 import Control.Lens
 import qualified Graphics.UI.Gtk as Gtk
@@ -58,14 +59,16 @@ instance UndoEq (SYN TEXT) where
     | otherwise = on (==) (view synTextContent) syn1 syn2
 
 instance n ~ Int => SyntaxLayout n ActiveZone LayoutCtx (SYN TEXT) where
-  layout lctx syn
-    | lctx ^. lctxSelected, syn ^. synTextEditMode =
-        let
-          (t1, t2) = Text.splitAt
-            (syn ^. synTextPosition)
-            (syn ^. synTextContent)
-        in horizontal [text t1, punct "|", text t2]
-    | otherwise = text (syn ^. synTextContent)
+  layout syn = do
+    lctx <- ask
+    let
+      (t1, t2) = Text.splitAt
+        (syn ^. synTextPosition)
+        (syn ^. synTextContent)
+      layoutActive = horizontal [text t1, punct "|", text t2]
+      layoutInactive = text (syn ^. synTextContent)
+      active = (lctx ^. lctxSelected) && (syn ^. synTextEditMode)
+    return $ if active then layoutActive else layoutInactive
 
 instance n ~ Int => SyntaxReact n ActiveZone (SYN TEXT) where
   react = do asum handlers; modify normalizeSynText

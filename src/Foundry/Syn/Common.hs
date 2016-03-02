@@ -87,8 +87,9 @@ hover
   => Op1 (CollageDraw' n)
   -> Offset n
   -> Op1 (CollageDraw' n)
-hover f o c = c <> maybe mempty id (activate obj o (CB.buildCollage c))
+hover f o c = CB.collageBuilder c' <> maybe mempty id (activate obj o c')
   where
+    c' = CB.buildCollage c
     obj o' e _ = CB.offset o' (f (phantom e))
 
 data LayoutCtx = LayoutCtx

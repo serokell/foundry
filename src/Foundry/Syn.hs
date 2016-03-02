@@ -13,6 +13,7 @@ import Data.Maybe
 import Data.Void
 import Data.Typeable
 
+import Control.Monad.Reader
 import Control.Monad.State
 import Control.Lens
 
@@ -209,7 +210,7 @@ instance UndoEq (SYN ARG) where
   undoEq (SynArg s1) (SynArg s2) = undoEq s1 s2
 
 instance n ~ Int => SyntaxLayout n ActiveZone LayoutCtx (SYN ARG) where
-  layout lctx (SynArg t) = layout lctx t
+  layout (SynArg t) = layout t
 
 instance n ~ Int => SyntaxReact n ActiveZone (SYN ARG) where
   react = asum handlers
@@ -230,7 +231,7 @@ instance UndoEq (SYN LAM) where
     && on undoEq (view synLamExpr2) s1 s2
 
 instance n ~ Int => SyntaxLayout n ActiveZone LayoutCtx (SYN LAM) where
-  layout lctx syn =
+  layout syn = reader $ \lctx ->
     let
       maxWidth = (max `on` view pointX . getExtents) header body
       header =
@@ -310,8 +311,7 @@ instance UndoEq (SYN PI) where
     && on undoEq (view synPiExpr2) s1 s2
 
 instance n ~ Int => SyntaxLayout n ActiveZone LayoutCtx (SYN PI) where
-
-  layout lctx syn =
+  layout syn = reader $ \lctx ->
     let
       maxWidth = (max `on` view pointX . getExtents) header body
       header =
@@ -390,17 +390,17 @@ instance UndoEq (SYN APP) where
     && on undoEq (view synAppExpr2) s1 s2
 
 instance n ~ Int => SyntaxLayout n ActiveZone LayoutCtx (SYN APP) where
-  layout lctx syn =
-        [ selLayout lctx
-            (SelAppExpr1, view synAppExpr1)
-            (join pad (Point 5 5))
-            syn
-        , join pad (Point 5 5)
-          $ selLayout lctx
-              (SelAppExpr2, view synAppExpr2)
-              (outline dark2 . join pad (Point 5 5))
-              syn
-        ] & horizontalCenter
+  layout syn = reader $ \lctx ->
+    [ selLayout lctx
+        (SelAppExpr1, view synAppExpr1)
+        (join pad (Point 5 5))
+        syn
+    , join pad (Point 5 5)
+      $ selLayout lctx
+          (SelAppExpr2, view synAppExpr2)
+          (outline dark2 . join pad (Point 5 5))
+          syn
+    ] & horizontalCenter
 
 instance n ~ Int => SyntaxReact n ActiveZone (SYN APP) where
   react = asum handlers
@@ -451,7 +451,7 @@ instance UndoEq (SYN CONST) where
 
 instance n ~ Int => SyntaxLayout n ActiveZone LayoutCtx (SYN CONST) where
 
-  layout _ = \case
+  layout = pure . \case
     SynConstStar -> punct "★"
     SynConstBox  -> punct "□"
 
@@ -466,8 +466,8 @@ instance UndoEq (SYN VAR) where
     && on (==)   (view synVarIndex) s1 s2
 
 instance n ~ Int => SyntaxLayout n ActiveZone LayoutCtx (SYN VAR) where
-  layout lctx v =
-    [ layout lctx (v ^. synVarName)
+  layout v = reader $ \lctx ->
+    [ runReader (layout (v ^. synVarName)) lctx
     , if (v ^. synVarIndex) > 0
       then layoutIndex (v ^. synVarIndex)
       else
@@ -517,7 +517,7 @@ instance UndoEq (SYN EMBED) where
   undoEq  _                     _                    = False
 
 instance n ~ Int => SyntaxLayout n ActiveZone LayoutCtx (SYN EMBED) where
-  layout _ _ = text "Embed"
+  layout _ = pure (text "Embed")
 
 instance n ~ Int => SyntaxReact n ActiveZone (SYN EMBED) where
 
@@ -534,13 +534,13 @@ instance UndoEq (SYN EXPR) where
   undoEq  _                 _                = False
 
 instance n ~ Int => SyntaxLayout n ActiveZone LayoutCtx (SYN EXPR) where
-  layout lctx = \case
-    SynExprLam   a -> layout lctx a
-    SynExprPi    a -> layout lctx a
-    SynExprApp   a -> layout lctx a
-    SynExprConst a -> layout lctx a
-    SynExprVar   a -> layout lctx a
-    SynExprEmbed a -> layout lctx a
+  layout = \case
+    SynExprLam   a -> layout a
+    SynExprPi    a -> layout a
+    SynExprApp   a -> layout a
+    SynExprConst a -> layout a
+    SynExprVar   a -> layout a
+    SynExprEmbed a -> layout a
 
 instance n ~ Int => SyntaxReact n ActiveZone (SYN EXPR) where
 
@@ -601,9 +601,9 @@ instance
   , SyntaxLayout n ActiveZone lctx (SYN sub)
   ) => SyntaxLayout n ActiveZone lctx (SYN (HOLE sub)) where
 
-  layout lctx = \case
-    SynHollow    -> punct "_"
-    SynSolid syn -> layout lctx syn
+  layout = \case
+    SynHollow    -> return (punct "_")
+    SynSolid syn -> layout syn
 
 instance
   ( n ~ Int
@@ -627,11 +627,11 @@ instance SyntaxBlank (SYN (HOLE sub)) where
   blank = return SynHollow
 
 
----       Syn       ---
+---       Top       ---
 ---    instances    ---
 
-instance n ~ Int => SyntaxLayout n ActiveZone (Extents n) (SYN (TOP n)) where
-  layout viewport syn =
+instance n ~ Int => SyntaxLayout n ActiveZone (Viewport n) (SYN (TOP n)) where
+  layout syn = reader $ \viewport ->
     let
       hoverBar = do
         guard $ syn ^. synHoverBarEnabled
@@ -641,13 +641,12 @@ instance n ~ Int => SyntaxLayout n ActiveZone (Extents n) (SYN (TOP n)) where
     in flip mappend (vertical bars)
      . hover (outline light1) (syn ^. synPointer)
      . background dark1
-     . center viewport
+     . center (viewport ^. _Viewport)
      . sel (lctx & lctxSelected &&~ synSelectionSelf (syn ^. synExpr))
      . join pad (Point 5 5)
-     $ layout lctx (syn ^. synExpr)
+     $ runReader (layout (syn ^. synExpr)) lctx
 
 instance n ~ Int => SyntaxReact n ActiveZone (SYN (TOP n)) where
-
   react = asum handlers
     where
       handlers =
@@ -765,4 +764,4 @@ selLayout lctx (sel', synSub) hook syn =
       & lctxPath %~ (`snoc` SomeSel sel')
   in sel (lctx' & lctxSelected &&~ synSelectionSelf (synSub syn))
    $ hook
-   $ layout lctx' (synSub syn)
+   $ runReader (layout (synSub syn)) lctx'
