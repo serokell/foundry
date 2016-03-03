@@ -19,46 +19,43 @@ import Source.Syntax
 import Source.Input
 import qualified Source.Input.KeyCode as KeyCode
 import Foundry.Syn.Common
-import Foundry.Syn.TH
 
-data TEXT
-
-data instance SYN TEXT = SynText
+data SynText = SynText
   { _synTextContent  :: Text
   , _synTextPosition :: Int
   , _synTextEditMode :: Bool
   } deriving (Eq, Ord, Show)
 
-makeLensesDataInst ''SYN ''TEXT
+makeLenses ''SynText
 
-instance Monoid (SYN TEXT) where
+instance Monoid SynText where
   mempty = SynText "" 0 True
   mappend syn1 syn2 = syn1
     & synTextContent  %~ mappend (syn2 ^. synTextContent)
     & synTextPosition %~ max     (syn2 ^. synTextPosition)
     & synTextEditMode %~ (&&)    (syn2 ^. synTextEditMode)
 
-splitSynText :: SYN TEXT -> (Text, Text)
+splitSynText :: SynText -> (Text, Text)
 splitSynText syn = Text.splitAt (syn ^. synTextPosition) (syn ^. synTextContent)
 
-insertSynText :: Text -> SYN TEXT -> SYN TEXT
+insertSynText :: Text -> SynText -> SynText
 insertSynText t syn =
   let (before, after) = splitSynText syn
   in syn & synTextContent .~ before <> t <> after
 
-normalizeSynText :: SYN TEXT -> SYN TEXT
+normalizeSynText :: SynText -> SynText
 normalizeSynText syn = syn & synTextPosition %~ normalizePosition
   where
     normalizePosition :: Int -> Int
     normalizePosition = max 0 . min (views synTextContent Text.length syn)
 
-instance UndoEq (SYN TEXT) where
+instance UndoEq SynText where
   undoEq syn1 syn2
     | view synTextEditMode syn1 = True
     | view synTextEditMode syn2 = False
     | otherwise = on (==) (view synTextContent) syn1 syn2
 
-instance n ~ Int => SyntaxLayout n ActiveZone LayoutCtx (SYN TEXT) where
+instance n ~ Int => SyntaxLayout n ActiveZone LayoutCtx SynText where
   layout syn = do
     lctx <- ask
     let
@@ -70,7 +67,7 @@ instance n ~ Int => SyntaxLayout n ActiveZone LayoutCtx (SYN TEXT) where
       isActive = (lctx ^. lctxSelected) && (syn ^. synTextEditMode)
     return $ if isActive then layoutActive else layoutInactive
 
-instance n ~ Int => SyntaxReact n ActiveZone (SYN TEXT) where
+instance n ~ Int => SyntaxReact n ActiveZone SynText where
   react = do asum handlers; modify normalizeSynText
     where
       handlers =

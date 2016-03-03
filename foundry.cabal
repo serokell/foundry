@@ -7,8 +7,8 @@ executable foundry
   main-is:             Main.hs
   other-modules:       Foundry.Syn
                        Foundry.Syn.Text
+                       Foundry.Syn.Hole
                        Foundry.Syn.Common
-                       Foundry.Syn.TH
 
   build-depends:       base
                ,       containers

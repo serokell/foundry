@@ -1,10 +1,9 @@
 module Main where
 
 import Source
-import Foundry.Syn (TOP)
-import Foundry.Syn.Common (SYN)
+import Foundry.Syn (SynTop)
 
 main :: IO ()
 main = do
-  _ :: SYN (TOP Int) <- runGUI
+  _ :: SynTop Int <- runGUI
   return ()

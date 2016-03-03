@@ -6,7 +6,7 @@ module Foundry.Syn.Common where
 import Data.Text (Text)
 import Data.Sequence (Seq)
 import Data.Monoid
-import Data.Typeable
+import Data.Maybe
 
 import Control.Lens
 import Control.Monad
@@ -15,6 +15,7 @@ import qualified Source.Collage.Builder as CB
 import Source.Draw
 import Source.Style
 import Source.Input
+import Source.Syntax
 
 dark1, dark2, dark3, light1 :: Color
 dark1  = RGB 0.20 0.20 0.20
@@ -39,19 +40,7 @@ keyCodeLetter kc c = \case
   KeyPress [] keyCode -> keyCode == kc || keyLetter c keyCode
   _ -> False
 
-data family SEL :: label -> *
-data family SYN :: label -> *
-
-data SomeSel where
-  SomeSel
-    :: ( Typeable (SEL label)
-       , Show (SEL label)
-       ) => SEL label -> SomeSel
-
-instance Show SomeSel where
-  showsPrec n (SomeSel sel) = showsPrec n sel
-
-type Path = Seq SomeSel
+type Path = Seq Int
 
 newtype ActiveZone = ActiveZone Path
 
@@ -106,5 +95,15 @@ sel lctx
     then outline dark2 . background dark3
     else id
 
+guardInputEvent :: (InputEvent n -> Bool) -> React n la syn
+guardInputEvent = guard <=< views rctxInputEvent
+
 class UndoEq a where
   undoEq :: a -> a -> Bool
+
+class SynSelection a sel | a -> sel where
+  synSelection :: a -> Maybe sel
+  synSelection = const Nothing
+
+synSelectionSelf :: SynSelection a sel => a -> Bool
+synSelectionSelf = isNothing . synSelection
