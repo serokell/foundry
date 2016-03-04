@@ -1,6 +1,3 @@
-{-# LANGUAGE TemplateHaskell #-}
-{-# LANGUAGE FlexibleInstances #-}
-{-# LANGUAGE FlexibleContexts #-}
 module Foundry.Syn.Text where
 
 import Data.Text (Text)

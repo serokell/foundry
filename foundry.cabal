@@ -9,6 +9,11 @@ executable foundry
                        Foundry.Syn.Text
                        Foundry.Syn.Hole
                        Foundry.Syn.Sum
+                       Foundry.Syn.Const
+                       Foundry.Syn.Embed
+                       Foundry.Syn.Arg
+                       Foundry.Syn.Var
+                       Foundry.Syn.Expr
                        Foundry.Syn.Common
 
   build-depends:       base
@@ -42,6 +47,12 @@ executable foundry
                        InstanceSigs
                        EmptyCase
                        FunctionalDependencies
+                       MultiWayIf
+                       ViewPatterns
+                       StandaloneDeriving
+                       TemplateHaskell
+                       FlexibleInstances
+                       FlexibleContexts
 
   ghc-options:         -Wall -threaded -O2
   ghc-prof-options:    -fprof-auto
