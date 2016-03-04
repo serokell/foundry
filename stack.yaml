@@ -3,7 +3,7 @@ packages:
 - '.'
 - location:
     git: https://github.com/int-index/source
-    commit: f649bfe29ee3a31507ef428145567447cd3d6193
+    commit: 9a5303c50ecf4eff02bb171996ffaa1cdaa82f25
   subdirs:
     - lib
 resolver: lts-5.5

@@ -1,6 +1,7 @@
 {-# OPTIONS -fno-warn-unticked-promoted-constructors #-}
 {-# LANGUAGE TemplateHaskell #-}
 {-# LANGUAGE ViewPatterns #-}
+{-# LANGUAGE MultiWayIf #-}
 {-# LANGUAGE FlexibleInstances #-}
 {-# LANGUAGE FlexibleContexts #-}
 module Foundry.Syn where
@@ -243,15 +244,14 @@ instance n ~ Int => SyntaxReact n ActiveZone SynLam where
           SelLamArg   -> reactRedirect synLamArg
           SelLamExpr1 -> reactRedirect synLamExpr1
           SelLamExpr2 -> reactRedirect synLamExpr2
-
-instance SyntaxBlank SynLam where
-  blank = return SynLam
-    { _synLamArg   = SynArg mempty
-    , _synLamExpr1 = SynHollow
-    , _synLamExpr2 = SynHollow
-    , _synLamSel   = Just SelLamArg
-    }
-
+  subreact = do
+    KeyPress [Shift] keyCode <- view rctxInputEvent
+    guard $ keyLetter 'L' keyCode
+    return SynLam
+      { _synLamArg   = SynArg mempty
+      , _synLamExpr1 = SynHollow
+      , _synLamExpr2 = SynHollow
+      , _synLamSel   = Just SelLamArg }
 
 ---        Pi       ---
 ---    instances    ---
@@ -323,14 +323,14 @@ instance n ~ Int => SyntaxReact n ActiveZone SynPi where
           SelPiArg   -> reactRedirect synPiArg
           SelPiExpr1 -> reactRedirect synPiExpr1
           SelPiExpr2 -> reactRedirect synPiExpr2
-
-instance SyntaxBlank SynPi where
-  blank = return SynPi
-    { _synPiArg   = SynArg mempty
-    , _synPiExpr1 = SynHollow
-    , _synPiExpr2 = SynHollow
-    , _synPiSel   = Just SelPiArg
-    }
+  subreact = do
+    KeyPress [Shift] keyCode <- view rctxInputEvent
+    guard $ keyLetter 'P' keyCode
+    return SynPi
+      { _synPiArg   = SynArg mempty
+      , _synPiExpr1 = SynHollow
+      , _synPiExpr2 = SynHollow
+      , _synPiSel   = Just SelPiArg }
 
 
 ---       App       ---
@@ -386,13 +386,13 @@ instance n ~ Int => SyntaxReact n ActiveZone SynApp where
         case selection of
           SelAppExpr1 -> reactRedirect synAppExpr1
           SelAppExpr2 -> reactRedirect synAppExpr2
-
-instance SyntaxBlank SynApp where
-  blank = return SynApp
-    { _synAppExpr1 = SynHollow
-    , _synAppExpr2 = SynHollow
-    , _synAppSel   = Just SelAppExpr1
-    }
+  subreact = do
+    KeyPress [Shift] keyCode <- view rctxInputEvent
+    guard $ keyLetter 'A' keyCode
+    return SynApp
+      { _synAppExpr1 = SynHollow
+      , _synAppExpr2 = SynHollow
+      , _synAppSel   = Just SelAppExpr1 }
 
 
 ---      Const      ---
@@ -402,12 +402,16 @@ instance UndoEq SynConst where
   undoEq = (==)
 
 instance n ~ Int => SyntaxLayout n ActiveZone LayoutCtx SynConst where
-
   layout = pure . \case
     SynConstStar -> punct "★"
     SynConstBox  -> punct "□"
 
 instance n ~ Int => SyntaxReact n ActiveZone SynConst where
+  subreact = do
+    KeyPress [Shift] keyCode <- view rctxInputEvent
+    if | keyLetter 'S' keyCode -> return SynConstStar
+       | keyLetter 'B' keyCode -> return SynConstBox
+       | otherwise -> mzero
 
 ---       Var       ---
 ---    instances    ---
@@ -456,9 +460,10 @@ instance n ~ Int => SyntaxReact n ActiveZone SynVar where
         KeyPress [Shift] keyCode <- view rctxInputEvent
         guard $ keyLetter 'D' keyCode
         synVarIndex %= max 0 . subtract 1
-
-instance SyntaxBlank SynVar where
-  blank = return $ SynVar mempty 0
+  subreact = do
+    KeyPress [] keyCode <- view rctxInputEvent
+    guard $ keyLetter 'i' keyCode
+    return $ SynVar mempty 0
 
 ---      Embed      ---
 ---    instances    ---
@@ -495,7 +500,6 @@ instance n ~ Int => SyntaxLayout n ActiveZone LayoutCtx SynExpr where
     SynExprEmbed a -> layout a
 
 instance n ~ Int => SyntaxReact n ActiveZone SynExpr where
-
   react = asum
     [ reactRedirect _SynExprLam
     , reactRedirect _SynExprPi
@@ -503,41 +507,13 @@ instance n ~ Int => SyntaxReact n ActiveZone SynExpr where
     , reactRedirect _SynExprConst
     , reactRedirect _SynExprVar
     , reactRedirect _SynExprEmbed ]
-
-  subreact = asum handlers
-    where
-      handlers =
-        [ handleShift_L
-        , handleShift_P
-        , handleShift_A
-        , handleShift_S
-        , handleShift_B
-        , handle_i
-        ] -- , handleShift_E
-      handleShift_L = do
-        KeyPress [Shift] keyCode <- view rctxInputEvent
-        guard $ keyLetter 'L' keyCode
-        SynExprLam <$> liftIO blank
-      handleShift_P = do
-        KeyPress [Shift] keyCode <- view rctxInputEvent
-        guard $ keyLetter 'P' keyCode
-        SynExprPi <$> liftIO blank
-      handleShift_A = do
-        KeyPress [Shift] keyCode <- view rctxInputEvent
-        guard $ keyLetter 'A' keyCode
-        SynExprApp <$> liftIO blank
-      handleShift_S = do
-        KeyPress [Shift] keyCode <- view rctxInputEvent
-        guard $ keyLetter 'S' keyCode
-        return $ SynExprConst SynConstStar
-      handleShift_B = do
-        KeyPress [Shift] keyCode <- view rctxInputEvent
-        guard $ keyLetter 'B' keyCode
-        return $ SynExprConst SynConstBox
-      handle_i = do
-        KeyPress [] keyCode <- view rctxInputEvent
-        guard $ keyLetter 'i' keyCode
-        SynExprVar <$> liftIO blank
+  subreact = asum
+    [ subreactRedirect _SynExprLam
+    , subreactRedirect _SynExprPi
+    , subreactRedirect _SynExprApp
+    , subreactRedirect _SynExprConst
+    , subreactRedirect _SynExprVar
+    , subreactRedirect _SynExprEmbed ]
 
 
 ---       Top       ---
@@ -575,8 +551,8 @@ instance n ~ Int => SyntaxReact n ActiveZone (SynTop n) where
       handleButtonPress = do
         ButtonPress <- view rctxInputEvent
         pointer <- use synPointer
-        Just p <- activate (\_ _ p -> p) pointer <$> view rctxLastLayout
-        zoom synExpr $ modify (updateExprPath p)
+        Just el <- activate pointer <$> view rctxLastLayout
+        zoom synExpr $ modify (updateExprPath (el ^. elementObject))
       handleCtrl_h = do
         KeyPress [Control] keyCode <- view rctxInputEvent
         guard $ keyLetter 'h' keyCode

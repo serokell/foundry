@@ -26,32 +26,27 @@ instance UndoEq sub => UndoEq (SynHole sub) where
   undoEq  SynHollow     SynHollow    = True
   undoEq  _             _            = False
 
-instance
-  ( n ~ Int
-  , SyntaxLayout n ActiveZone lctx sub
-  ) => SyntaxLayout n ActiveZone lctx (SynHole sub) where
-
+instance (n ~ Int, SyntaxLayout n ActiveZone lctx sub)
+      => SyntaxLayout n ActiveZone lctx (SynHole sub) where
   layout = \case
     SynHollow    -> return (punct "_")
     SynSolid syn -> layout syn
 
-instance
-  ( n ~ Int
-  , SyntaxReact n ActiveZone sub
-  ) => SyntaxReact n ActiveZone (SynHole sub) where
-
+instance SyntaxReact n ActiveZone sub
+      => SyntaxReact n ActiveZone (SynHole sub) where
   react = asum handlers
     where
       handlers =
-        [ handleRedirectHollow
-        , reactRedirect _SynSolid
+        [ reactRedirect _SynSolid
+        , handleRedirectHollow
         , handleDelete ]
       handleRedirectHollow = do
         SynHollow <- get
-        subreactRedirect _SynSolid
+        subreactToReact subreact
       handleDelete = do
         guardInputEvent $ keyCodeLetter KeyCode.Delete 'x'
         put SynHollow
+  subreact = subreactRedirect _SynSolid
 
 instance SyntaxBlank (SynHole sub) where
   blank = return SynHollow

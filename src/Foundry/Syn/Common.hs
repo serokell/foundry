@@ -51,35 +51,35 @@ active p c = (CB.collageBuilder . collage1 (CB.getExtents c)) activeZone `mappen
   where
     activeZone = DrawEmbed (ActiveZone p)
 
+within :: (Ord n, Num n) => n -> n -> n -> Bool
+within a zoneOffset zoneExtents
+   = a >  zoneOffset
+  && a < (zoneOffset + zoneExtents)
+
 activate
-  :: forall n r
-   . (Ord n, Num n)
-  => (Offset n -> Extents n -> Path -> r)
-  -> Offset n
+  :: (Ord n, Num n)
+  => Offset n
   -> Collage n (Draw ActiveZone)
-  -> Maybe r
-activate f o = getLast . foldMap (Last . check) . getCollage
+  -> Maybe (Element n Path)
+activate o = getLast . foldMap (Last . check) . getCollage
   where
-    within :: (Ord a, Num a) => a -> a -> a -> Bool
-    within a zoneOffset zoneExtents
-       = a >  zoneOffset
-      && a < (zoneOffset + zoneExtents)
-    check :: Element n (Draw ActiveZone) -> Maybe r
     check (Element o' e d) = do
       DrawEmbed (ActiveZone p) <- Just d
       let Point okX okY = Point within within <*> o <*> o' <*> e
       guard (okX && okY)
-      Just (f o' e p)
+      Just (Element o' e p)
 
 hover
   :: (Ord n, Num n)
   => Op1 (CollageDraw' n)
   -> Offset n
   -> Op1 (CollageDraw' n)
-hover f o c = CB.collageBuilder c' <> maybe mempty id (activate obj o c')
+hover f o c = CB.collageBuilder c' <> maybe mempty obj (activate o c')
   where
     c' = CB.buildCollage c
-    obj o' e _ = CB.offset o' (f (phantom e))
+    obj el = CB.offset
+      (el ^. elementOffset)
+      (f (phantom (el ^. elementExtents)))
 
 data LayoutCtx = LayoutCtx
   { _lctxSelected :: Bool
