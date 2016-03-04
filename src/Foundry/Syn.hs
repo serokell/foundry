@@ -24,11 +24,32 @@ import Source.Input
 import qualified Source.Input.KeyCode as KeyCode
 import Foundry.Syn.Text
 import Foundry.Syn.Hole
+import Foundry.Syn.Sum
 import Foundry.Syn.Common
 
 import qualified Morte.Core as M
 import qualified Morte.Parser as M.P
 import qualified Morte.Import as M.I
+
+data SynConst = SynConstStar | SynConstBox
+  deriving (Eq, Ord, Show)
+
+data SynEmbed
+  = SynEmbedFilePath SynText
+  | SynEmbedURL SynText
+  deriving (Eq, Ord, Show)
+
+newtype SynArg = SynArg SynText
+  deriving (Eq, Ord, Show)
+
+makePrisms ''SynArg
+
+data SynVar = SynVar
+  { _synVarName  :: SynText
+  , _synVarIndex :: Int
+  } deriving (Eq, Ord, Show)
+
+makeLenses ''SynVar
 
 data SelLam = SelLamArg | SelLamExpr1 | SelLamExpr2
   deriving (Eq, Ord, Enum, Show)
@@ -38,6 +59,9 @@ data SelPi = SelPiArg | SelPiExpr1 | SelPiExpr2
 
 data SelApp = SelAppExpr1 | SelAppExpr2
   deriving (Eq, Ord, Enum, Show)
+
+type SynExpr = SynSum
+  '[SynLam, SynPi, SynApp, SynConst, SynVar, SynEmbed]
 
 data SynLam = SynLam
   { _synLamArg   :: SynArg
@@ -59,30 +83,9 @@ data SynApp = SynApp
   , _synAppSel   :: Maybe SelApp
   } deriving (Eq, Ord, Show)
 
-data SynConst = SynConstStar | SynConstBox
-  deriving (Eq, Ord, Show)
-
-data SynEmbed
-  = SynEmbedFilePath SynText
-  | SynEmbedURL SynText
-  deriving (Eq, Ord, Show)
-
-newtype SynArg = SynArg SynText
-  deriving (Eq, Ord, Show)
-
-data SynVar = SynVar
-  { _synVarName  :: SynText
-  , _synVarIndex :: Int
-  } deriving (Eq, Ord, Show)
-
-data SynExpr
-  = SynExprLam   SynLam
-  | SynExprPi    SynPi
-  | SynExprApp   SynApp
-  | SynExprConst SynConst
-  | SynExprVar   SynVar
-  | SynExprEmbed SynEmbed
-  deriving (Eq, Ord, Show)
+makeLenses ''SynLam
+makeLenses ''SynPi
+makeLenses ''SynApp
 
 data SynTop n = SynTop
   { _synExpr            :: SynHole SynExpr
@@ -93,12 +96,6 @@ data SynTop n = SynTop
   } deriving (Eq, Show)
 
 makeLenses ''SynTop
-makeLenses ''SynVar
-makePrisms ''SynArg
-makeLenses ''SynLam
-makeLenses ''SynPi
-makeLenses ''SynApp
-makePrisms ''SynExpr
 
 synImportExpr :: M.Expr M.X -> SynExpr
 synImportExpr =
@@ -108,7 +105,7 @@ synImportExpr =
       in SynText t' (Text.length t') False
     synImportConst = \case
       M.Star -> SynConstStar
-      M.Box  -> SynConstBox
+      M.Box -> SynConstBox
     synImportVar (M.V t n) = SynVar (synImportText t) n
     synImportArg t = SynArg (synImportText t)
     synImportLam x _A  b = SynLam
@@ -126,11 +123,12 @@ synImportExpr =
       (SynSolid (synImportExpr a))
       Nothing
   in \case
-    M.Const c -> SynExprConst $ synImportConst c
-    M.Var   v -> SynExprVar   $ synImportVar   v
-    M.Lam x _A  b -> SynExprLam $ synImportLam x _A  b
-    M.Pi  x _A _B -> SynExprPi  $ synImportPi  x _A _B
-    M.App f a -> SynExprApp $ synImportApp f a
+    {- TODO: autolift '[SynLam, SynPi, SynApp, SynConst, SynVar, SynEmbed] -}
+    M.Const c -> SynAddend . SynAddend . SynAddend . SynAugend $ synImportConst c
+    M.Var v -> SynAddend . SynAddend . SynAddend . SynAddend . SynAugend $ synImportVar v
+    M.Lam x _A b -> SynAugend $ synImportLam x _A b
+    M.Pi  x _A _B -> SynAddend . SynAugend $ synImportPi x _A _B
+    M.App f a -> SynAddend . SynAddend . SynAugend $ synImportApp f a
     M.Embed e -> M.absurd e
 
 instance SynSelection SynLam SelLam where
@@ -146,15 +144,6 @@ instance SynSelection SynArg Void
 instance SynSelection SynConst Void
 instance SynSelection SynVar Void
 instance SynSelection SynEmbed Void
-
-instance SynSelection SynExpr () where
-  synSelection = \case
-    SynExprLam   a -> () <$ synSelection a
-    SynExprPi    a -> () <$ synSelection a
-    SynExprApp   a -> () <$ synSelection a
-    SynExprConst a -> () <$ synSelection a
-    SynExprVar   a -> () <$ synSelection a
-    SynExprEmbed a -> () <$ synSelection a
 
 ---       Arg       ---
 ---    instances    ---
@@ -478,44 +467,6 @@ instance n ~ Int => SyntaxLayout n ActiveZone LayoutCtx SynEmbed where
 
 instance n ~ Int => SyntaxReact n ActiveZone SynEmbed where
 
----       Expr      ---
----    instances    ---
-
-instance UndoEq SynExpr where
-  undoEq (SynExprLam   a1) (SynExprLam   a2) = undoEq a1 a2
-  undoEq (SynExprPi    a1) (SynExprPi    a2) = undoEq a1 a2
-  undoEq (SynExprApp   a1) (SynExprApp   a2) = undoEq a1 a2
-  undoEq (SynExprConst a1) (SynExprConst a2) = undoEq a1 a2
-  undoEq (SynExprVar   a1) (SynExprVar   a2) = undoEq a1 a2
-  undoEq (SynExprEmbed a1) (SynExprEmbed a2) = undoEq a1 a2
-  undoEq  _                 _                = False
-
-instance n ~ Int => SyntaxLayout n ActiveZone LayoutCtx SynExpr where
-  layout = \case
-    SynExprLam   a -> layout a
-    SynExprPi    a -> layout a
-    SynExprApp   a -> layout a
-    SynExprConst a -> layout a
-    SynExprVar   a -> layout a
-    SynExprEmbed a -> layout a
-
-instance n ~ Int => SyntaxReact n ActiveZone SynExpr where
-  react = asum
-    [ reactRedirect _SynExprLam
-    , reactRedirect _SynExprPi
-    , reactRedirect _SynExprApp
-    , reactRedirect _SynExprConst
-    , reactRedirect _SynExprVar
-    , reactRedirect _SynExprEmbed ]
-  subreact = asum
-    [ subreactRedirect _SynExprLam
-    , subreactRedirect _SynExprPi
-    , subreactRedirect _SynExprApp
-    , subreactRedirect _SynExprConst
-    , subreactRedirect _SynExprVar
-    , subreactRedirect _SynExprEmbed ]
-
-
 ---       Top       ---
 ---    instances    ---
 
@@ -584,9 +535,9 @@ instance n ~ Int => SyntaxReact n ActiveZone (SynTop n) where
 updateExprPath :: Path -> SynHole SynExpr -> SynHole SynExpr
 updateExprPath path
   = over _SynSolid
-  $ over _SynExprLam (updateLamPath path)
-  . over _SynExprPi  (updatePiPath  path)
-  . over _SynExprApp (updateAppPath path)
+  $ over _SynAugend (updateLamPath path)
+  . over (_SynAddend . _SynAugend) (updatePiPath  path)
+  . over (_SynAddend . _SynAddend . _SynAugend) (updateAppPath path)
 
 updateLamPath :: Path -> SynLam -> SynLam
 updateLamPath path e =

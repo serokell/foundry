@@ -8,6 +8,7 @@ executable foundry
   other-modules:       Foundry.Syn
                        Foundry.Syn.Text
                        Foundry.Syn.Hole
+                       Foundry.Syn.Sum
                        Foundry.Syn.Common
 
   build-depends:       base
