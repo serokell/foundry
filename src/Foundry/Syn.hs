@@ -8,6 +8,7 @@ import Data.Function
 import Control.Monad.Reader
 import Control.Monad.State
 import Control.Lens
+import Data.Dynamic
 
 import Source.Collage.Builder (vertical)
 import Source.Syntax
@@ -144,33 +145,36 @@ updateLamPath :: Path -> SynLam -> SynLam
 updateLamPath path e =
   case uncons path of
     Nothing -> e & synLamSel .~ Nothing
-    Just (toEnum -> sel', sels) -> e
+    Just (fromDynamic -> Just sel', sels) -> e
       & synLamSel .~ Just sel'
       & case sel' of
           SelLamExpr1 -> synLamExpr1 %~ updateExprPath sels
           SelLamExpr2 -> synLamExpr2 %~ updateExprPath sels
           SelLamArg   -> id
+    _ -> e
 
 updatePiPath :: Path -> SynPi -> SynPi
 updatePiPath path e =
   case uncons path of
     Nothing -> e & synPiSel .~ Nothing
-    Just (toEnum -> sel', sels) -> e
+    Just (fromDynamic -> Just sel', sels) -> e
       & synPiSel .~ Just sel'
       & case sel' of
           SelPiExpr1 -> synPiExpr1 %~ updateExprPath sels
           SelPiExpr2 -> synPiExpr2 %~ updateExprPath sels
           SelPiArg   -> id
+    _ -> e
 
 updateAppPath :: Path -> SynApp -> SynApp
 updateAppPath path e =
   case uncons path of
     Nothing -> e & synAppSel .~ Nothing
-    Just (toEnum -> sel', sels) -> e
+    Just (fromDynamic -> Just sel', sels) -> e
       & synAppSel .~ Just sel'
       & case sel' of
           SelAppExpr1 -> synAppExpr1 %~ updateExprPath sels
           SelAppExpr2 -> synAppExpr2 %~ updateExprPath sels
+    _ -> e
 
 instance n ~ Int => SyntaxBlank (SynTop n) where
   blank = do

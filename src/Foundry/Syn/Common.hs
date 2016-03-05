@@ -4,8 +4,10 @@ import Data.Text (Text)
 import Data.Sequence (Seq)
 import Data.Monoid
 import Data.Maybe
+import Data.Dynamic
 
 import Control.Lens
+import Control.Applicative
 import Control.Monad
 
 import qualified Source.Collage.Builder as CB
@@ -13,6 +15,9 @@ import Source.Draw
 import Source.Style
 import Source.Input
 import Source.Syntax
+
+maybeA :: Alternative f => Maybe a -> f a
+maybeA = maybe empty pure
 
 dark1, dark2, dark3, light1 :: Color
 dark1  = RGB 0.20 0.20 0.20
@@ -37,7 +42,7 @@ keyCodeLetter kc c = \case
   KeyPress [] keyCode -> keyCode == kc || keyLetter c keyCode
   _ -> False
 
-type Path = Seq Int
+type Path = Seq Dynamic
 
 newtype ActiveZone = ActiveZone Path
 

@@ -5,6 +5,7 @@ import Data.Function
 import Control.Monad.Reader
 import Control.Monad.State
 import Control.Lens
+import Data.Dynamic
 
 import Source.Collage.Builder (horizontal, vertical, getExtents)
 import Source.Syntax
@@ -24,7 +25,7 @@ type SynExpr = SynSum
   '[SynLam, SynPi, SynApp, SynConst, SynVar, SynEmbed]
 
 data SelLam = SelLamArg | SelLamExpr1 | SelLamExpr2
-  deriving (Eq, Ord, Enum, Show)
+  deriving (Eq, Ord, Enum, Bounded, Show)
 
 data SynLam = SynLam
   { _synLamArg   :: SynArg
@@ -34,7 +35,7 @@ data SynLam = SynLam
   } deriving (Eq, Ord, Show)
 
 data SelPi = SelPiArg | SelPiExpr1 | SelPiExpr2
-  deriving (Eq, Ord, Enum, Show)
+  deriving (Eq, Ord, Enum, Bounded, Show)
 
 data SynPi = SynPi
   { _synPiArg   :: SynArg
@@ -44,7 +45,7 @@ data SynPi = SynPi
   } deriving (Eq, Ord, Show)
 
 data SelApp = SelAppExpr1 | SelAppExpr2
-  deriving (Eq, Ord, Enum, Show)
+  deriving (Eq, Ord, Enum, Bounded, Show)
 
 data SynApp = SynApp
   { _synAppExpr1 :: SynHole SynExpr
@@ -55,6 +56,27 @@ data SynApp = SynApp
 makeLenses ''SynLam
 makeLenses ''SynPi
 makeLenses ''SynApp
+
+class Eq s => Sel s where
+  selOrder :: [s]
+  default selOrder :: (Enum s, Bounded s) => [s]
+  selOrder = [minBound .. maxBound]
+
+instance Sel SelLam
+instance Sel SelPi
+instance Sel SelApp
+
+lookupNext :: Eq s => [s] -> s -> Maybe s
+lookupNext ss s = lookup s (ss `zip` tail ss)
+
+selRevOrder :: Sel s => [s]
+selRevOrder = reverse selOrder
+
+selNext :: Sel s => s -> Maybe s
+selNext = lookupNext selOrder
+
+selPrev :: Sel s => s -> Maybe s
+selPrev = lookupNext selRevOrder
 
 ---       Lam       ---
 ---    instances    ---
@@ -113,16 +135,14 @@ instance n ~ Int => SyntaxReact n ActiveZone SynLam where
         synLamSel .= Just SelLamExpr2
       handleArrowLeft = do
         guardInputEvent $ keyCodeLetter KeyCode.ArrowLeft 'h'
-        use synLamSel >>= \case
-          Just SelLamExpr2 -> synLamSel . _Just .= SelLamExpr1
-          Just SelLamExpr1 -> synLamSel . _Just .= SelLamArg
-          _ -> mzero
+        Just selection <- gets synSelection
+        selection' <- maybeA (selPrev selection)
+        synLamSel . _Just .= selection'
       handleArrowRight = do
         guardInputEvent $ keyCodeLetter KeyCode.ArrowRight 'l'
-        use synLamSel >>= \case
-          Just SelLamArg   -> synLamSel . _Just .= SelLamExpr1
-          Just SelLamExpr1 -> synLamSel . _Just .= SelLamExpr2
-          _ -> mzero
+        Just selection <- gets synSelection
+        selection' <- maybeA (selNext selection)
+        synLamSel . _Just .= selection'
       handleSelRedirect = do
         Just selection <- gets synSelection
         case selection of
@@ -195,16 +215,14 @@ instance n ~ Int => SyntaxReact n ActiveZone SynPi where
         synPiSel .= Just SelPiExpr2
       handleArrowLeft = do
         guardInputEvent $ keyCodeLetter KeyCode.ArrowLeft 'h'
-        use synPiSel >>= \case
-          Just SelPiExpr2 -> synPiSel . _Just .= SelPiExpr1
-          Just SelPiExpr1 -> synPiSel . _Just .= SelPiArg
-          _ -> mzero
+        Just selection <- gets synSelection
+        selection' <- maybeA (selPrev selection)
+        synPiSel . _Just .= selection'
       handleArrowRight = do
         guardInputEvent $ keyCodeLetter KeyCode.ArrowRight 'l'
-        use synPiSel >>= \case
-          Just SelPiArg   -> synPiSel . _Just .= SelPiExpr1
-          Just SelPiExpr1 -> synPiSel . _Just .= SelPiExpr2
-          _ -> mzero
+        Just selection <- gets synSelection
+        selection' <- maybeA (selNext selection)
+        synPiSel . _Just .= selection'
       handleSelRedirect = do
         Just selection <- gets synSelection
         case selection of
@@ -264,14 +282,14 @@ instance n ~ Int => SyntaxReact n ActiveZone SynApp where
         synAppSel .= Just SelAppExpr1
       handleArrowLeft = do
         guardInputEvent $ keyCodeLetter KeyCode.ArrowLeft 'h'
-        use synAppSel >>= \case
-          Just SelAppExpr2 -> synAppSel . _Just .= SelAppExpr1
-          _ -> mzero
+        Just selection <- gets synSelection
+        selection' <- maybeA (selPrev selection)
+        synAppSel . _Just .= selection'
       handleArrowRight = do
         guardInputEvent $ keyCodeLetter KeyCode.ArrowRight 'l'
-        use synAppSel >>= \case
-          Just SelAppExpr1 -> synAppSel . _Just .= SelAppExpr2
-          _ -> mzero
+        Just selection <- gets synSelection
+        selection' <- maybeA (selNext selection)
+        synAppSel . _Just .= selection'
       handleSelRedirect = do
         Just selection <- gets synSelection
         case selection of
@@ -288,7 +306,7 @@ instance n ~ Int => SyntaxReact n ActiveZone SynApp where
 ---  helpers  ---
 
 selLayout
-  :: (Enum a1, Eq a1, SynSelection a a1, SynSelection syn sel,
+  :: (Typeable a1, Eq a1, SynSelection a a1, SynSelection syn sel,
       SyntaxLayout n la LayoutCtx syn)
   => LayoutCtx
   -> (a1, a -> syn)
@@ -300,7 +318,7 @@ selLayout lctx (sel', synSub) hook syn =
     lctx'
       = lctx
       & lctxSelected &&~ (synSelection syn == Just sel')
-      & lctxPath %~ (`snoc` fromEnum sel')
+      & lctxPath %~ (`snoc` toDyn sel')
   in sel (lctx' & lctxSelected &&~ synSelectionSelf (synSub syn))
    $ hook
    $ runReader (layout (synSub syn)) lctx'

@@ -50,6 +50,7 @@ executable foundry
                        MultiWayIf
                        ViewPatterns
                        StandaloneDeriving
+                       DefaultSignatures
                        TemplateHaskell
                        FlexibleInstances
                        FlexibleContexts
