@@ -32,8 +32,7 @@ instance n ~ Int => SyntaxLayout n ActiveZone LayoutCtx SynVar where
     [ runReader (layout (v ^. synVarName)) lctx
     , if (v ^. synVarIndex) > 0
       then layoutIndex (v ^. synVarIndex)
-      else
-        mempty
+      else mempty
     ] & horizontal
     where
       layoutIndex = text . Text.map toSub . Text.pack . show
