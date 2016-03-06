@@ -24,10 +24,10 @@ dark2  = RGB 0.30 0.30 0.30
 dark3  = RGB 0.25 0.25 0.25
 light1 = RGB 0.70 0.70 0.70
 
-text :: Text -> CollageDraw' Int
+text :: Integral n => Text -> CollageDraw' n
 text = textline font
 
-punct :: Text -> CollageDraw' Int
+punct :: Integral n => Text -> CollageDraw' n
 punct = textline (font { fontColor = light1 })
 
 font :: Font
@@ -48,7 +48,7 @@ newtype ActiveZone = ActiveZone Path
 type CollageDraw' n = CB.CollageBuilder n (Draw ActiveZone)
 
 active :: (Num n, Ord n) => Path -> Op1 (CollageDraw' n)
-active p c = (CB.collageBuilder . collage1 (CB.getExtents c)) activeZone `mappend` c
+active p c = CB.collageBuilder1 (CB.getExtents c) activeZone <> c
   where
     activeZone = DrawEmbed (ActiveZone p)
 
@@ -89,7 +89,7 @@ data LayoutCtx = LayoutCtx
 
 makeLenses ''LayoutCtx
 
-sel :: LayoutCtx -> CollageDraw' Int -> CollageDraw' Int
+sel :: (Num n, Ord n) => LayoutCtx -> CollageDraw' n -> CollageDraw' n
 sel lctx
   = active (lctx ^. lctxPath)
   . if lctx ^. lctxSelected

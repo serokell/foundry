@@ -117,6 +117,26 @@ handleArrows
 handleArrows = asum
   [handleArrowUp, handleArrowDown, handleArrowLeft, handleArrowRight]
 
+class SelLayout s where
+  selLayoutHook :: s -> Op1 (CollageDraw' Int)
+
+instance SelLayout SelLam where
+  selLayoutHook = \case
+    SelLamArg   -> join pad (Point 4 0)
+    SelLamExpr1 -> join pad (Point 4 0)
+    SelLamExpr2 -> id
+
+instance SelLayout SelPi where
+  selLayoutHook = \case
+    SelPiArg   -> join pad (Point 4 0)
+    SelPiExpr1 -> join pad (Point 4 0)
+    SelPiExpr2 -> id
+
+instance SelLayout SelApp where
+  selLayoutHook = \case
+    SelAppExpr1 -> join pad (Point 5 5)
+    SelAppExpr2 -> outline dark2 . join pad (Point 5 5)
+
 ---       Lam       ---
 ---    instances    ---
 
@@ -137,20 +157,12 @@ instance n ~ Int => SyntaxLayout n ActiveZone LayoutCtx SynLam where
       maxWidth = (max `on` view pointX . getExtents) header body
       header =
         [ extend (Point 4 0) (punct "λ")
-        , [ selLayout
-              lctx
-              (SelLamArg, synLamArg)
-              (join pad (Point 4 0))
-              syn
+        , [ runReader (selLayout (SelLamArg, synLamArg) syn) lctx
           , join pad (Point 4 0) (punct ":")
-          , selLayout
-              lctx
-              (SelLamExpr1, synLamExpr1)
-              (join pad (Point 4 0))
-              syn
+          , runReader (selLayout (SelLamExpr1, synLamExpr1) syn) lctx
           ] & horizontal
         ] & horizontal
-      body = selLayout lctx (SelLamExpr2, synLamExpr2) id syn
+      body = runReader (selLayout (SelLamExpr2, synLamExpr2) syn) lctx
     in
       [ header
       , join pad (Point 0 4) (line light1 maxWidth)
@@ -191,20 +203,12 @@ instance n ~ Int => SyntaxLayout n ActiveZone LayoutCtx SynPi where
       maxWidth = (max `on` view pointX . getExtents) header body
       header =
         [ extend (Point 4 0) (punct "Π")
-        , [ selLayout
-              lctx
-              (SelPiArg, synPiArg)
-              (join pad (Point 4 0))
-              syn
+        , [ runReader (selLayout (SelPiArg, synPiArg) syn) lctx
           , join pad (Point 4 0) (punct ":")
-          , selLayout
-              lctx
-              (SelPiExpr1, synPiExpr1)
-              (join pad (Point 4 0))
-              syn
+          , runReader (selLayout (SelPiExpr1, synPiExpr1) syn) lctx
           ] & horizontal
         ] & horizontal
-      body = selLayout lctx (SelPiExpr2, synPiExpr2) id syn
+      body = runReader (selLayout (SelPiExpr2, synPiExpr2) syn) lctx
     in
       [ header
       , join pad (Point 0 4) (line light1 maxWidth)
@@ -241,15 +245,9 @@ instance UndoEq SynApp where
 
 instance n ~ Int => SyntaxLayout n ActiveZone LayoutCtx SynApp where
   layout syn = reader $ \lctx ->
-    [ selLayout lctx
-        (SelAppExpr1, synAppExpr1)
-        (join pad (Point 5 5))
-        syn
+    [ runReader (selLayout (SelAppExpr1, synAppExpr1) syn) lctx
     , join pad (Point 5 5)
-      $ selLayout lctx
-          (SelAppExpr2, synAppExpr2)
-          (outline dark2 . join pad (Point 5 5))
-          syn
+      $ runReader (selLayout (SelAppExpr2, synAppExpr2) syn) lctx
     ] & horizontalCenter
 
 instance n ~ Int => SyntaxReact n rp ActiveZone SynApp where
@@ -267,13 +265,17 @@ instance n ~ Int => SyntaxReact n rp ActiveZone SynApp where
 
 ---  helpers  ---
 
-selLayout lctx (sel', synSub) hook syn =
+selLayout (sel', synSub) syn = do
   let
-    lctx'
-      = lctx
-      & lctxSelected &&~ (view synSelection syn == sel')
-      & lctxSelected &&~ (synSelfSelected syn == False)
-      & lctxPath %~ (`snoc` toDyn sel')
-  in sel (lctx' & lctxSelected &&~ synSelfSelected (view synSub syn))
-   $ hook
-   $ runReader (layout (view synSub syn)) lctx'
+    sub = view synSub syn
+    appendSelection
+      = (lctxSelected &&~ (view synSelection syn == sel'))
+      . (lctxSelected &&~ (synSelfSelected syn == False))
+      . (lctxPath %~ (`snoc` toDyn sel'))
+    enforceSelfSelection
+      = lctxSelected &&~ synSelfSelected sub
+  local appendSelection $ do
+    a <- layout sub
+    reader $ \lctx ->
+       sel (enforceSelfSelection lctx)
+     $ selLayoutHook sel' a
