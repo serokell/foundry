@@ -10,6 +10,9 @@ import Control.Monad.State
 import Control.Lens
 import Data.Dynamic
 
+import Data.Singletons.Prelude
+import Data.Vinyl
+
 import Source.Collage.Builder (vertical)
 import Source.Syntax
 import Source.Draw
@@ -22,6 +25,7 @@ import Foundry.Syn.Expr
 import Foundry.Syn.Const
 import Foundry.Syn.Arg
 import Foundry.Syn.Var
+import Foundry.Syn.Record
 import Foundry.Syn.Common
 
 import qualified Morte.Core as M
@@ -39,22 +43,25 @@ synImportExpr =
       M.Box -> SynConstBox
     synImportVar (M.V t n) = SynVar (synImportText t) n
     synImportArg t = SynArg (synImportText t)
-    synImportLam x _A  b = SynLam
-      (synImportArg x)
-      (SynSolid (synImportExpr _A))
-      (SynSolid (synImportExpr b))
-      SelLamExpr2
+    synImportLam x _A  b = SynRecord
+       ( SynRecField (synImportArg x)
+      :& SynRecField (SynSolid (synImportExpr _A))
+      :& SynRecField (SynSolid (synImportExpr b))
+      :& RNil )
+      (toSing SelLamExpr2)
       True
-    synImportPi  x _A _B = SynPi
-      (synImportArg x)
-      (SynSolid (synImportExpr _A))
-      (SynSolid (synImportExpr _B))
-      SelPiExpr2
+    synImportPi  x _A _B = SynRecord
+       ( SynRecField (synImportArg x)
+      :& SynRecField (SynSolid (synImportExpr _A))
+      :& SynRecField (SynSolid (synImportExpr _B))
+      :& RNil )
+      (toSing SelPiExpr2)
       True
-    synImportApp f a = SynApp
-      (SynSolid (synImportExpr f))
-      (SynSolid (synImportExpr a))
-      SelAppExpr1
+    synImportApp f a = SynRecord
+       ( SynRecField (SynSolid (synImportExpr f))
+      :& SynRecField (SynSolid (synImportExpr a))
+      :& RNil )
+      (toSing SelAppExpr1)
       True
   in \case
     {- TODO: autolift '[SynLam, SynPi, SynApp, SynConst, SynVar, SynEmbed] -}
@@ -71,7 +78,7 @@ data SynTop n = SynTop
   , _synHoverBarEnabled :: Bool
   , _synUndo            :: [SynHole SynExpr]
   , _synRedo            :: [SynHole SynExpr]
-  } deriving (Eq, Show)
+  }
 
 makeLenses ''SynTop
 
@@ -152,8 +159,8 @@ updateLamPath path e =
       & synSelectionSelf .~ False
       & synSelection .~ sel'
       & case sel' of
-          SelLamExpr1 -> synLamExpr1 %~ updateExprPath sels
-          SelLamExpr2 -> synLamExpr2 %~ updateExprPath sels
+          SelLamExpr1 -> synField SSelLamExpr1 %~ updateExprPath sels
+          SelLamExpr2 -> synField SSelLamExpr2 %~ updateExprPath sels
           SelLamArg   -> id
     _ -> e
 
@@ -165,8 +172,8 @@ updatePiPath path e =
       & synSelectionSelf .~ False
       & synSelection .~ sel'
       & case sel' of
-          SelPiExpr1 -> synPiExpr1 %~ updateExprPath sels
-          SelPiExpr2 -> synPiExpr2 %~ updateExprPath sels
+          SelPiExpr1 -> synField SSelPiExpr1 %~ updateExprPath sels
+          SelPiExpr2 -> synField SSelPiExpr2 %~ updateExprPath sels
           SelPiArg   -> id
     _ -> e
 
@@ -178,8 +185,8 @@ updateAppPath path e =
       & synSelectionSelf .~ False
       & synSelection .~ sel'
       & case sel' of
-          SelAppExpr1 -> synAppExpr1 %~ updateExprPath sels
-          SelAppExpr2 -> synAppExpr2 %~ updateExprPath sels
+          SelAppExpr1 -> synField SSelAppExpr1 %~ updateExprPath sels
+          SelAppExpr2 -> synField SSelAppExpr2 %~ updateExprPath sels
     _ -> e
 
 instance n ~ Int => SyntaxBlank (SynTop n) where

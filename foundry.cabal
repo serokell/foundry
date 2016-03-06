@@ -14,6 +14,7 @@ executable foundry
                        Foundry.Syn.Arg
                        Foundry.Syn.Var
                        Foundry.Syn.Expr
+                       Foundry.Syn.Record
                        Foundry.Syn.Common
 
   build-depends:       base
@@ -25,6 +26,8 @@ executable foundry
                ,       text
                ,       lens
                ,       gtk3
+               ,       singletons
+               ,       vinyl
                ,       morte
                ,       template-haskell
                ,       source
@@ -54,6 +57,7 @@ executable foundry
                        TemplateHaskell
                        FlexibleInstances
                        FlexibleContexts
+                       GeneralizedNewtypeDeriving
 
   ghc-options:         -Wall -threaded -O2
   ghc-prof-options:    -fprof-auto
