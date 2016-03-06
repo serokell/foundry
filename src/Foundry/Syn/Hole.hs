@@ -13,10 +13,10 @@ data SynHole sub = SynSolid sub | SynHollow
 
 makePrisms ''SynHole
 
-instance SynSelection sub sel => SynSelection (SynHole sub) sel where
-  synSelection = \case
-    SynHollow -> Nothing
-    SynSolid syn -> synSelection syn
+instance SynSelfSelected sub => SynSelfSelected (SynHole sub) where
+  synSelfSelected = \case
+    SynHollow -> True
+    SynSolid syn -> synSelfSelected syn
 
 instance UndoEq sub => UndoEq (SynHole sub) where
   undoEq (SynSolid s1) (SynSolid s2) = undoEq s1 s2
@@ -29,8 +29,8 @@ instance (n ~ Int, SyntaxLayout n ActiveZone lctx sub)
     SynHollow    -> return (punct "_")
     SynSolid syn -> layout syn
 
-instance SyntaxReact n ActiveZone sub
-      => SyntaxReact n ActiveZone (SynHole sub) where
+instance SyntaxReact n rp ActiveZone sub
+      => SyntaxReact n rp ActiveZone (SynHole sub) where
   react = asum handlers
     where
       handlers =

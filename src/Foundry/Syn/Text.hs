@@ -64,7 +64,7 @@ instance n ~ Int => SyntaxLayout n ActiveZone LayoutCtx SynText where
       isActive = (lctx ^. lctxSelected) && (syn ^. synTextEditMode)
     return $ if isActive then layoutActive else layoutInactive
 
-instance n ~ Int => SyntaxReact n ActiveZone SynText where
+instance n ~ Int => SyntaxReact n rp ActiveZone SynText where
   react = do asum handlers; modify normalizeSynText
     where
       handlers =

@@ -43,16 +43,19 @@ synImportExpr =
       (synImportArg x)
       (SynSolid (synImportExpr _A))
       (SynSolid (synImportExpr b))
-      Nothing
+      SelLamExpr2
+      True
     synImportPi  x _A _B = SynPi
       (synImportArg x)
       (SynSolid (synImportExpr _A))
       (SynSolid (synImportExpr _B))
-      Nothing
+      SelPiExpr2
+      True
     synImportApp f a = SynApp
       (SynSolid (synImportExpr f))
       (SynSolid (synImportExpr a))
-      Nothing
+      SelAppExpr1
+      True
   in \case
     {- TODO: autolift '[SynLam, SynPi, SynApp, SynConst, SynVar, SynEmbed] -}
     M.Const c -> SynAddend . SynAddend . SynAddend . SynAugend $ synImportConst c
@@ -84,11 +87,11 @@ instance n ~ Int => SyntaxLayout n ActiveZone (Viewport n) (SynTop n) where
      . hover (outline light1) (syn ^. synPointer)
      . background dark1
      . center (viewport ^. _Viewport)
-     . sel (lctx & lctxSelected &&~ synSelectionSelf (syn ^. synExpr))
+     . sel (lctx & lctxSelected &&~ synSelfSelected (syn ^. synExpr))
      . join pad (Point 5 5)
      $ runReader (layout (syn ^. synExpr)) lctx
 
-instance n ~ Int => SyntaxReact n ActiveZone (SynTop n) where
+instance n ~ Int => SyntaxReact n () ActiveZone (SynTop n) where
   react = asum handlers
     where
       handlers =
@@ -144,9 +147,10 @@ updateExprPath path
 updateLamPath :: Path -> SynLam -> SynLam
 updateLamPath path e =
   case uncons path of
-    Nothing -> e & synLamSel .~ Nothing
+    Nothing -> e & synSelectionSelf .~ True
     Just (fromDynamic -> Just sel', sels) -> e
-      & synLamSel .~ Just sel'
+      & synSelectionSelf .~ False
+      & synSelection .~ sel'
       & case sel' of
           SelLamExpr1 -> synLamExpr1 %~ updateExprPath sels
           SelLamExpr2 -> synLamExpr2 %~ updateExprPath sels
@@ -156,9 +160,10 @@ updateLamPath path e =
 updatePiPath :: Path -> SynPi -> SynPi
 updatePiPath path e =
   case uncons path of
-    Nothing -> e & synPiSel .~ Nothing
+    Nothing -> e & synSelectionSelf .~ True
     Just (fromDynamic -> Just sel', sels) -> e
-      & synPiSel .~ Just sel'
+      & synSelectionSelf .~ False
+      & synSelection .~ sel'
       & case sel' of
           SelPiExpr1 -> synPiExpr1 %~ updateExprPath sels
           SelPiExpr2 -> synPiExpr2 %~ updateExprPath sels
@@ -168,9 +173,10 @@ updatePiPath path e =
 updateAppPath :: Path -> SynApp -> SynApp
 updateAppPath path e =
   case uncons path of
-    Nothing -> e & synAppSel .~ Nothing
+    Nothing -> e & synSelectionSelf .~ True
     Just (fromDynamic -> Just sel', sels) -> e
-      & synAppSel .~ Just sel'
+      & synSelectionSelf .~ False
+      & synSelection .~ sel'
       & case sel' of
           SelAppExpr1 -> synAppExpr1 %~ updateExprPath sels
           SelAppExpr2 -> synAppExpr2 %~ updateExprPath sels

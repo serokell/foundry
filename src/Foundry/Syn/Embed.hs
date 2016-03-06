@@ -1,7 +1,5 @@
 module Foundry.Syn.Embed where
 
-import Data.Void
-
 import Source.Syntax
 
 import Foundry.Syn.Text
@@ -12,7 +10,8 @@ data SynEmbed
   | SynEmbedURL SynText
   deriving (Eq, Ord, Show)
 
-instance SynSelection SynEmbed Void
+instance SynSelfSelected SynEmbed where
+  synSelfSelected = const True
 
 instance UndoEq SynEmbed where
   undoEq (SynEmbedFilePath t1) (SynEmbedFilePath t2) = undoEq t1 t2
@@ -22,4 +21,4 @@ instance UndoEq SynEmbed where
 instance n ~ Int => SyntaxLayout n ActiveZone LayoutCtx SynEmbed where
   layout _ = pure (text "Embed")
 
-instance n ~ Int => SyntaxReact n ActiveZone SynEmbed where
+instance n ~ Int => SyntaxReact n rp ActiveZone SynEmbed where

@@ -3,7 +3,6 @@ module Foundry.Syn.Expr where
 import Data.Foldable
 import Data.Function
 import Control.Monad.Reader
-import Control.Monad.State
 import Control.Lens
 import Data.Dynamic
 
@@ -31,7 +30,8 @@ data SynLam = SynLam
   { _synLamArg   :: SynArg
   , _synLamExpr1 :: SynHole SynExpr
   , _synLamExpr2 :: SynHole SynExpr
-  , _synLamSel   :: Maybe SelLam
+  , _synLamSel :: SelLam
+  , _synLamSelSelf :: Bool
   } deriving (Eq, Ord, Show)
 
 data SelPi = SelPiArg | SelPiExpr1 | SelPiExpr2
@@ -41,7 +41,8 @@ data SynPi = SynPi
   { _synPiArg   :: SynArg
   , _synPiExpr1 :: SynHole SynExpr
   , _synPiExpr2 :: SynHole SynExpr
-  , _synPiSel   :: Maybe SelPi
+  , _synPiSel :: SelPi
+  , _synPiSelSelf :: Bool
   } deriving (Eq, Ord, Show)
 
 data SelApp = SelAppExpr1 | SelAppExpr2
@@ -50,7 +51,8 @@ data SelApp = SelAppExpr1 | SelAppExpr2
 data SynApp = SynApp
   { _synAppExpr1 :: SynHole SynExpr
   , _synAppExpr2 :: SynHole SynExpr
-  , _synAppSel   :: Maybe SelApp
+  , _synAppSel :: SelApp
+  , _synAppSelSelf :: Bool
   } deriving (Eq, Ord, Show)
 
 makeLenses ''SynLam
@@ -81,8 +83,10 @@ selPrev = lookupNext selRevOrder
 ---       Lam       ---
 ---    instances    ---
 
+instance SynSelfSelected SynLam
 instance SynSelection SynLam SelLam where
-  synSelection = view synLamSel
+  synSelection = synLamSel
+  synSelectionSelf = synLamSelSelf
 
 instance UndoEq SynLam where
   undoEq s1 s2
@@ -116,7 +120,7 @@ instance n ~ Int => SyntaxLayout n ActiveZone LayoutCtx SynLam where
       , body
       ] & vertical
 
-instance n ~ Int => SyntaxReact n ActiveZone SynLam where
+instance n ~ Int => SyntaxReact n rp ActiveZone SynLam where
   react = asum handlers
     where
       handlers =
@@ -127,24 +131,27 @@ instance n ~ Int => SyntaxReact n ActiveZone SynLam where
         , handleArrowDown ]
       handleArrowUp = do
         guardInputEvent $ keyCodeLetter KeyCode.ArrowUp 'k'
-        Just _ <- gets synSelection
-        synLamSel .= Nothing
+        False <- use synSelectionSelf
+        synSelectionSelf .= True
       handleArrowDown = do
         guardInputEvent $ keyCodeLetter KeyCode.ArrowDown 'j'
-        Nothing <- gets synSelection
-        synLamSel .= Just SelLamExpr2
+        True <- use synSelectionSelf
+        synSelectionSelf .= False
       handleArrowLeft = do
         guardInputEvent $ keyCodeLetter KeyCode.ArrowLeft 'h'
-        Just selection <- gets synSelection
+        False <- use synSelectionSelf
+        selection <- use synSelection
         selection' <- maybeA (selPrev selection)
-        synLamSel . _Just .= selection'
+        synLamSel .= selection'
       handleArrowRight = do
         guardInputEvent $ keyCodeLetter KeyCode.ArrowRight 'l'
-        Just selection <- gets synSelection
+        False <- use synSelectionSelf
+        selection <- use synSelection
         selection' <- maybeA (selNext selection)
-        synLamSel . _Just .= selection'
+        synLamSel .= selection'
       handleSelRedirect = do
-        Just selection <- gets synSelection
+        False <- use synSelectionSelf
+        selection <- use synSelection
         case selection of
           SelLamArg   -> reactRedirect synLamArg
           SelLamExpr1 -> reactRedirect synLamExpr1
@@ -156,13 +163,16 @@ instance n ~ Int => SyntaxReact n ActiveZone SynLam where
       { _synLamArg   = SynArg mempty
       , _synLamExpr1 = SynHollow
       , _synLamExpr2 = SynHollow
-      , _synLamSel   = Just SelLamArg }
+      , _synLamSel = SelLamArg
+      , _synLamSelSelf = False }
 
 ---        Pi       ---
 ---    instances    ---
 
+instance SynSelfSelected SynPi
 instance SynSelection SynPi SelPi where
-  synSelection = view synPiSel
+  synSelection = synPiSel
+  synSelectionSelf = synPiSelSelf
 
 instance UndoEq SynPi where
   undoEq s1 s2
@@ -196,7 +206,7 @@ instance n ~ Int => SyntaxLayout n ActiveZone LayoutCtx SynPi where
       , body
       ] & vertical
 
-instance n ~ Int => SyntaxReact n ActiveZone SynPi where
+instance n ~ Int => SyntaxReact n rp ActiveZone SynPi where
   react = asum handlers
     where
       handlers =
@@ -207,24 +217,27 @@ instance n ~ Int => SyntaxReact n ActiveZone SynPi where
         , handleArrowDown ]
       handleArrowUp = do
         guardInputEvent $ keyCodeLetter KeyCode.ArrowUp 'k'
-        Just _ <- gets synSelection
-        synPiSel .= Nothing
+        False <- use synSelectionSelf
+        synSelectionSelf .= True
       handleArrowDown = do
         guardInputEvent $ keyCodeLetter KeyCode.ArrowDown 'j'
-        Nothing <- gets synSelection
-        synPiSel .= Just SelPiExpr2
+        True <- use synSelectionSelf
+        synSelectionSelf .= False
       handleArrowLeft = do
         guardInputEvent $ keyCodeLetter KeyCode.ArrowLeft 'h'
-        Just selection <- gets synSelection
+        False <- use synSelectionSelf
+        selection <- use synSelection
         selection' <- maybeA (selPrev selection)
-        synPiSel . _Just .= selection'
+        synPiSel .= selection'
       handleArrowRight = do
         guardInputEvent $ keyCodeLetter KeyCode.ArrowRight 'l'
-        Just selection <- gets synSelection
+        False <- use synSelectionSelf
+        selection <- use synSelection
         selection' <- maybeA (selNext selection)
-        synPiSel . _Just .= selection'
+        synPiSel .= selection'
       handleSelRedirect = do
-        Just selection <- gets synSelection
+        False <- use synSelectionSelf
+        selection <- use synSelection
         case selection of
           SelPiArg   -> reactRedirect synPiArg
           SelPiExpr1 -> reactRedirect synPiExpr1
@@ -236,14 +249,17 @@ instance n ~ Int => SyntaxReact n ActiveZone SynPi where
       { _synPiArg   = SynArg mempty
       , _synPiExpr1 = SynHollow
       , _synPiExpr2 = SynHollow
-      , _synPiSel   = Just SelPiArg }
+      , _synPiSel = SelPiArg
+      , _synPiSelSelf = False }
 
 
 ---       App       ---
 ---    instances    ---
 
+instance SynSelfSelected SynApp
 instance SynSelection SynApp SelApp where
-  synSelection = view synAppSel
+  synSelection = synAppSel
+  synSelectionSelf = synAppSelSelf
 
 instance UndoEq SynApp where
   undoEq s1 s2
@@ -263,7 +279,7 @@ instance n ~ Int => SyntaxLayout n ActiveZone LayoutCtx SynApp where
           syn
     ] & horizontalCenter
 
-instance n ~ Int => SyntaxReact n ActiveZone SynApp where
+instance n ~ Int => SyntaxReact n rp ActiveZone SynApp where
   react = asum handlers
     where
       handlers =
@@ -274,24 +290,27 @@ instance n ~ Int => SyntaxReact n ActiveZone SynApp where
         , handleArrowDown ]
       handleArrowUp = do
         guardInputEvent $ keyCodeLetter KeyCode.ArrowUp 'k'
-        Just _ <- gets synSelection
-        synAppSel .= Nothing
+        False <- use synSelectionSelf
+        synSelectionSelf .= True
       handleArrowDown = do
         guardInputEvent $ keyCodeLetter KeyCode.ArrowDown 'j'
-        Nothing <- gets synSelection
-        synAppSel .= Just SelAppExpr1
+        True <- use synSelectionSelf
+        synSelectionSelf .= False
       handleArrowLeft = do
         guardInputEvent $ keyCodeLetter KeyCode.ArrowLeft 'h'
-        Just selection <- gets synSelection
+        False <- use synSelectionSelf
+        selection <- use synSelection
         selection' <- maybeA (selPrev selection)
-        synAppSel . _Just .= selection'
+        synAppSel .= selection'
       handleArrowRight = do
         guardInputEvent $ keyCodeLetter KeyCode.ArrowRight 'l'
-        Just selection <- gets synSelection
+        False <- use synSelectionSelf
+        selection <- use synSelection
         selection' <- maybeA (selNext selection)
-        synAppSel . _Just .= selection'
+        synAppSel .= selection'
       handleSelRedirect = do
-        Just selection <- gets synSelection
+        False <- use synSelectionSelf
+        selection <- use synSelection
         case selection of
           SelAppExpr1 -> reactRedirect synAppExpr1
           SelAppExpr2 -> reactRedirect synAppExpr2
@@ -301,24 +320,18 @@ instance n ~ Int => SyntaxReact n ActiveZone SynApp where
     return SynApp
       { _synAppExpr1 = SynHollow
       , _synAppExpr2 = SynHollow
-      , _synAppSel   = Just SelAppExpr1 }
+      , _synAppSel = SelAppExpr1
+      , _synAppSelSelf = False }
 
 ---  helpers  ---
 
-selLayout
-  :: (Typeable a1, Eq a1, SynSelection a a1, SynSelection syn sel,
-      SyntaxLayout n la LayoutCtx syn)
-  => LayoutCtx
-  -> (a1, a -> syn)
-  -> (CollageBuilderDraw n la -> CollageDraw' Int)
-  -> a
-  -> CollageDraw' Int
 selLayout lctx (sel', synSub) hook syn =
   let
     lctx'
       = lctx
-      & lctxSelected &&~ (synSelection syn == Just sel')
+      & lctxSelected &&~ (view synSelection syn == sel')
+      & lctxSelected &&~ (synSelfSelected syn == False)
       & lctxPath %~ (`snoc` toDyn sel')
-  in sel (lctx' & lctxSelected &&~ synSelectionSelf (synSub syn))
+  in sel (lctx' & lctxSelected &&~ synSelfSelected (synSub syn))
    $ hook
    $ runReader (layout (synSub syn)) lctx'

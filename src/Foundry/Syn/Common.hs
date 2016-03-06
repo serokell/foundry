@@ -3,7 +3,6 @@ module Foundry.Syn.Common where
 import Data.Text (Text)
 import Data.Sequence (Seq)
 import Data.Monoid
-import Data.Maybe
 import Data.Dynamic
 
 import Control.Lens
@@ -97,15 +96,17 @@ sel lctx
     then outline dark2 . background dark3
     else id
 
-guardInputEvent :: (InputEvent n -> Bool) -> React n la syn
+guardInputEvent :: (InputEvent n -> Bool) -> React n rp la syn
 guardInputEvent = guard <=< views rctxInputEvent
 
 class UndoEq a where
   undoEq :: a -> a -> Bool
 
-class SynSelection a sel | a -> sel where
-  synSelection :: a -> Maybe sel
-  synSelection = const Nothing
+class SynSelfSelected a where
+  synSelfSelected :: a -> Bool
+  default synSelfSelected :: SynSelection a sel => a -> Bool
+  synSelfSelected = view synSelectionSelf
 
-synSelectionSelf :: SynSelection a sel => a -> Bool
-synSelectionSelf = isNothing . synSelection
+class SynSelfSelected a => SynSelection a sel | a -> sel where
+  synSelection :: Lens' a sel
+  synSelectionSelf :: Lens' a Bool

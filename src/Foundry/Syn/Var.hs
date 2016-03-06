@@ -3,7 +3,6 @@ module Foundry.Syn.Var where
 import qualified Data.Text as Text
 import Data.Foldable
 import Data.Function
-import Data.Void
 import Control.Monad.Reader
 import Control.Lens
 
@@ -20,7 +19,8 @@ data SynVar = SynVar
 
 makeLenses ''SynVar
 
-instance SynSelection SynVar Void
+instance SynSelfSelected SynVar where
+  synSelfSelected = const True
 
 instance UndoEq SynVar where
   undoEq s1 s2
@@ -51,7 +51,7 @@ instance n ~ Int => SyntaxLayout n ActiveZone LayoutCtx SynVar where
         '9' -> '₉'
         c   -> c
 
-instance n ~ Int => SyntaxReact n ActiveZone SynVar where
+instance n ~ Int => SyntaxReact n rp ActiveZone SynVar where
   react = asum handlers
     where
       handlers =

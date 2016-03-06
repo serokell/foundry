@@ -11,11 +11,11 @@ data SynAdd s1 s2 = SynAugend s1 | SynAddend s2
 
 makePrisms ''SynAdd
 
-instance (SynSelection s1 sel1, SynSelection s2 sel2)
-      => SynSelection (SynAdd s1 s2) () where
-  synSelection = \case
-    SynAugend s -> () <$ synSelection s
-    SynAddend s -> () <$ synSelection s
+instance (SynSelfSelected s1, SynSelfSelected s2)
+      => SynSelfSelected (SynAdd s1 s2) where
+  synSelfSelected = \case
+    SynAugend s -> synSelfSelected s
+    SynAddend s -> synSelfSelected s
 
 instance (UndoEq s1, UndoEq s2)
       => UndoEq (SynAdd s1 s2) where
@@ -29,8 +29,8 @@ instance (SyntaxLayout n la lctx s1, SyntaxLayout n la lctx s2)
     SynAugend s -> layout s
     SynAddend s -> layout s
 
-instance (SyntaxReact n la s1, SyntaxReact n la s2)
-      => SyntaxReact n la (SynAdd s1 s2) where
+instance (SyntaxReact n rp la s1, SyntaxReact n rp la s2)
+      => SyntaxReact n rp la (SynAdd s1 s2) where
   react = asum [reactRedirect _SynAugend, reactRedirect _SynAddend]
   subreact = asum [subreactRedirect _SynAugend, subreactRedirect _SynAddend]
 
