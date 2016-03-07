@@ -1,7 +1,10 @@
 module Foundry.Syn.Record where
 
 import Data.Foldable
+import Control.Monad
+import Control.Monad.Reader
 import Control.Lens
+import Data.Dynamic
 
 import Data.Singletons.Prelude
 import Data.Singletons.Prelude.List
@@ -10,8 +13,12 @@ import Data.Singletons.Prelude.Maybe
 import Data.Vinyl
 import Data.Vinyl.TypeLevel
 
+import qualified Data.Singletons.TH as Sing
+import qualified Language.Haskell.TH as TH
+
 import Source.Syntax
 import Source.Collage
+import Source.Input
 import qualified Source.Input.KeyCode as KeyCode
 
 import Foundry.Syn.Common
@@ -135,3 +142,45 @@ instance ( kproxy ~ ('KProxy :: KProxy sel)
       => SynSelection (SynRecord kproxy) demoteRep where
   synSelection = synRecSel . someSingIso
   synSelectionSelf = synRecSelSelf
+
+instance UndoEq (Rec SynRecField '[]) where
+  undoEq RNil RNil = True
+
+instance (UndoEq (SynRecField a), UndoEq (Rec SynRecField as))
+      => UndoEq (Rec SynRecField (a ': as)) where
+  undoEq (a1 :& as1) (a2 :& as2) = undoEq a1 a2 && undoEq as1 as2
+
+instance ( kproxy ~ ('KProxy :: KProxy sel)
+         , UndoEq (SynRec kproxy) )
+      => UndoEq (SynRecord kproxy) where
+  undoEq a1 a2 = undoEq (a1 ^. synRec) (a2 ^. synRec)
+
+recSubreact :: Int ~ n => Char -> syn -> Subreact n rp ActiveZone syn
+recSubreact c syn = do
+  KeyPress [Shift] keyCode <- view rctxInputEvent
+  guard (keyLetter c keyCode)
+  return syn
+
+recHandleSelRedirect :: TH.Name -> TH.ExpQ
+recHandleSelRedirect selTypeName =
+  [e| do False <- use synSelectionSelf
+         SomeSing selection <- use synRecSel
+         $(Sing.sCases selTypeName [e|selection|]
+             [e|reactRedirect (synField selection)|])
+   |]
+
+selLayout ssel syn = do
+  let
+    sel' = fromSing ssel
+    sub = view (synField ssel) syn
+    appendSelection
+      = (lctxSelected &&~ (view synSelection syn == sel'))
+      . (lctxSelected &&~ (synSelfSelected syn == False))
+      . (lctxPath %~ (`snoc` toDyn sel'))
+    enforceSelfSelection
+      = lctxSelected &&~ synSelfSelected sub
+  local appendSelection $ do
+    a <- layout sub
+    reader $ \lctx ->
+       sel (enforceSelfSelection lctx)
+     $ selLayoutHook sel' a
