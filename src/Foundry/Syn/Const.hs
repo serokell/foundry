@@ -1,11 +1,7 @@
 module Foundry.Syn.Const where
 
-import Control.Monad.Reader
-import Control.Lens
-
+import Control.Applicative
 import Source.Syntax
-import Source.Input
-
 import Foundry.Syn.Common
 
 data SynConst = SynConstStar | SynConstBox
@@ -22,9 +18,7 @@ instance n ~ Int => SyntaxLayout n ActiveZone LayoutCtx SynConst where
     SynConstStar -> punct "★"
     SynConstBox  -> punct "□"
 
-instance n ~ Int => SyntaxReact n rp ActiveZone SynConst where
-  subreact = do
-    KeyPress [Shift] keyCode <- view rctxInputEvent
-    if | keyLetter 'S' keyCode -> return SynConstStar
-       | keyLetter 'B' keyCode -> return SynConstBox
-       | otherwise -> mzero
+instance SyntaxReact n rp ActiveZone SynConst where
+  subreact
+     =  simpleSubreact 'S' SynConstStar
+    <|> simpleSubreact 'B' SynConstBox

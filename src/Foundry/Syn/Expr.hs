@@ -46,8 +46,9 @@ type SynExpr = SynSum
 
 type SynLam = SynRecord ('KProxy :: KProxy SelLam)
 
-type instance FieldType (s :: SelLam) = FieldTypes s
-  '[SynArg, SynHole SynExpr, SynHole SynExpr]
+type instance FieldType 'SelLamArg   = SynArg
+type instance FieldType 'SelLamExpr1 = SynHole SynExpr
+type instance FieldType 'SelLamExpr2 = SynHole SynExpr
 
 instance Sel SelLam
 
@@ -78,7 +79,7 @@ instance n ~ Int => SyntaxLayout n ActiveZone LayoutCtx SynLam where
 instance n ~ Int => SyntaxReact n rp ActiveZone SynLam where
   react = $(recHandleSelRedirect ''SelLam) <|> handleArrows
   subreact
-    = recSubreact 'L'
+    = simpleSubreact 'L'
     $ SynRecord
        ( SynRecField (SynArg mempty)
       :& SynRecField SynHollow
@@ -92,8 +93,9 @@ instance n ~ Int => SyntaxReact n rp ActiveZone SynLam where
 
 type SynPi = SynRecord ('KProxy :: KProxy SelPi)
 
-type instance FieldType (s :: SelPi) = FieldTypes s
-  '[SynArg, SynHole SynExpr, SynHole SynExpr]
+type instance FieldType 'SelPiArg   = SynArg
+type instance FieldType 'SelPiExpr1 = SynHole SynExpr
+type instance FieldType 'SelPiExpr2 = SynHole SynExpr
 
 instance Sel SelPi
 
@@ -124,7 +126,7 @@ instance n ~ Int => SyntaxLayout n ActiveZone LayoutCtx SynPi where
 instance n ~ Int => SyntaxReact n rp ActiveZone SynPi where
   react = $(recHandleSelRedirect ''SelPi) <|> handleArrows
   subreact
-    = recSubreact 'P'
+    = simpleSubreact 'P'
     $ SynRecord
        ( SynRecField (SynArg mempty)
       :& SynRecField SynHollow
@@ -138,8 +140,8 @@ instance n ~ Int => SyntaxReact n rp ActiveZone SynPi where
 
 type SynApp = SynRecord ('KProxy :: KProxy SelApp)
 
-type instance FieldType (s :: SelApp) = FieldTypes s
-  '[SynHole SynExpr, SynHole SynExpr]
+type instance FieldType 'SelAppExpr1 = SynHole SynExpr
+type instance FieldType 'SelAppExpr2 = SynHole SynExpr
 
 instance Sel SelApp
 
@@ -158,7 +160,7 @@ instance n ~ Int => SyntaxLayout n ActiveZone LayoutCtx SynApp where
 instance n ~ Int => SyntaxReact n rp ActiveZone SynApp where
   react = $(recHandleSelRedirect ''SelApp) <|> handleArrows
   subreact
-    = recSubreact 'A'
+    = simpleSubreact 'A'
     $ SynRecord
       (SynRecField SynHollow :& SynRecField SynHollow :& RNil)
       (toSing SelAppExpr1) False

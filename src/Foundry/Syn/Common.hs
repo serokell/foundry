@@ -96,6 +96,12 @@ sel lctx
     then outline dark2 . background dark3
     else id
 
+simpleSubreact :: Char -> syn -> Subreact n rp la syn
+simpleSubreact c syn = do
+  KeyPress [Shift] keyCode <- view rctxInputEvent
+  guard (keyLetter c keyCode)
+  return syn
+
 guardInputEvent :: (InputEvent n -> Bool) -> React n rp la syn
 guardInputEvent = guard <=< views rctxInputEvent
 

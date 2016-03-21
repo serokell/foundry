@@ -1,32 +1,23 @@
 module Foundry.Syn.Record where
 
 import Data.Foldable
-import Control.Monad
 import Control.Monad.Reader
 import Control.Lens
 import Data.Dynamic
 
 import Data.Singletons.Prelude
-import Data.Singletons.Prelude.List
-import Data.Singletons.Prelude.Maybe
-
 import Data.Vinyl
-import Data.Vinyl.TypeLevel
 
 import qualified Data.Singletons.TH as Sing
 import qualified Language.Haskell.TH as TH
 
 import Source.Syntax
 import Source.Collage
-import Source.Input
 import qualified Source.Input.KeyCode as KeyCode
 
 import Foundry.Syn.Common
 
 type family FieldType (sel :: k) :: *
-
-type FieldTypes s ss = FromJust (Lookup s
-  (Zip (EnumFromTo MinBound MaxBound) ss))
 
 newtype SynRecField (sel :: k) = SynRecField (FieldType sel)
   deriving (UndoEq)
@@ -60,10 +51,7 @@ synRecSelSelf :: Lens' (SynRecord kproxy) Bool
 synRecSelSelf = lens _synRecSelSelf (\s b -> s {_synRecSelSelf = b})
 
 synField
-  :: RElem
-      (r :: sel)
-      (EnumFromTo MinBound MaxBound)
-      (RIndex r (EnumFromTo MinBound MaxBound))
+  :: ((r :: sel) ∈ EnumFromTo MinBound MaxBound)
   => Sing r
   -> Lens' (SynRecord ('KProxy :: KProxy sel)) (FieldType r)
 synField s = synRec . rlens s . _SynRecField
@@ -154,12 +142,6 @@ instance ( kproxy ~ ('KProxy :: KProxy sel)
          , UndoEq (SynRec kproxy) )
       => UndoEq (SynRecord kproxy) where
   undoEq a1 a2 = undoEq (a1 ^. synRec) (a2 ^. synRec)
-
-recSubreact :: Int ~ n => Char -> syn -> Subreact n rp ActiveZone syn
-recSubreact c syn = do
-  KeyPress [Shift] keyCode <- view rctxInputEvent
-  guard (keyLetter c keyCode)
-  return syn
 
 recHandleSelRedirect :: TH.Name -> TH.ExpQ
 recHandleSelRedirect selTypeName =
