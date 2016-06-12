@@ -58,6 +58,8 @@ executable foundry
                        FlexibleInstances
                        FlexibleContexts
                        GeneralizedNewtypeDeriving
+                       TypeInType
+                       TypeApplications
 
   ghc-options:         -Wall -threaded -O2
   ghc-prof-options:    -fprof-auto

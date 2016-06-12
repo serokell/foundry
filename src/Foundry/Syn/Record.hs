@@ -1,5 +1,6 @@
 module Foundry.Syn.Record where
 
+import Data.Kind (Type)
 import Data.Foldable
 import Control.Monad.Reader
 import Control.Lens
@@ -17,7 +18,7 @@ import qualified Source.Input.KeyCode as KeyCode
 
 import Foundry.Syn.Common
 
-type family FieldType (sel :: k) :: *
+type family FieldType (sel :: k) :: Type
 
 newtype SynRecField (sel :: k) = SynRecField (FieldType sel)
 
@@ -25,36 +26,30 @@ deriving instance UndoEq (FieldType sel) => UndoEq (SynRecField sel)
 
 makePrisms ''SynRecField
 
-type SynRec (kproxy :: KProxy sel) =
-  Rec (SynRecField :: sel -> *) (EnumFromTo MinBound MaxBound)
+type SynRec sel =
+  Rec (SynRecField :: sel -> Type) (EnumFromTo MinBound MaxBound)
 
-data SynRecord (kproxy :: KProxy sel) = SynRecord
-  { _synRec :: SynRec ('KProxy :: KProxy sel)
+data SynRecord sel = SynRecord
+  { _synRec :: SynRec sel
   , _synRecSel :: SomeSing ('KProxy :: KProxy sel)
   , _synRecSelSelf :: Bool
   }
 
 -- makeLenses fails for some reason.
 
-synRec
-  :: Lens'
-      (SynRecord ('KProxy :: KProxy sel))
-      (SynRec    ('KProxy :: KProxy sel))
+synRec :: Lens' (SynRecord sel) (SynRec sel)
 synRec = lens _synRec (\s b -> s {_synRec = b})
 
-synRecSel
-  :: Lens'
-       (SynRecord ('KProxy :: KProxy sel))
-       (SomeSing  ('KProxy :: KProxy sel))
+synRecSel :: Lens' (SynRecord sel) (SomeSing ('KProxy :: KProxy sel))
 synRecSel = lens _synRecSel (\s b -> s {_synRecSel = b})
 
-synRecSelSelf :: Lens' (SynRecord kproxy) Bool
+synRecSelSelf :: Lens' (SynRecord sel) Bool
 synRecSelSelf = lens _synRecSelSelf (\s b -> s {_synRecSelSelf = b})
 
 synField
   :: ((r :: sel) ∈ EnumFromTo MinBound MaxBound)
   => Sing r
-  -> Lens' (SynRecord ('KProxy :: KProxy sel)) (FieldType r)
+  -> Lens' (SynRecord sel) (FieldType r)
 synField s = synRec . rlens s . _SynRecField
 
 someSingIso
@@ -124,11 +119,11 @@ handleArrows = asum
 instance ( kproxy ~ ('KProxy :: KProxy sel)
          , SingKind kproxy
          , demoteRep ~ (DemoteRep kproxy) )
-      => SynSelfSelected (SynRecord kproxy)
+      => SynSelfSelected (SynRecord sel)
 instance ( kproxy ~ ('KProxy :: KProxy sel)
          , SingKind kproxy
          , demoteRep ~ (DemoteRep kproxy) )
-      => SynSelection (SynRecord kproxy) demoteRep where
+      => SynSelection (SynRecord sel) demoteRep where
   synSelection = synRecSel . someSingIso
   synSelectionSelf = synRecSelSelf
 
@@ -140,8 +135,8 @@ instance (UndoEq (SynRecField a), UndoEq (Rec SynRecField as))
   undoEq (a1 :& as1) (a2 :& as2) = undoEq a1 a2 && undoEq as1 as2
 
 instance ( kproxy ~ ('KProxy :: KProxy sel)
-         , UndoEq (SynRec kproxy) )
-      => UndoEq (SynRecord kproxy) where
+         , UndoEq (SynRec sel) )
+      => UndoEq (SynRecord sel) where
   undoEq a1 a2 = undoEq (a1 ^. synRec) (a2 ^. synRec)
 
 recHandleSelRedirect :: TH.Name -> TH.ExpQ

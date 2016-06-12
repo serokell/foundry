@@ -1,5 +1,6 @@
 module Foundry.Syn.Sum where
 
+import Data.Kind (Type)
 import Control.Lens
 import Data.Foldable
 
@@ -34,6 +35,6 @@ instance (SyntaxReact n rp la s1, SyntaxReact n rp la s2)
   react = asum [reactRedirect _SynAugend, reactRedirect _SynAddend]
   subreact = asum [subreactRedirect _SynAugend, subreactRedirect _SynAddend]
 
-type family SynSum (s :: [*]) :: * where
+type family SynSum (s :: [Type]) :: Type where
   SynSum '[s] = s
   SynSum (s ': ss) = SynAdd s (SynSum ss)

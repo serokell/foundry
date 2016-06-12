@@ -44,7 +44,7 @@ type SynExpr = SynSum
 
 ---- Lam ----
 
-type SynLam = SynRecord ('KProxy :: KProxy SelLam)
+type SynLam = SynRecord SelLam
 
 type instance FieldType 'SelLamArg   = SynArg
 type instance FieldType 'SelLamExpr1 = SynHole SynExpr
@@ -91,7 +91,7 @@ instance n ~ Int => SyntaxReact n rp ActiveZone SynLam where
 
 ---- Pi ----
 
-type SynPi = SynRecord ('KProxy :: KProxy SelPi)
+type SynPi = SynRecord SelPi
 
 type instance FieldType 'SelPiArg   = SynArg
 type instance FieldType 'SelPiExpr1 = SynHole SynExpr
@@ -138,7 +138,7 @@ instance n ~ Int => SyntaxReact n rp ActiveZone SynPi where
 
 ---- App ----
 
-type SynApp = SynRecord ('KProxy :: KProxy SelApp)
+type SynApp = SynRecord SelApp
 
 type instance FieldType 'SelAppExpr1 = SynHole SynExpr
 type instance FieldType 'SelAppExpr2 = SynHole SynExpr
