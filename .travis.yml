@@ -5,9 +5,6 @@ addons:
     sources:
       - hvr-ghc
     packages:
-      - ghc-7.10.2
-      - alex-3.1.4
-      - happy-1.19.5
       - libgtk-3-dev
       - libgmp-dev
 
@@ -16,11 +13,11 @@ env:
 
 install:
   - mkdir -p ~/.local/bin
-  - travis_retry curl -L https://github.com/commercialhaskell/stack/releases/download/v0.1.6.0/stack-0.1.6.0-linux-x86_64.tar.gz | tar -xvzf -
-  - mv stack-0.1.6.0-linux-x86_64/stack ~/.local/bin
+  - travis_retry curl -L https://github.com/commercialhaskell/stack/releases/download/v1.1.2/stack-1.1.2-linux-x86_64.tar.gz | tar -xvz
+  - mv stack-1.1.2-linux-x86_64/stack ~/.local/bin
   - export PATH=~/.local/bin:$PATH
   - stack setup
   - stack install gtk2hs-buildtools
 
 script:
-  - stack test
+  - stack test foundry
