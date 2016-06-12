@@ -32,45 +32,57 @@ import qualified Morte.Core as M
 import qualified Morte.Parser as M.P
 import qualified Morte.Import as M.I
 
+synImportText :: Text.Lazy.Text -> SynText
+synImportText t =
+  let t' = Text.Lazy.toStrict t
+  in SynText t' (Text.length t') False
+
+synImportConst :: M.Const -> SynConst
+synImportConst = \case
+  M.Star -> SynConstStar
+  M.Box -> SynConstBox
+
+synImportVar :: M.Var -> SynVar
+synImportVar (M.V t n) = SynVar (synImportText t) n
+
+synImportArg :: Text.Lazy.Text -> SynArg
+synImportArg t = SynArg (synImportText t)
+
+synImportLam :: Text.Lazy.Text -> M.Expr M.X -> M.Expr M.X -> SynLam
+synImportLam x _A  b = SynRecord
+   ( SynRecField (synImportArg x)
+  :& SynRecField (SynSolid (synImportExpr _A))
+  :& SynRecField (SynSolid (synImportExpr b))
+  :& RNil )
+  (toSing SelLamExpr2)
+  True
+
+synImportPi :: Text.Lazy.Text -> M.Expr M.X -> M.Expr M.X -> SynPi
+synImportPi  x _A _B = SynRecord
+   ( SynRecField (synImportArg x)
+  :& SynRecField (SynSolid (synImportExpr _A))
+  :& SynRecField (SynSolid (synImportExpr _B))
+  :& RNil )
+  (toSing SelPiExpr2)
+  True
+
+synImportApp :: M.Expr M.X -> M.Expr M.X -> SynApp
+synImportApp f a = SynRecord
+   ( SynRecField (SynSolid (synImportExpr f))
+  :& SynRecField (SynSolid (synImportExpr a))
+  :& RNil )
+  (toSing SelAppExpr1)
+  True
+
 synImportExpr :: M.Expr M.X -> SynExpr
-synImportExpr =
-  let
-    synImportText t =
-      let t' = Text.Lazy.toStrict t
-      in SynText t' (Text.length t') False
-    synImportConst = \case
-      M.Star -> SynConstStar
-      M.Box -> SynConstBox
-    synImportVar (M.V t n) = SynVar (synImportText t) n
-    synImportArg t = SynArg (synImportText t)
-    synImportLam x _A  b = SynRecord
-       ( SynRecField (synImportArg x)
-      :& SynRecField (SynSolid (synImportExpr _A))
-      :& SynRecField (SynSolid (synImportExpr b))
-      :& RNil )
-      (toSing SelLamExpr2)
-      True
-    synImportPi  x _A _B = SynRecord
-       ( SynRecField (synImportArg x)
-      :& SynRecField (SynSolid (synImportExpr _A))
-      :& SynRecField (SynSolid (synImportExpr _B))
-      :& RNil )
-      (toSing SelPiExpr2)
-      True
-    synImportApp f a = SynRecord
-       ( SynRecField (SynSolid (synImportExpr f))
-      :& SynRecField (SynSolid (synImportExpr a))
-      :& RNil )
-      (toSing SelAppExpr1)
-      True
-  in \case
-    {- TODO: autolift '[SynLam, SynPi, SynApp, SynConst, SynVar, SynEmbed] -}
-    M.Const c -> SynAddend . SynAddend . SynAddend . SynAugend $ synImportConst c
-    M.Var v -> SynAddend . SynAddend . SynAddend . SynAddend . SynAugend $ synImportVar v
-    M.Lam x _A b -> SynAugend $ synImportLam x _A b
-    M.Pi  x _A _B -> SynAddend . SynAugend $ synImportPi x _A _B
-    M.App f a -> SynAddend . SynAddend . SynAugend $ synImportApp f a
-    M.Embed e -> M.absurd e
+synImportExpr = \case
+  {- TODO: autolift '[SynLam, SynPi, SynApp, SynConst, SynVar, SynEmbed] -}
+  M.Const c -> SynAddend . SynAddend . SynAddend . SynAugend $ synImportConst c
+  M.Var v -> SynAddend . SynAddend . SynAddend . SynAddend . SynAugend $ synImportVar v
+  M.Lam x _A b -> SynAugend $ synImportLam x _A b
+  M.Pi  x _A _B -> SynAddend . SynAugend $ synImportPi x _A _B
+  M.App f a -> SynAddend . SynAddend . SynAugend $ synImportApp f a
+  M.Embed e -> M.absurd e
 
 data SynTop n = SynTop
   { _synExpr            :: SynHole SynExpr
@@ -194,5 +206,5 @@ instance n ~ Int => SyntaxBlank (SynTop n) where
     let et = "λ(x : ∀(Nat : *) → ∀(Succ : Nat → Nat) → ∀(Zero : Nat) → Nat) → x (∀(Bool : *) → ∀(True : Bool) → ∀(False : Bool) → Bool) (λ(x : ∀(Bool : *) → ∀(True : Bool) → ∀(False : Bool) → Bool) → x (∀(Bool : *) → ∀(True : Bool) → ∀(False : Bool) → Bool) (λ(Bool : *) → λ(True : Bool) → λ(False : Bool) → False) (λ(Bool : *) → λ(True : Bool) → λ(False : Bool) → True)) (λ(Bool : *) → λ(True : Bool) → λ(False : Bool) → True)"
     expr <- synImportExpr <$> case M.P.exprFromText et of
       Left  _ -> return $ M.Const M.Star
-      Right e -> M.I.load e
+      Right e -> M.I.load Nothing e
     return $ SynTop (SynSolid expr) (pure 0) False [] []

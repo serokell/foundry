@@ -6,4 +6,8 @@ packages:
     commit: ef215ba8a88d8faaeb198c6d95910fb970091fcd
   subdirs:
     - lib
-resolver: lts-5.5
+resolver: nightly-2016-06-11
+allow-newer: True
+extra-deps:
+- morte-1.6.0
+- streams-3.2.1

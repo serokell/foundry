@@ -20,7 +20,8 @@ import Foundry.Syn.Common
 type family FieldType (sel :: k) :: *
 
 newtype SynRecField (sel :: k) = SynRecField (FieldType sel)
-  deriving (UndoEq)
+
+deriving instance UndoEq (FieldType sel) => UndoEq (SynRecField sel)
 
 makePrisms ''SynRecField
 
