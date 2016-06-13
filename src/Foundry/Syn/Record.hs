@@ -31,7 +31,7 @@ type SynRec sel =
 
 data SynRecord sel = SynRecord
   { _synRec :: SynRec sel
-  , _synRecSel :: SomeSing ('KProxy :: KProxy sel)
+  , _synRecSel :: SomeSing sel
   , _synRecSelSelf :: Bool
   }
 
@@ -40,7 +40,7 @@ data SynRecord sel = SynRecord
 synRec :: Lens' (SynRecord sel) (SynRec sel)
 synRec = lens _synRec (\s b -> s {_synRec = b})
 
-synRecSel :: Lens' (SynRecord sel) (SomeSing ('KProxy :: KProxy sel))
+synRecSel :: Lens' (SynRecord sel) (SomeSing sel)
 synRecSel = lens _synRecSel (\s b -> s {_synRecSel = b})
 
 synRecSelSelf :: Lens' (SynRecord sel) Bool
@@ -52,10 +52,7 @@ synField
   -> Lens' (SynRecord sel) (FieldType r)
 synField s = synRec . rlens s . _SynRecField
 
-someSingIso
-  :: SingKind ('KProxy :: KProxy k)
-  => Iso' (SomeSing  ('KProxy :: KProxy k))
-          (DemoteRep ('KProxy :: KProxy k))
+someSingIso :: SingKind sel => Iso' (SomeSing sel) (DemoteRep sel)
 someSingIso = iso (\(SomeSing ss) -> fromSing ss) toSing
 
 -- Selection-related classes
@@ -116,14 +113,11 @@ handleArrows
 handleArrows = asum
   [handleArrowUp, handleArrowDown, handleArrowLeft, handleArrowRight]
 
-instance ( kproxy ~ ('KProxy :: KProxy sel)
-         , SingKind kproxy
-         , demoteRep ~ (DemoteRep kproxy) )
+instance (SingKind sel, DemoteRep sel ~ sel)
       => SynSelfSelected (SynRecord sel)
-instance ( kproxy ~ ('KProxy :: KProxy sel)
-         , SingKind kproxy
-         , demoteRep ~ (DemoteRep kproxy) )
-      => SynSelection (SynRecord sel) demoteRep where
+
+instance (SingKind sel, DemoteRep sel ~ sel)
+      => SynSelection (SynRecord sel) sel where
   synSelection = synRecSel . someSingIso
   synSelectionSelf = synRecSelSelf
 
@@ -134,9 +128,7 @@ instance (UndoEq (SynRecField a), UndoEq (Rec SynRecField as))
       => UndoEq (Rec SynRecField (a ': as)) where
   undoEq (a1 :& as1) (a2 :& as2) = undoEq a1 a2 && undoEq as1 as2
 
-instance ( kproxy ~ ('KProxy :: KProxy sel)
-         , UndoEq (SynRec sel) )
-      => UndoEq (SynRecord sel) where
+instance UndoEq (SynRec sel) => UndoEq (SynRecord sel) where
   undoEq a1 a2 = undoEq (a1 ^. synRec) (a2 ^. synRec)
 
 recHandleSelRedirect :: TH.Name -> TH.ExpQ

@@ -2,6 +2,9 @@ flags: {}
 packages:
 - '.'
 - location:
+    git: https://github.com/goldfirere/singletons.git
+    commit: 69851166b0f9a604bcfff9a305d14bec8a95414e
+- location:
     git: https://github.com/int-index/source
     commit: ef215ba8a88d8faaeb198c6d95910fb970091fcd
   subdirs:
@@ -9,5 +12,5 @@ packages:
 resolver: nightly-2016-06-11
 allow-newer: True
 extra-deps:
-- morte-1.6.0
+- morte-1.6.1
 - streams-3.2.1
