@@ -9,8 +9,8 @@ packages:
     commit: ef215ba8a88d8faaeb198c6d95910fb970091fcd
   subdirs:
     - lib
-resolver: nightly-2016-06-11
+resolver: nightly-2016-08-20
 allow-newer: True
 extra-deps:
 - morte-1.6.1
-- streams-3.2.1
+- streams-3.3

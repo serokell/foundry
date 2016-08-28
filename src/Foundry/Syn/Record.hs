@@ -57,18 +57,16 @@ someSingIso = iso (\(SomeSing ss) -> fromSing ss) toSing
 
 -- Selection-related classes
 
-class Eq s => Sel s where
-  selOrder :: [s]
-  default selOrder :: (Enum s, Bounded s) => [s]
-  selOrder = [minBound .. maxBound]
+selOrder :: (Enum s, Bounded s) => [s]
+selOrder = [minBound .. maxBound]
 
 lookupNext :: Eq s => [s] -> s -> Maybe s
 lookupNext ss s = lookup s (ss `zip` tail ss)
 
-selRevOrder :: Sel s => [s]
+selRevOrder :: (Enum s, Bounded s) => [s]
 selRevOrder = reverse selOrder
 
-selNext, selPrev :: Sel s => s -> Maybe s
+selNext, selPrev :: (Enum s, Bounded s, Eq s) => s -> Maybe s
 selNext = lookupNext selOrder
 selPrev = lookupNext selRevOrder
 
@@ -88,7 +86,7 @@ handleArrowDown = do
   synSelectionSelf .= False
 
 handleArrowLeft
-  :: (SynSelection syn sel, Sel sel)
+  :: (SynSelection syn sel, Enum sel, Bounded sel, Eq sel)
   => React n rp la syn
 handleArrowLeft = do
   guardInputEvent $ keyCodeLetter KeyCode.ArrowLeft 'h'
@@ -98,7 +96,7 @@ handleArrowLeft = do
   synSelection .= selection'
 
 handleArrowRight
-  :: (SynSelection syn sel, Sel sel)
+  :: (SynSelection syn sel, Enum sel, Bounded sel, Eq sel)
   => React n rp la syn
 handleArrowRight = do
   guardInputEvent $ keyCodeLetter KeyCode.ArrowRight 'l'
@@ -108,7 +106,7 @@ handleArrowRight = do
   synSelection .= selection'
 
 handleArrows
-  :: (SynSelection syn sel, Sel sel)
+  :: (SynSelection syn sel, Enum sel, Bounded sel, Eq sel)
   => React n rp la syn
 handleArrows = asum
   [handleArrowUp, handleArrowDown, handleArrowLeft, handleArrowRight]
@@ -139,6 +137,15 @@ recHandleSelRedirect selTypeName =
              [e|reactRedirect (synField selection)|])
    |]
 
+selLayout ::
+  forall t (a :: t).
+     (DemoteRep t ~ t, SelLayout t,
+      (a ∈ EnumFromTo MinBound MaxBound),
+      SingKind t, SyntaxLayout Int ActiveZone LayoutCtx (FieldType a),
+      SynSelfSelected (FieldType a), Typeable t, Eq t)
+  => Sing a
+  -> SynRecord t
+  -> Reader LayoutCtx (CollageDraw' Int)
 selLayout ssel syn = do
   let
     sel' = fromSing ssel

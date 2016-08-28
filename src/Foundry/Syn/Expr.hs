@@ -50,8 +50,6 @@ type instance FieldType 'SelLamArg   = SynArg
 type instance FieldType 'SelLamExpr1 = SynHole SynExpr
 type instance FieldType 'SelLamExpr2 = SynHole SynExpr
 
-instance Sel SelLam
-
 instance SelLayout SelLam where
   selLayoutHook = \case
     SelLamArg   -> join pad (Point 4 0)
@@ -97,8 +95,6 @@ type instance FieldType 'SelPiArg   = SynArg
 type instance FieldType 'SelPiExpr1 = SynHole SynExpr
 type instance FieldType 'SelPiExpr2 = SynHole SynExpr
 
-instance Sel SelPi
-
 instance SelLayout SelPi where
   selLayoutHook = \case
     SelPiArg   -> join pad (Point 4 0)
@@ -142,8 +138,6 @@ type SynApp = SynRecord SelApp
 
 type instance FieldType 'SelAppExpr1 = SynHole SynExpr
 type instance FieldType 'SelAppExpr2 = SynHole SynExpr
-
-instance Sel SelApp
 
 instance SelLayout SelApp where
   selLayoutHook = \case
