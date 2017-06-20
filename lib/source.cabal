@@ -1,0 +1,56 @@
+name:                source
+version:             0.1.0.0
+build-type:          Simple
+cabal-version:       >=1.10
+
+library
+
+  exposed-modules:     Source
+                       Source.Point
+                       Source.Collage
+                       Source.Collage.Builder
+                       Source.Draw
+                       Source.Style
+                       Source.Render
+                       Source.Input
+                       Source.Input.KeyCode
+                       Source.Syntax
+
+  build-depends:       base >=4.7
+               ,       lens >=4.11
+               ,       transformers >=0.4
+               ,       gtk3 >=0.13
+               ,       cairo >=0.13
+               ,       pango >=0.13
+               ,       text >=1.2
+               ,       streams >=3.2.1
+               ,       semigroups >=0.16
+               ,       mtl >= 2.2.1
+               ,       bifunctors
+
+  default-language:    Haskell2010
+  default-extensions:  LambdaCase
+                       MultiWayIf
+                       TupleSections
+                       RecordWildCards
+                       RankNTypes
+                       ScopedTypeVariables
+                       TypeFamilies
+                       GADTs
+                       PatternSynonyms
+                       ViewPatterns
+                       ConstraintKinds
+                       DataKinds
+                       PolyKinds
+                       TypeOperators
+                       StandaloneDeriving
+                       MultiParamTypeClasses
+                       FlexibleInstances
+                       FlexibleContexts
+                       UndecidableInstances
+
+  ghc-options:         -Wall -threaded -O2
+  ghc-prof-options:    -fprof-auto
+                       -rtsopts
+                       -auto-all
+                       -caf-all

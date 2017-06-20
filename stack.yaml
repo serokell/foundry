@@ -5,10 +5,4 @@ packages:
     git: https://github.com/goldfirere/singletons.git
     commit: 00c488fe5a2384b401bd3b1b6d4b197c5d1e1a56
   extra-dep: true
-- location:
-    git: https://github.com/int-index/source-old
-    commit: c59f0c4e1b1ca47e14d11a69d410d283ff526629
-  extra-dep: true
-  subdirs:
-    - lib
 resolver: nightly-2017-06-19
