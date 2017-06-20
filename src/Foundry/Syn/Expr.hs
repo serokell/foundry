@@ -5,7 +5,6 @@ import Control.Applicative
 import Control.Monad.Reader
 import Control.Lens
 
-import qualified Language.Haskell.TH as TH
 import qualified Data.Singletons.TH as Sing
 import Data.Singletons.Prelude
 
@@ -35,8 +34,7 @@ Sing.singletons [d|
     deriving (Eq, Ord, Enum, Bounded, Show)
   |]
 
--- A necessary hack. Does nothing.
-TH.runQ $ return []
+return []
 
 type SynExpr = SynSum
   '[SynLam, SynPi, SynApp, SynConst, SynVar, SynEmbed]
@@ -46,9 +44,10 @@ type SynExpr = SynSum
 
 type SynLam = SynRecord SelLam
 
-type instance FieldType 'SelLamArg   = SynArg
-type instance FieldType 'SelLamExpr1 = SynHole SynExpr
-type instance FieldType 'SelLamExpr2 = SynHole SynExpr
+type instance FieldTypes SelLam =
+  '[ SynArg
+   , SynHole SynExpr
+   , SynHole SynExpr ]
 
 instance SelLayout SelLam where
   selLayoutHook = \case
@@ -83,7 +82,7 @@ instance n ~ Int => SyntaxReact n rp ActiveZone SynLam where
       :& SynRecField SynHollow
       :& SynRecField SynHollow
       :& RNil )
-      (toSing SelLamArg)
+      0
       False
 
 
@@ -91,9 +90,10 @@ instance n ~ Int => SyntaxReact n rp ActiveZone SynLam where
 
 type SynPi = SynRecord SelPi
 
-type instance FieldType 'SelPiArg   = SynArg
-type instance FieldType 'SelPiExpr1 = SynHole SynExpr
-type instance FieldType 'SelPiExpr2 = SynHole SynExpr
+type instance FieldTypes SelPi =
+  '[ SynArg
+   , SynHole SynExpr
+   , SynHole SynExpr ]
 
 instance SelLayout SelPi where
   selLayoutHook = \case
@@ -128,7 +128,7 @@ instance n ~ Int => SyntaxReact n rp ActiveZone SynPi where
       :& SynRecField SynHollow
       :& SynRecField SynHollow
       :& RNil )
-      (toSing SelPiArg)
+      0
       False
 
 
@@ -136,8 +136,9 @@ instance n ~ Int => SyntaxReact n rp ActiveZone SynPi where
 
 type SynApp = SynRecord SelApp
 
-type instance FieldType 'SelAppExpr1 = SynHole SynExpr
-type instance FieldType 'SelAppExpr2 = SynHole SynExpr
+type instance FieldTypes SelApp =
+  '[ SynHole SynExpr
+   , SynHole SynExpr ]
 
 instance SelLayout SelApp where
   selLayoutHook = \case
@@ -157,4 +158,4 @@ instance n ~ Int => SyntaxReact n rp ActiveZone SynApp where
     = simpleSubreact 'A'
     $ SynRecord
       (SynRecField SynHollow :& SynRecField SynHollow :& RNil)
-      (toSing SelAppExpr1) False
+      0 False

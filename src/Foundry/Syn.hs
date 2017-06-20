@@ -10,7 +10,6 @@ import Control.Monad.State
 import Control.Lens
 import Data.Dynamic
 
-import Data.Singletons.Prelude
 import Data.Vinyl
 
 import Source.Collage.Builder (vertical)
@@ -54,7 +53,7 @@ synImportLam x _A  b = SynRecord
   :& SynRecField (SynSolid (synImportExpr _A))
   :& SynRecField (SynSolid (synImportExpr b))
   :& RNil )
-  (toSing SelLamExpr2)
+  2
   True
 
 synImportPi :: Text.Lazy.Text -> M.Expr M.X -> M.Expr M.X -> SynPi
@@ -63,7 +62,7 @@ synImportPi  x _A _B = SynRecord
   :& SynRecField (SynSolid (synImportExpr _A))
   :& SynRecField (SynSolid (synImportExpr _B))
   :& RNil )
-  (toSing SelPiExpr2)
+  2
   True
 
 synImportApp :: M.Expr M.X -> M.Expr M.X -> SynApp
@@ -71,7 +70,7 @@ synImportApp f a = SynRecord
    ( SynRecField (SynSolid (synImportExpr f))
   :& SynRecField (SynSolid (synImportExpr a))
   :& RNil )
-  (toSing SelAppExpr1)
+  0
   True
 
 synImportExpr :: M.Expr M.X -> SynExpr

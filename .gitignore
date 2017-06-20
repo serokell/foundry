@@ -1,4 +1,8 @@
-.stack-work
 tags
+.stack-work
+dist
+dist-newstyle
+.cabal-sandbox/
+cabal.sandbox.config
 *.agdai
 MAlonzo

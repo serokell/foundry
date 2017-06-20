@@ -3,6 +3,7 @@ module Foundry.Syn.Common where
 import Data.Text (Text)
 import Data.Sequence (Seq)
 import Data.Monoid
+import Data.Vinyl
 import Data.Dynamic
 
 import Control.Lens
@@ -107,6 +108,14 @@ guardInputEvent = guard <=< views rctxInputEvent
 
 class UndoEq a where
   undoEq :: a -> a -> Bool
+
+instance UndoEq (Rec f '[]) where
+  undoEq RNil RNil = True
+
+instance (UndoEq (f a), UndoEq (Rec f as))
+      => UndoEq (Rec f (a ': as)) where
+  undoEq (a1 :& as1) (a2 :& as2) = undoEq a1 a2 && undoEq as1 as2
+
 
 class SynSelfSelected a where
   synSelfSelected :: a -> Bool

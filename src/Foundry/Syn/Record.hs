@@ -7,6 +7,7 @@ import Control.Lens
 import Data.Dynamic
 
 import Data.Singletons.Prelude
+import Data.Singletons.Prelude.List
 import Data.Vinyl
 
 import qualified Data.Singletons.TH as Sing
@@ -18,42 +19,33 @@ import qualified Source.Input.KeyCode as KeyCode
 
 import Foundry.Syn.Common
 
-type family FieldType (sel :: k) :: Type
+type family FieldTypes (sel :: Type) :: [Type]
 
-newtype SynRecField (sel :: k) = SynRecField (FieldType sel)
+newtype SynRecField k (sel :: k) = SynRecField (FieldTypes k :!! FromEnum sel)
 
-deriving instance UndoEq (FieldType sel) => UndoEq (SynRecField sel)
+deriving instance UndoEq (FieldTypes k :!! FromEnum sel) => UndoEq (SynRecField k sel)
 
 makePrisms ''SynRecField
 
 type SynRec sel =
-  Rec (SynRecField :: sel -> Type) (EnumFromTo MinBound MaxBound)
+  Rec (SynRecField sel) (EnumFromTo MinBound MaxBound)
 
 data SynRecord sel = SynRecord
   { _synRec :: SynRec sel
-  , _synRecSel :: SomeSing sel
+  , _synRecSel :: Integer
   , _synRecSelSelf :: Bool
   }
 
--- makeLenses fails for some reason.
+makeLenses ''SynRecord
 
-synRec :: Lens' (SynRecord sel) (SynRec sel)
-synRec = lens _synRec (\s b -> s {_synRec = b})
-
-synRecSel :: Lens' (SynRecord sel) (SomeSing sel)
-synRecSel = lens _synRecSel (\s b -> s {_synRecSel = b})
-
-synRecSelSelf :: Lens' (SynRecord sel) Bool
-synRecSelSelf = lens _synRecSelSelf (\s b -> s {_synRecSelSelf = b})
+instance UndoEq (SynRec sel) => UndoEq (SynRecord sel) where
+  undoEq a1 a2 = undoEq (a1 ^. synRec) (a2 ^. synRec)
 
 synField
   :: ((r :: sel) ∈ EnumFromTo MinBound MaxBound)
   => Sing r
-  -> Lens' (SynRecord sel) (FieldType r)
+  -> Lens' (SynRecord sel) (FieldTypes sel :!! FromEnum r)
 synField s = synRec . rlens s . _SynRecField
-
-someSingIso :: SingKind sel => Iso' (SomeSing sel) (DemoteRep sel)
-someSingIso = iso (\(SomeSing ss) -> fromSing ss) toSing
 
 -- Selection-related classes
 
@@ -111,38 +103,28 @@ handleArrows
 handleArrows = asum
   [handleArrowUp, handleArrowDown, handleArrowLeft, handleArrowRight]
 
-instance (SingKind sel, DemoteRep sel ~ sel)
+instance (SingKind sel, Demote sel ~ sel, Enum sel)
       => SynSelfSelected (SynRecord sel)
 
-instance (SingKind sel, DemoteRep sel ~ sel)
+instance (SingKind sel, Demote sel ~ sel, Enum sel)
       => SynSelection (SynRecord sel) sel where
-  synSelection = synRecSel . someSingIso
+  synSelection = synRecSel . iso (toEnum . fromIntegral) (toInteger . fromEnum)
   synSelectionSelf = synRecSelSelf
-
-instance UndoEq (Rec SynRecField '[]) where
-  undoEq RNil RNil = True
-
-instance (UndoEq (SynRecField a), UndoEq (Rec SynRecField as))
-      => UndoEq (Rec SynRecField (a ': as)) where
-  undoEq (a1 :& as1) (a2 :& as2) = undoEq a1 a2 && undoEq as1 as2
-
-instance UndoEq (SynRec sel) => UndoEq (SynRecord sel) where
-  undoEq a1 a2 = undoEq (a1 ^. synRec) (a2 ^. synRec)
 
 recHandleSelRedirect :: TH.Name -> TH.ExpQ
 recHandleSelRedirect selTypeName =
   [e| do False <- use synSelectionSelf
-         SomeSing selection <- use synRecSel
+         SomeSing selection <- uses synRecSel (toSing . toEnum . fromIntegral)
          $(Sing.sCases selTypeName [e|selection|]
              [e|reactRedirect (synField selection)|])
    |]
 
 selLayout ::
   forall t (a :: t).
-     (DemoteRep t ~ t, SelLayout t,
+     (Demote t ~ t, SelLayout t, Enum t,
       (a ∈ EnumFromTo MinBound MaxBound),
-      SingKind t, SyntaxLayout Int ActiveZone LayoutCtx (FieldType a),
-      SynSelfSelected (FieldType a), Typeable t, Eq t)
+      SingKind t, SyntaxLayout Int ActiveZone LayoutCtx (FieldTypes t :!! FromEnum a),
+      SynSelfSelected (FieldTypes t :!! FromEnum a), Typeable t, Eq t)
   => Sing a
   -> SynRecord t
   -> Reader LayoutCtx (CollageDraw' Int)
