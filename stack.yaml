@@ -6,3 +6,7 @@ packages:
     commit: 00c488fe5a2384b401bd3b1b6d4b197c5d1e1a56
   extra-dep: true
 resolver: nightly-2017-06-19
+
+nix:
+  shell-file: shell.nix
+  pure: true
