@@ -4,7 +4,6 @@ import Data.Text (Text)
 import qualified Data.Text as Text
 import Data.Foldable
 import Data.Function
-import Data.Monoid
 
 import Control.Monad.Reader
 import Control.Monad.State
@@ -25,12 +24,14 @@ data SynText = SynText
 
 makeLenses ''SynText
 
-instance Monoid SynText where
-  mempty = SynText "" 0 True
-  mappend syn1 syn2 = syn1
+instance Semigroup SynText where
+  syn1 <> syn2 = syn1
     & synTextContent  %~ mappend (syn2 ^. synTextContent)
     & synTextPosition %~ max     (syn2 ^. synTextPosition)
     & synTextEditMode %~ (&&)    (syn2 ^. synTextEditMode)
+
+instance Monoid SynText where
+  mempty = SynText "" 0 True
 
 splitSynText :: SynText -> (Text, Text)
 splitSynText syn = Text.splitAt (syn ^. synTextPosition) (syn ^. synTextContent)

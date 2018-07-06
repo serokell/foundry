@@ -1,8 +1,25 @@
-tags
-.stack-work
+# Cabal
 dist
 dist-newstyle
 .cabal-sandbox/
 cabal.sandbox.config
+cabal.project.local
+.ghc.environment*
+
+# Profiling
+*.prof
+
+# Stack
+.stack-work
+
+# Emacs
+TAGS
+.dir-locals.el
+
+# Vim
+tags
+*.swp
+
+# Agda
 *.agdai
 MAlonzo
