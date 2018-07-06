@@ -41,7 +41,7 @@ data Element n a = Element
 makeLenses ''Element
 
 newtype Collage n a = Collage { getCollage :: [Element n a] }
-  deriving (Eq, Show, Monoid, Functor)
+  deriving (Eq, Show, Semigroup, Monoid, Functor)
 
 makePrisms ''Collage
 

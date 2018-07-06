@@ -21,9 +21,9 @@ import Foundry.Syn.Common
 
 type family FieldTypes (sel :: Type) :: [Type]
 
-newtype SynRecField k (sel :: k) = SynRecField (FieldTypes k :!! FromEnum sel)
+newtype SynRecField k (sel :: k) = SynRecField (FieldTypes k !! FromEnum sel)
 
-deriving instance UndoEq (FieldTypes k :!! FromEnum sel) => UndoEq (SynRecField k sel)
+deriving instance UndoEq (FieldTypes k !! FromEnum sel) => UndoEq (SynRecField k sel)
 
 makePrisms ''SynRecField
 
@@ -44,7 +44,7 @@ instance UndoEq (SynRec sel) => UndoEq (SynRecord sel) where
 synField
   :: ((r :: sel) ∈ EnumFromTo MinBound MaxBound)
   => Sing r
-  -> Lens' (SynRecord sel) (FieldTypes sel :!! FromEnum r)
+  -> Lens' (SynRecord sel) (FieldTypes sel !! FromEnum r)
 synField s = synRec . rlens s . _SynRecField
 
 -- Selection-related classes
@@ -123,8 +123,8 @@ selLayout ::
   forall t (a :: t).
      (Demote t ~ t, SelLayout t, Enum t,
       (a ∈ EnumFromTo MinBound MaxBound),
-      SingKind t, SyntaxLayout Int ActiveZone LayoutCtx (FieldTypes t :!! FromEnum a),
-      SynSelfSelected (FieldTypes t :!! FromEnum a), Typeable t, Eq t)
+      SingKind t, SyntaxLayout Int ActiveZone LayoutCtx (FieldTypes t !! FromEnum a),
+      SynSelfSelected (FieldTypes t !! FromEnum a), Typeable t, Eq t)
   => Sing a
   -> SynRecord t
   -> Reader LayoutCtx (CollageDraw' Int)

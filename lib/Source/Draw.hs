@@ -5,7 +5,6 @@ module Source.Draw
   ) where
 
 import Control.Lens
-import Data.Monoid
 import Data.Text (Text)
 import qualified Data.Text as Text
 import qualified Graphics.Rendering.Pango as Pango

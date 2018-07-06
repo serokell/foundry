@@ -20,7 +20,6 @@ Implementation status:
 ## Getting Started
 
 ```
-$ stack install gtk2hs-buildtools
-$ stack build
-$ stack exec -- foundry
+$ nix-shell --pure
+$ cabal new-run exe:foundry
 ```

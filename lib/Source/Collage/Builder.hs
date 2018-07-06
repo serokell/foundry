@@ -14,7 +14,6 @@ module Source.Collage.Builder
   , horizontal
   ) where
 
-import Data.Monoid
 import Control.Lens
 
 import qualified Source.Collage as C
@@ -64,11 +63,13 @@ getExtents = view collageBuilderExtents
 buildCollage :: Num n => CollageBuilder n a -> Collage n a
 buildCollage = rigidCollage . view collageBuilderCollage
 
-instance (Num n, Ord n) => Monoid (CollageBuilder n a) where
-  mempty = CollageBuilder (PureFC mempty) C.pointZero
-  mappend cb1 cb2 = CollageBuilder
+instance (Num n, Ord n) => Semigroup (CollageBuilder n a) where
+  cb1 <> cb2 = CollageBuilder
     (view collageBuilderCollage cb1 `MappendFC`  view collageBuilderCollage cb2)
     (view collageBuilderExtents cb1 `C.pointMax` view collageBuilderExtents cb2)
+
+instance (Num n, Ord n) => Monoid (CollageBuilder n a) where
+  mempty = CollageBuilder (PureFC mempty) C.pointZero
 
 offset :: Num n => Offset n -> Op1 (CollageBuilder n a)
 offset o
