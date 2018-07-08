@@ -105,7 +105,7 @@ instance SyntaxLayout ActiveZone Viewport SynTop where
      . background dark1
      . center (viewport ^. _Viewport)
      . sel (lctx & lctxSelected &&~ synSelfSelected (syn ^. synExpr))
-     . join pad (Extents 5 5)
+     . pad (LRTB 5 5 5 5)
      $ runReader (layout (syn ^. synExpr)) lctx
 
 instance SyntaxReact () ActiveZone SynTop where

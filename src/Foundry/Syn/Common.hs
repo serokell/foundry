@@ -1,6 +1,7 @@
 module Foundry.Syn.Common where
 
 import Data.Text (Text)
+import Numeric.Natural (Natural)
 import Data.Sequence (Seq)
 import Data.Monoid
 import Data.Vinyl
@@ -11,27 +12,30 @@ import Control.Applicative
 import Control.Monad
 
 import Source.Draw
-import Source.Style
 import Source.Input
 import Source.Syntax
 
 maybeA :: Alternative f => Maybe a -> f a
 maybeA = maybe empty pure
 
-dark1, dark2, dark3, light1 :: Color
-dark1  = RGB 0.20 0.20 0.20
-dark2  = RGB 0.30 0.30 0.30
-dark3  = RGB 0.25 0.25 0.25
-light1 = RGB 0.70 0.70 0.70
+dark1, dark2, dark3, light1, white :: Color
+dark1  = RGB 51 51 51
+dark2  = RGB 77 77 77
+dark3  = RGB 64 64 64
+light1 = RGB 179 179 179
+white  = RGB 255 255 255
+
+textWithCursor :: s -/ Draw ActiveZone => Text -> Maybe Natural -> Collage s
+textWithCursor = textline white font
 
 text :: s -/ Draw ActiveZone => Text -> Collage s
-text = textline font
+text t = textWithCursor t Nothing
 
 punct :: s -/ Draw ActiveZone => Text -> Collage s
-punct = textline (font { fontColor = light1 })
+punct t = textline light1 font t Nothing
 
 font :: Font
-font = Font "Ubuntu" 12 (RGB 1 1 1) FontWeightNormal
+font = Font "Ubuntu" 12 FontWeightNormal
 
 keyLetter :: Char -> KeyCode -> Bool
 keyLetter c keyCode = keyChar keyCode == Just c

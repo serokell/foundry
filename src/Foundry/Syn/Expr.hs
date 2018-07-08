@@ -49,8 +49,8 @@ type instance FieldTypes SelLam =
 
 instance SelLayout SelLam where
   selLayoutHook = \case
-    SelLamArg   -> join pad (Extents 4 0)
-    SelLamExpr1 -> join pad (Extents 4 0)
+    SelLamArg   -> pad (LRTB 4 4 0 0)
+    SelLamExpr1 -> pad (LRTB 4 4 0 0)
     SelLamExpr2 -> id
 
 instance SyntaxLayout ActiveZone LayoutCtx SynLam where
@@ -58,16 +58,16 @@ instance SyntaxLayout ActiveZone LayoutCtx SynLam where
     let
       maxWidth = (max `on` extentsW . collageExtents) header body
       header =
-        [ extend (Extents 4 0) (punct "λ")
+        [ pad (LRTB 0 4 0 0) (punct "λ")
         , [ runReader (selLayout SSelLamArg syn) lctx
-          , join pad (Extents 4 0) (punct ":")
+          , pad (LRTB 4 4 0 0) (punct ":")
           , runReader (selLayout SSelLamExpr1 syn) lctx
           ] & horizontal
         ] & horizontal
       body = runReader (selLayout SSelLamExpr2 syn) lctx
     in
       [ header
-      , join pad (Extents 0 4) (line light1 maxWidth)
+      , pad (LRTB 0 0 4 4) (line light1 maxWidth)
       , body
       ] & vertical
 
@@ -95,8 +95,8 @@ type instance FieldTypes SelPi =
 
 instance SelLayout SelPi where
   selLayoutHook = \case
-    SelPiArg   -> join pad (Extents 4 0)
-    SelPiExpr1 -> join pad (Extents 4 0)
+    SelPiArg   -> pad (LRTB 4 4 0 0)
+    SelPiExpr1 -> pad (LRTB 4 4 0 0)
     SelPiExpr2 -> id
 
 instance SyntaxLayout ActiveZone LayoutCtx SynPi where
@@ -104,16 +104,16 @@ instance SyntaxLayout ActiveZone LayoutCtx SynPi where
     let
       maxWidth = (max `on` extentsW . collageExtents) header body
       header =
-        [ extend (Extents 4 0) (punct "Π")
+        [ pad (LRTB 0 4 0 0) (punct "Π")
         , [ runReader (selLayout SSelPiArg syn) lctx
-          , join pad (Extents 4 0) (punct ":")
+          , pad (LRTB 4 4 0 0) (punct ":")
           , runReader (selLayout SSelPiExpr1 syn) lctx
           ] & horizontal
         ] & horizontal
       body = runReader (selLayout SSelPiExpr2 syn) lctx
     in
       [ header
-      , join pad (Extents 0 4) (line light1 maxWidth)
+      , pad (LRTB 0 0 4 4) (line light1 maxWidth)
       , body
       ] & vertical
 
@@ -140,13 +140,13 @@ type instance FieldTypes SelApp =
 
 instance SelLayout SelApp where
   selLayoutHook = \case
-    SelAppExpr1 -> join pad (Extents 5 5)
-    SelAppExpr2 -> outline dark2 . join pad (Extents 5 5)
+    SelAppExpr1 -> pad (LRTB 5 5 5 5)
+    SelAppExpr2 -> outline dark2 . pad (LRTB 5 5 5 5)
 
 instance SyntaxLayout ActiveZone LayoutCtx SynApp where
   layout syn = reader $ \lctx ->
     [ runReader (selLayout SSelAppExpr1 syn) lctx
-    , join pad (Extents 5 5)
+    , pad (LRTB 5 5 5 5)
       $ runReader (selLayout SSelAppExpr2 syn) lctx
     ] & horizontalCenter
 

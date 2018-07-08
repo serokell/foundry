@@ -3,3 +3,4 @@ packages:
   submodules/slay/number-double
   submodules/slay/core
   submodules/slay/combinators
+  submodules/slay/cairo

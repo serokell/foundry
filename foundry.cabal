@@ -7,7 +7,6 @@ library
 
   exposed-modules:     Source
                        Source.Draw
-                       Source.Style
                        Source.Render
                        Source.Input
                        Source.Input.KeyCode
@@ -29,6 +28,7 @@ library
                ,       slay-core
                ,       slay-number-double
                ,       slay-combinators
+               ,       slay-cairo
 
   mixins:
     slay-number-double (Slay.Number.Double as Slay.Number)

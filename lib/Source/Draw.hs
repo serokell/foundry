@@ -3,27 +3,29 @@ module Source.Draw
   ( module Source.Draw,
     module Slay.Core,
     module Slay.Combinators,
+    module Slay.Cairo.Prim.Color,
+    module Slay.Cairo.Prim.Rect,
+    FontWeight(..), Font(..),
     module Inj
   ) where
 
 import Control.Lens
 import Data.Text (Text)
-import qualified Data.Text as Text
-import qualified Graphics.Rendering.Pango as Pango
-import System.IO.Unsafe (unsafePerformIO)
+import Numeric.Natural (Natural)
+import qualified Graphics.Rendering.Cairo.Matrix as Cairo.Matrix
 
 import Inj
 
 import Slay.Core
+import Slay.Cairo.Prim.Color
+import Slay.Cairo.Prim.Rect
+import Slay.Cairo.Prim.Text
+import Slay.Cairo.Prim.PangoText
 import Slay.Combinators
 
-import Source.Style
-
 data Draw a
-  = DrawText Extents Color Pango.PangoLayout
-  | DrawPhantom Extents
-  | DrawOutline Extents Color
-  | DrawBackground Extents Color
+  = DrawText (PangoText Identity)
+  | DrawRect (PrimRect Identity)
   | DrawEmbed Extents a
   deriving Functor
 
@@ -31,52 +33,32 @@ instance p ~ Draw a => Inj p (Draw a)
 
 dExtents :: Draw a -> Extents
 dExtents = \case
-  DrawText e _ _ -> e
-  DrawPhantom e -> e
-  DrawOutline e _ -> e
-  DrawBackground e _ -> e
+  DrawText t -> ptextExtents t
+  DrawRect r -> rectExtents r
   DrawEmbed e _ -> e
 
 phantom :: s -/ Draw a => Extents -> Collage s
-phantom e = inj (DrawPhantom e)
-
-offset :: s -/ Draw a => Extents -> Collage s -> Collage s
-offset e c = collageCompose (extentsOffset e) (phantom (Extents 0 0)) c
-
-extend :: s -/ Draw a => Extents -> Collage s -> Collage s
-extend e c = collageCompose (extentsOffset (collageExtents c)) c (phantom e)
+phantom e = inj (DrawRect (rect (Identity Nothing) (Identity Nothing) e))
 
 outline :: s -/ Draw a => Color -> Collage s -> Collage s
 outline color c =
-  c <> inj (DrawOutline (collageExtents c) color)
+  c <> inj (DrawRect (rect (Identity (Just (LRTB 1 1 1 1))) (Identity (Just color)) (collageExtents c)))
 
 background :: s -/ Draw a => Color -> Collage s -> Collage s
 background color c =
-  inj (DrawBackground (collageExtents c) color) <> c
+  inj (DrawRect (rect (Identity Nothing) (Identity (Just color)) (collageExtents c))) <> c
 
-textline :: s -/ Draw a => Font -> Text -> Collage s
-textline font text = unsafePerformIO $ do
-  cairoContext <- Pango.cairoCreateContext Nothing
-  pangoFont <- Pango.fontDescriptionNew
-  pangoFont `Pango.fontDescriptionSetFamily` Text.unpack (fontFamily font)
-  pangoFont `Pango.fontDescriptionSetSize` fontSize font
-  pangoFont `Pango.fontDescriptionSetWeight` (case fontWeight font of
-      FontWeightNormal -> Pango.WeightNormal
-      FontWeightBold -> Pango.WeightBold)
-  pangoLayout <- Pango.layoutEmpty cairoContext
-  pangoLayout `Pango.layoutSetText` Text.unpack text
-  pangoLayout `Pango.layoutSetFontDescription` Just pangoFont
-  -- TODO: handle x y
-  (_, Pango.PangoRectangle _x _y w h) <- Pango.layoutGetExtents pangoLayout
-  let e = Extents (fromInteger $ ceiling w) (fromInteger $ ceiling h)
-  return . inj $ DrawText e (fontColor font) pangoLayout
+textline :: s -/ Draw a => Color -> Font -> Text -> Maybe Natural -> Collage s
+textline color font str mpos = inj $ DrawText $ primTextPango Cairo.Matrix.identity $
+  text font (Identity color) str (Identity mpos)
 
 line :: s -/ Draw a => Color -> Unsigned -> Collage s
-line color w = inj (DrawBackground (Extents w 1) color)
+line color w = inj (DrawRect (rect (Identity Nothing) (Identity (Just color)) (Extents w 1)))
 
-pad :: s -/ Draw a => Extents -> Extents -> Collage s -> Collage s
-pad o1 o2 = offset o1 . extend o2
+pad :: s -/ Draw a => LRTB Unsigned -> Collage s -> Collage s
+pad lrtb = substrate lrtb (\e -> DrawRect $ rect (Identity Nothing) (Identity Nothing) e)
 
+-- FIXME: underflow due to Extents being unsigned
 center :: s -/ Draw a => Extents -> Collage s -> Collage s
 center (Extents vacantWidth vacantHeight) collage =
   let
@@ -87,10 +69,14 @@ center (Extents vacantWidth vacantHeight) collage =
     excessWidth2 = excessWidth - excessWidth1
     excessHeight1 = fromInteger (ceil (excessHeight/2))
     excessHeight2 = excessHeight - excessHeight1
+    lrtb =
+      LRTB
+        { left = excessWidth1,
+          right = excessWidth2,
+          top = excessHeight1,
+          bottom = excessHeight2 }
   in
-    collage & pad
-      (Extents excessWidth1 excessHeight1)
-      (Extents excessWidth2 excessHeight2)
+    pad lrtb collage
 
 horizontal :: s -/ Draw a => [Collage s] -> Collage s
 horizontal [] = phantom (Extents 0 0)

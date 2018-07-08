@@ -57,11 +57,10 @@ instance SyntaxLayout ActiveZone LayoutCtx SynText where
   layout syn = do
     lctx <- ask
     let
-      (t1, t2) = Text.splitAt
-        (syn ^. synTextPosition)
-        (syn ^. synTextContent)
-      -- TODO: proper cursor
-      layoutActive = text t1 `horizTop` punct "|" `horizTop` text t2
+      layoutActive =
+        textWithCursor
+          (syn ^. synTextContent)
+          (Just . fromIntegral $ syn ^. synTextPosition)
       layoutInactive = text (syn ^. synTextContent)
       isActive = (lctx ^. lctxSelected) && (syn ^. synTextEditMode)
     return $ if isActive then layoutActive else layoutInactive

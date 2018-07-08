@@ -38,8 +38,8 @@ data LayoutDraw la =
   LayoutDraw (forall s. s -/ Draw la => ElementRefl s (Draw la) -> Collage s)
 
 runLayoutDraw :: View (Draw la) (Draw la) -> LayoutDraw la -> CollageRep (Draw la)
-runLayoutDraw view (LayoutDraw mkCollage) =
-  withView (\er@ElementRefl -> getCollageRep (mkCollage er)) view
+runLayoutDraw v (LayoutDraw mkCollage) =
+  withView (\er@ElementRefl -> getCollageRep (mkCollage er)) v
 
 data ReactCtx rp la syn = ReactCtx
   { _rctxAsyncReact :: ((syn -> syn) -> IO ())
