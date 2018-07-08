@@ -6,7 +6,7 @@ import Data.Function
 import Control.Monad.Reader
 import Control.Lens
 
-import Source.Collage.Builder (horizontal)
+import Source.Draw
 import Source.Syntax
 import Source.Input
 import Foundry.Syn.Text
@@ -27,13 +27,14 @@ instance UndoEq SynVar where
      = on undoEq (view synVarName)  s1 s2
     && on (==)   (view synVarIndex) s1 s2
 
-instance n ~ Int => SyntaxLayout n ActiveZone LayoutCtx SynVar where
+instance SyntaxLayout ActiveZone LayoutCtx SynVar where
   layout v = reader $ \lctx ->
-    [ runReader (layout (v ^. synVarName)) lctx
-    , if (v ^. synVarIndex) > 0
-      then layoutIndex (v ^. synVarIndex)
-      else mempty
-    ] & horizontal
+    let
+      c = runReader (layout (v ^. synVarName)) lctx
+    in
+      if (v ^. synVarIndex) > 0
+      then c `horizTop` layoutIndex (v ^. synVarIndex)
+      else c
     where
       layoutIndex = text . Text.map toSub . Text.pack . show
       toSub :: Char -> Char
@@ -50,7 +51,7 @@ instance n ~ Int => SyntaxLayout n ActiveZone LayoutCtx SynVar where
         '9' -> '₉'
         c   -> c
 
-instance n ~ Int => SyntaxReact n rp ActiveZone SynVar where
+instance SyntaxReact rp ActiveZone SynVar where
   react = asum handlers
     where
       handlers =

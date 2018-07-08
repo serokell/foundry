@@ -1,14 +1,11 @@
+cabal-version:       2.1
 name:                foundry
 version:             0.1.0.0
 build-type:          Simple
-cabal-version:       >=1.10
 
 library
 
   exposed-modules:     Source
-                       Source.Point
-                       Source.Collage
-                       Source.Collage.Builder
                        Source.Draw
                        Source.Style
                        Source.Render
@@ -27,6 +24,14 @@ library
                ,       semigroups >=0.16
                ,       mtl >= 2.2.1
                ,       bifunctors
+               ,       inj
+               ,       inj-base
+               ,       slay-core
+               ,       slay-number-double
+               ,       slay-combinators
+
+  mixins:
+    slay-number-double (Slay.Number.Double as Slay.Number)
 
   hs-source-dirs:      lib
 

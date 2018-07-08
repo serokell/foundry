@@ -8,17 +8,16 @@ import Control.Monad.Trans.Maybe
 import qualified Graphics.UI.Gtk as Gtk
 import Data.IORef
 
+import Slay.Core
 import qualified Source.Syntax as Syn
+import Source.Draw
 import Source.Input (InputEvent(..), Modifier(..))
 import Source.Render (render)
-import Source.Collage (Point(..))
-import Source.Collage.Builder (buildCollage)
 
 runGUI
-  :: Integral n
-  => Syn.SyntaxBlank syn
-  => Syn.SyntaxLayout n la (Syn.Viewport n) syn
-  => Syn.SyntaxReact  n () la syn
+  :: Syn.SyntaxBlank syn
+  => Syn.SyntaxLayout la Syn.Viewport syn
+  => Syn.SyntaxReact () la syn
   => IO syn
 runGUI = do
   _ <- Gtk.initGUI
@@ -28,11 +27,10 @@ runGUI = do
   readIORef synRef
 
 createMainWindow
-  :: forall n la syn
-   . Integral n
-  => Syn.SyntaxBlank syn
-  => Syn.SyntaxLayout n la (Syn.Viewport n) syn
-  => Syn.SyntaxReact  n () la syn
+  :: forall la syn.
+     Syn.SyntaxBlank syn
+  => Syn.SyntaxLayout la Syn.Viewport syn
+  => Syn.SyntaxReact () la syn
   => IORef syn
   -> IO Gtk.Window
 createMainWindow synRef = do
@@ -47,7 +45,7 @@ createMainWindow synRef = do
       , Gtk.ButtonPressMask
       ]
 
-  layoutRef :: IORef (Syn.CollageDraw n la)
+  layoutRef :: IORef (Syn.LayoutDraw la)
     <- newIORef (error "layoutRef used before initialization")
 
   let
@@ -58,9 +56,9 @@ createMainWindow synRef = do
 
     updateCanvas viewport = do
       syn <- liftIO $ readIORef synRef
-      let layout = buildCollage $ runReader (Syn.layout syn) viewport
+      let layout = Syn.LayoutDraw (\ElementRefl -> runReader (Syn.layout syn) viewport)
       liftIO $ writeIORef layoutRef layout
-      render layout
+      render $ Syn.runLayoutDraw (\d -> (dExtents d, d)) layout
 
     handleInputEvent inputEvent = do
       syn <- liftIO $ readIORef synRef
@@ -81,7 +79,7 @@ createMainWindow synRef = do
   void $ Gtk.on canvas Gtk.draw $ do
     w <- liftIO $ Gtk.widgetGetAllocatedWidth  canvas
     h <- liftIO $ Gtk.widgetGetAllocatedHeight canvas
-    let viewport = Syn.Viewport (fromIntegral <$> Point w h)
+    let viewport = Syn.Viewport (Extents (fromIntegral w) (fromIntegral h))
     updateCanvas viewport
 
   void $ Gtk.on canvas Gtk.keyPressEvent $ do

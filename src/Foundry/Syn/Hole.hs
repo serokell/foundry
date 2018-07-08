@@ -23,14 +23,14 @@ instance UndoEq sub => UndoEq (SynHole sub) where
   undoEq  SynHollow     SynHollow    = True
   undoEq  _             _            = False
 
-instance (n ~ Int, SyntaxLayout n ActiveZone lctx sub)
-      => SyntaxLayout n ActiveZone lctx (SynHole sub) where
+instance (SyntaxLayout ActiveZone lctx sub)
+      => SyntaxLayout ActiveZone lctx (SynHole sub) where
   layout = \case
     SynHollow    -> return (punct "_")
     SynSolid syn -> layout syn
 
-instance SyntaxReact n rp ActiveZone sub
-      => SyntaxReact n rp ActiveZone (SynHole sub) where
+instance SyntaxReact rp ActiveZone sub
+      => SyntaxReact rp ActiveZone (SynHole sub) where
   react = asum handlers
     where
       handlers =

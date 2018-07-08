@@ -10,7 +10,7 @@ import Control.Monad.State
 import Control.Lens
 import qualified Graphics.UI.Gtk as Gtk
 
-import Source.Collage.Builder (horizontal)
+import Source.Draw
 import Source.Syntax
 import Source.Input
 import qualified Source.Input.KeyCode as KeyCode
@@ -53,19 +53,20 @@ instance UndoEq SynText where
     | view synTextEditMode syn2 = False
     | otherwise = on (==) (view synTextContent) syn1 syn2
 
-instance n ~ Int => SyntaxLayout n ActiveZone LayoutCtx SynText where
+instance SyntaxLayout ActiveZone LayoutCtx SynText where
   layout syn = do
     lctx <- ask
     let
       (t1, t2) = Text.splitAt
         (syn ^. synTextPosition)
         (syn ^. synTextContent)
-      layoutActive = horizontal [text t1, punct "|", text t2]
+      -- TODO: proper cursor
+      layoutActive = text t1 `horizTop` punct "|" `horizTop` text t2
       layoutInactive = text (syn ^. synTextContent)
       isActive = (lctx ^. lctxSelected) && (syn ^. synTextEditMode)
     return $ if isActive then layoutActive else layoutInactive
 
-instance n ~ Int => SyntaxReact n rp ActiveZone SynText where
+instance SyntaxReact rp ActiveZone SynText where
   react = do asum handlers; modify normalizeSynText
     where
       handlers =

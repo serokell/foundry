@@ -10,7 +10,6 @@ import Control.Lens
 import Control.Applicative
 import Control.Monad
 
-import qualified Source.Collage.Builder as CB
 import Source.Draw
 import Source.Style
 import Source.Input
@@ -25,10 +24,10 @@ dark2  = RGB 0.30 0.30 0.30
 dark3  = RGB 0.25 0.25 0.25
 light1 = RGB 0.70 0.70 0.70
 
-text :: Integral n => Text -> CollageDraw' n
+text :: s -/ Draw ActiveZone => Text -> Collage s
 text = textline font
 
-punct :: Integral n => Text -> CollageDraw' n
+punct :: s -/ Draw ActiveZone => Text -> Collage s
 punct = textline (font { fontColor = light1 })
 
 font :: Font
@@ -46,42 +45,36 @@ type Path = Seq Dynamic
 
 newtype ActiveZone = ActiveZone Path
 
-type CollageDraw' n = CB.CollageBuilder n (Draw ActiveZone)
-
-active :: (Num n, Ord n) => Path -> Op1 (CollageDraw' n)
-active p c = CB.collageBuilder1 (CB.getExtents c) activeZone <> c
+active :: s -/ Draw ActiveZone => Path -> Collage s -> Collage s
+active p c = inj activeZone <> c
   where
-    activeZone = DrawEmbed (ActiveZone p)
+    activeZone = DrawEmbed (collageExtents c) (ActiveZone p)
 
-within :: (Ord n, Num n) => n -> n -> n -> Bool
-within a zoneOffset zoneExtents
-   = a >  zoneOffset
-  && a < (zoneOffset + zoneExtents)
-
-activate
-  :: (Ord n, Num n)
-  => Offset n
-  -> Collage n (Draw ActiveZone)
-  -> Maybe (Element n Path)
-activate o = getLast . foldMap (Last . check) . getCollage
+activate ::
+  (s -/ Draw ActiveZone, Element s ~ Draw ActiveZone) =>
+  Offset ->
+  Collage s ->
+  Maybe (Offset, Extents, Path)
+activate o c =
+  getLast . foldMap (Last . check) $ collageRepElements (getCollageRep c)
   where
-    check (Element o' e d) = do
-      DrawEmbed (ActiveZone p) <- Just d
-      let Point okX okY = Point within within <*> o <*> o' <*> e
-      guard (okX && okY)
-      Just (Element o' e p)
+    check (o', e, d) = do
+      DrawEmbed _ (ActiveZone p) <- Just d
+      guard $ insideBox (o', e) o
+      Just (o', e, p)
 
-hover
-  :: (Ord n, Num n)
-  => Op1 (CollageDraw' n)
-  -> Offset n
-  -> Op1 (CollageDraw' n)
-hover f o c = CB.collageBuilder c' <> maybe mempty obj (activate o c')
-  where
-    c' = CB.buildCollage c
-    obj el = CB.offset
-      (el ^. elementOffset)
-      (f (phantom (el ^. elementExtents)))
+-- TODO: remove (Element s ~ Draw ActiveZone) by a using a different hover
+--       system (adding hover intersection into prim context perhaps)
+hover ::
+  (s -/ Draw ActiveZone, Element s ~ Draw ActiveZone) =>
+  (Collage s -> Collage s) ->
+  Offset ->
+  Collage s ->
+  Collage s
+hover f o c =
+  case activate o c of
+    Nothing -> c
+    Just (o', e, _) -> collageCompose o' c (f (phantom e))
 
 data LayoutCtx = LayoutCtx
   { _lctxSelected :: Bool
@@ -90,20 +83,20 @@ data LayoutCtx = LayoutCtx
 
 makeLenses ''LayoutCtx
 
-sel :: (Num n, Ord n) => LayoutCtx -> CollageDraw' n -> CollageDraw' n
+sel :: s -/ Draw ActiveZone => LayoutCtx -> Collage s -> Collage s
 sel lctx
   = active (lctx ^. lctxPath)
   . if lctx ^. lctxSelected
     then outline dark2 . background dark3
     else id
 
-simpleSubreact :: Char -> syn -> Subreact n rp la syn
+simpleSubreact :: Char -> syn -> Subreact rp la syn
 simpleSubreact c syn = do
   KeyPress [Shift] keyCode <- view rctxInputEvent
   guard (keyLetter c keyCode)
   return syn
 
-guardInputEvent :: (InputEvent n -> Bool) -> React n rp la syn
+guardInputEvent :: (InputEvent Int -> Bool) -> React rp la syn
 guardInputEvent = guard <=< views rctxInputEvent
 
 class UndoEq a where

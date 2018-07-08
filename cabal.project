@@ -1,0 +1,5 @@
+packages:
+  foundry.cabal
+  submodules/slay/number-double
+  submodules/slay/core
+  submodules/slay/combinators

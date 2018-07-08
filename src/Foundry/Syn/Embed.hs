@@ -5,7 +5,7 @@ import Control.Monad.Reader
 import Control.Monad.State
 import Control.Lens
 
-import Source.Collage.Builder (horizontal)
+import Source.Draw
 import Source.Syntax
 import Source.Input
 
@@ -27,13 +27,13 @@ instance UndoEq SynEmbed where
   undoEq (SynEmbedURL      t1) (SynEmbedURL      t2) = undoEq t1 t2
   undoEq  _                     _                    = False
 
-instance n ~ Int => SyntaxLayout n ActiveZone LayoutCtx SynEmbed where
+instance SyntaxLayout ActiveZone LayoutCtx SynEmbed where
   layout (SynEmbedFilePath t) = reader $ \lctx ->
-    horizontal [punct "file:", runReader (layout t) lctx]
+    punct "file:" `horizTop` runReader (layout t) lctx
   layout (SynEmbedURL t) = reader $ \lctx ->
-    horizontal [punct "url:", runReader (layout t) lctx]
+    punct "url:" `horizTop` runReader (layout t) lctx
 
-instance n ~ Int => SyntaxReact n rp ActiveZone SynEmbed where
+instance SyntaxReact rp ActiveZone SynEmbed where
   react = asum handlers
     where
       handleShiftUp = do

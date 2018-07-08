@@ -5,5 +5,5 @@ import Foundry.Syn (SynTop)
 
 main :: IO ()
 main = do
-  _ :: SynTop Int <- runGUI
+  _ :: SynTop <- runGUI
   return ()

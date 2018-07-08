@@ -3,14 +3,12 @@ module Foundry.Syn.Expr where
 import Data.Function
 import Control.Applicative
 import Control.Monad.Reader
-import Control.Lens
 
 import qualified Data.Singletons.TH as Sing
 import Data.Singletons.Prelude
 
 import Data.Vinyl
 
-import Source.Collage.Builder (horizontal, vertical, getExtents)
 import Source.Syntax
 import Source.Draw
 
@@ -51,29 +49,29 @@ type instance FieldTypes SelLam =
 
 instance SelLayout SelLam where
   selLayoutHook = \case
-    SelLamArg   -> join pad (Point 4 0)
-    SelLamExpr1 -> join pad (Point 4 0)
+    SelLamArg   -> join pad (Extents 4 0)
+    SelLamExpr1 -> join pad (Extents 4 0)
     SelLamExpr2 -> id
 
-instance n ~ Int => SyntaxLayout n ActiveZone LayoutCtx SynLam where
+instance SyntaxLayout ActiveZone LayoutCtx SynLam where
   layout syn = reader $ \lctx ->
     let
-      maxWidth = (max `on` view pointX . getExtents) header body
+      maxWidth = (max `on` extentsW . collageExtents) header body
       header =
-        [ extend (Point 4 0) (punct "λ")
+        [ extend (Extents 4 0) (punct "λ")
         , [ runReader (selLayout SSelLamArg syn) lctx
-          , join pad (Point 4 0) (punct ":")
+          , join pad (Extents 4 0) (punct ":")
           , runReader (selLayout SSelLamExpr1 syn) lctx
           ] & horizontal
         ] & horizontal
       body = runReader (selLayout SSelLamExpr2 syn) lctx
     in
       [ header
-      , join pad (Point 0 4) (line light1 maxWidth)
+      , join pad (Extents 0 4) (line light1 maxWidth)
       , body
       ] & vertical
 
-instance n ~ Int => SyntaxReact n rp ActiveZone SynLam where
+instance SyntaxReact rp ActiveZone SynLam where
   react = $(recHandleSelRedirect ''SelLam) <|> handleArrows
   subreact
     = simpleSubreact 'L'
@@ -97,29 +95,29 @@ type instance FieldTypes SelPi =
 
 instance SelLayout SelPi where
   selLayoutHook = \case
-    SelPiArg   -> join pad (Point 4 0)
-    SelPiExpr1 -> join pad (Point 4 0)
+    SelPiArg   -> join pad (Extents 4 0)
+    SelPiExpr1 -> join pad (Extents 4 0)
     SelPiExpr2 -> id
 
-instance n ~ Int => SyntaxLayout n ActiveZone LayoutCtx SynPi where
+instance SyntaxLayout ActiveZone LayoutCtx SynPi where
   layout syn = reader $ \lctx ->
     let
-      maxWidth = (max `on` view pointX . getExtents) header body
+      maxWidth = (max `on` extentsW . collageExtents) header body
       header =
-        [ extend (Point 4 0) (punct "Π")
+        [ extend (Extents 4 0) (punct "Π")
         , [ runReader (selLayout SSelPiArg syn) lctx
-          , join pad (Point 4 0) (punct ":")
+          , join pad (Extents 4 0) (punct ":")
           , runReader (selLayout SSelPiExpr1 syn) lctx
           ] & horizontal
         ] & horizontal
       body = runReader (selLayout SSelPiExpr2 syn) lctx
     in
       [ header
-      , join pad (Point 0 4) (line light1 maxWidth)
+      , join pad (Extents 0 4) (line light1 maxWidth)
       , body
       ] & vertical
 
-instance n ~ Int => SyntaxReact n rp ActiveZone SynPi where
+instance SyntaxReact rp ActiveZone SynPi where
   react = $(recHandleSelRedirect ''SelPi) <|> handleArrows
   subreact
     = simpleSubreact 'P'
@@ -142,17 +140,17 @@ type instance FieldTypes SelApp =
 
 instance SelLayout SelApp where
   selLayoutHook = \case
-    SelAppExpr1 -> join pad (Point 5 5)
-    SelAppExpr2 -> outline dark2 . join pad (Point 5 5)
+    SelAppExpr1 -> join pad (Extents 5 5)
+    SelAppExpr2 -> outline dark2 . join pad (Extents 5 5)
 
-instance n ~ Int => SyntaxLayout n ActiveZone LayoutCtx SynApp where
+instance SyntaxLayout ActiveZone LayoutCtx SynApp where
   layout syn = reader $ \lctx ->
     [ runReader (selLayout SSelAppExpr1 syn) lctx
-    , join pad (Point 5 5)
+    , join pad (Extents 5 5)
       $ runReader (selLayout SSelAppExpr2 syn) lctx
     ] & horizontalCenter
 
-instance n ~ Int => SyntaxReact n rp ActiveZone SynApp where
+instance SyntaxReact rp ActiveZone SynApp where
   react = $(recHandleSelRedirect ''SelApp) <|> handleArrows
   subreact
     = simpleSubreact 'A'

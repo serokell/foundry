@@ -12,7 +12,6 @@ import Data.Dynamic
 
 import Data.Vinyl
 
-import Source.Collage.Builder (vertical)
 import Source.Syntax
 import Source.Draw
 import Source.Input
@@ -83,9 +82,9 @@ synImportExpr = \case
   M.App f a -> SynAddend . SynAddend . SynAugend $ synImportApp f a
   M.Embed e -> M.absurd e
 
-data SynTop n = SynTop
+data SynTop = SynTop
   { _synExpr            :: SynHole SynExpr
-  , _synPointer         :: Offset n
+  , _synPointer         :: Offset
   , _synHoverBarEnabled :: Bool
   , _synUndo            :: [SynHole SynExpr]
   , _synRedo            :: [SynHole SynExpr]
@@ -93,7 +92,7 @@ data SynTop n = SynTop
 
 makeLenses ''SynTop
 
-instance n ~ Int => SyntaxLayout n ActiveZone (Viewport n) (SynTop n) where
+instance SyntaxLayout ActiveZone Viewport SynTop where
   layout syn = reader $ \viewport ->
     let
       hoverBar = do
@@ -101,32 +100,33 @@ instance n ~ Int => SyntaxLayout n ActiveZone (Viewport n) (SynTop n) where
         [text . Text.pack . show $ syn ^. synPointer]
       bars = concat [hoverBar]
       lctx = LayoutCtx True Seq.empty
-    in flip mappend (vertical bars)
+    in flip (<>) (vertical bars)
      . hover (outline light1) (syn ^. synPointer)
      . background dark1
      . center (viewport ^. _Viewport)
      . sel (lctx & lctxSelected &&~ synSelfSelected (syn ^. synExpr))
-     . join pad (Point 5 5)
+     . join pad (Extents 5 5)
      $ runReader (layout (syn ^. synExpr)) lctx
 
-instance n ~ Int => SyntaxReact n () ActiveZone (SynTop n) where
+instance SyntaxReact () ActiveZone SynTop where
   react = asum handlers
     where
       handlers =
         [ handlePointerMotion
-        , handleButtonPress
+        -- , handleButtonPress
         , handleCtrl_h
         , handleRedirectExpr
         , handle_u
         , handleCtrl_r ]
       handlePointerMotion = do
         PointerMotion x y <- view rctxInputEvent
-        synPointer .= Point x y
-      handleButtonPress = do
-        ButtonPress <- view rctxInputEvent
-        pointer <- use synPointer
-        Just el <- activate pointer <$> view rctxLastLayout
-        zoom synExpr $ modify (updateExprPath (el ^. elementObject))
+        synPointer .= Offset (fromIntegral x) (fromIntegral y)
+      -- FIXME: this function
+      -- handleButtonPress = do
+      --   ButtonPress <- view rctxInputEvent
+      --   pointer <- use synPointer
+      --   Just (_, _, p) <- activate pointer <$> view rctxLastLayout
+      --   zoom synExpr $ modify (updateExprPath p)
       handleCtrl_h = do
         KeyPress [Control] keyCode <- view rctxInputEvent
         guard $ keyLetter 'h' keyCode
@@ -200,10 +200,10 @@ updateAppPath path e =
           SelAppExpr2 -> synField SSelAppExpr2 %~ updateExprPath sels
     _ -> e
 
-instance n ~ Int => SyntaxBlank (SynTop n) where
+instance SyntaxBlank SynTop where
   blank = do
     let et = "λ(x : ∀(Nat : *) → ∀(Succ : Nat → Nat) → ∀(Zero : Nat) → Nat) → x (∀(Bool : *) → ∀(True : Bool) → ∀(False : Bool) → Bool) (λ(x : ∀(Bool : *) → ∀(True : Bool) → ∀(False : Bool) → Bool) → x (∀(Bool : *) → ∀(True : Bool) → ∀(False : Bool) → Bool) (λ(Bool : *) → λ(True : Bool) → λ(False : Bool) → False) (λ(Bool : *) → λ(True : Bool) → λ(False : Bool) → True)) (λ(Bool : *) → λ(True : Bool) → λ(False : Bool) → True)"
     expr <- synImportExpr <$> case M.P.exprFromText et of
       Left  _ -> return $ M.Const M.Star
       Right e -> M.I.load Nothing e
-    return $ SynTop (SynSolid expr) (pure 0) False [] []
+    return $ SynTop (SynSolid expr) offsetZero False [] []
