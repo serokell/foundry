@@ -22,6 +22,7 @@ import Slay.Cairo.Prim.Rect
 import Slay.Cairo.Prim.Text
 import Slay.Cairo.Prim.PangoText
 import Slay.Combinators
+import Slay.Cairo.Render
 
 data Draw a
   = DrawText (PangoText Identity)
@@ -30,6 +31,13 @@ data Draw a
   deriving Functor
 
 instance p ~ Draw a => Inj p (Draw a)
+
+instance RenderElement Identity (Draw a) where
+  renderElement getG (offset, extents, d) =
+    case d of
+      DrawEmbed _ _ -> return ()
+      DrawRect r -> renderElement getG (offset, extents, r)
+      DrawText t -> renderElement getG (offset, extents, t)
 
 dExtents :: Draw a -> Extents
 dExtents = \case

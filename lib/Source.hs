@@ -5,14 +5,15 @@ module Source
 import Control.Monad.Reader
 import Control.Monad.State
 import Control.Monad.Trans.Maybe
+import Data.Functor.Identity
 import qualified Graphics.UI.Gtk as Gtk
 import Data.IORef
 
 import Slay.Core
+import Slay.Cairo.Render
 import qualified Source.Syntax as Syn
 import Source.Draw
 import Source.Input (InputEvent(..), Modifier(..))
-import Source.Render (render)
 
 runGUI
   :: Syn.SyntaxBlank syn
@@ -58,7 +59,8 @@ createMainWindow synRef = do
       syn <- liftIO $ readIORef synRef
       let layout = Syn.LayoutDraw (\ElementRefl -> runReader (Syn.layout syn) viewport)
       liftIO $ writeIORef layoutRef layout
-      render $ Syn.runLayoutDraw (\d -> (dExtents d, d)) layout
+      renderElements runIdentity . collageRepElements $
+        Syn.runLayoutDraw (\d -> (dExtents d, d)) layout
 
     handleInputEvent inputEvent = do
       syn <- liftIO $ readIORef synRef
