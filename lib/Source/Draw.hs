@@ -58,13 +58,14 @@ line color w = inj (DrawRect (rect (Identity Nothing) (Identity (Just color)) (E
 pad :: s -/ Draw a => LRTB Unsigned -> Collage s -> Collage s
 pad lrtb = substrate lrtb (\e -> DrawRect $ rect (Identity Nothing) (Identity Nothing) e)
 
--- FIXME: underflow due to Extents being unsigned
 center :: s -/ Draw a => Extents -> Collage s -> Collage s
 center (Extents vacantWidth vacantHeight) collage =
   let
     Extents width height = collageExtents collage
-    excessWidth = max 0 (vacantWidth - width)
-    excessHeight = max 0 (vacantHeight - height)
+    excessWidth =
+      if vacantWidth >= width then vacantWidth - width else 0
+    excessHeight =
+      if vacantHeight >= height then vacantHeight - height else 0
     excessWidth1 = fromInteger (ceil (excessWidth/2))
     excessWidth2 = excessWidth - excessWidth1
     excessHeight1 = fromInteger (ceil (excessHeight/2))
@@ -87,14 +88,26 @@ vertical [] = phantom (Extents 0 0)
 vertical xs = foldr1 vertLeft xs
 
 horizontalCenter, verticalCenter :: s -/ Draw a => [Collage s] -> Collage s
-horizontalCenter = horizontal -- TODO
-verticalCenter = vertical -- TODO
+verticalCenter [] = phantom (Extents 0 0)
+verticalCenter xs =
+  foldr1 (align max (\_ _ -> 0) (\e -> (extentsOffset e) { offsetX = 0 })) xs
+horizontalCenter [] = phantom (Extents 0 0)
+horizontalCenter xs =
+  foldr1 (align (\_ _ -> 0) max (\e -> (extentsOffset e) { offsetY = 0 })) xs
 
--- align :: Integral n => Op2 n -> Op2 n -> (Extents n -> Offset n) -> Op2 (CollageBuilderDraw n a)
--- align adj1 adj2 move c1 c2 =
---   let vacant = Point adj1 adj2 <*> B.getExtents c1 <*> B.getExtents c2
---   in B.overlay move (center vacant c1) (center vacant c2)
-
--- verticalCenter, horizontalCenter :: Integral n => OpN (CollageBuilderDraw n a)
--- verticalCenter   = foldr (align max (\_ _ -> 0) (set pointX 0)) mempty
--- horizontalCenter = foldr (align (\_ _ -> 0) max (set pointY 0)) mempty
+align ::
+  s -/ Draw a =>
+  (Unsigned -> Unsigned -> Unsigned) ->
+  (Unsigned -> Unsigned -> Unsigned) ->
+  (Extents -> Offset) ->
+  (Collage s -> Collage s -> Collage s)
+align adj1 adj2 move c1 c2 =
+  let
+    e1 = collageExtents c1
+    e2 = collageExtents c2
+    vacant =
+      Extents
+        (extentsW e1 `adj1` extentsW e2)
+        (extentsH e1 `adj2` extentsH e2)
+  in
+    collageCompose (move e1) (center vacant c1) (center vacant c2)
