@@ -55,12 +55,11 @@ active p c = inj activeZone <> c
     activeZone = DrawEmbed (collageExtents c) (ActiveZone p)
 
 activate ::
-  (s -/ Draw ActiveZone, Element s ~ Draw ActiveZone) =>
   Offset ->
-  Collage s ->
+  CollageRep (Draw ActiveZone) ->
   Maybe (Offset, Extents, Path)
 activate o c =
-  getLast . foldMap (Last . check) $ collageRepElements (getCollageRep c)
+  getLast . foldMap (Last . check) $ collageRepElements c
   where
     check (o', e, d) = do
       DrawEmbed _ (ActiveZone p) <- Just d
@@ -76,7 +75,7 @@ hover ::
   Collage s ->
   Collage s
 hover f o c =
-  case activate o c of
+  case activate o (getCollageRep c) of
     Nothing -> c
     Just (o', e, _) -> collageCompose o' c (f (phantom e))
 

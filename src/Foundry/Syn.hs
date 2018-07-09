@@ -113,7 +113,7 @@ instance SyntaxReact () ActiveZone SynTop where
     where
       handlers =
         [ handlePointerMotion
-        -- , handleButtonPress
+        , handleButtonPress
         , handleCtrl_h
         , handleRedirectExpr
         , handle_u
@@ -121,12 +121,13 @@ instance SyntaxReact () ActiveZone SynTop where
       handlePointerMotion = do
         PointerMotion x y <- view rctxInputEvent
         synPointer .= Offset (fromIntegral x) (fromIntegral y)
-      -- FIXME: this function
-      -- handleButtonPress = do
-      --   ButtonPress <- view rctxInputEvent
-      --   pointer <- use synPointer
-      --   Just (_, _, p) <- activate pointer <$> view rctxLastLayout
-      --   zoom synExpr $ modify (updateExprPath p)
+      handleButtonPress = do
+        ButtonPress <- view rctxInputEvent
+        pointer <- use synPointer
+        Just (_, _, p) <-
+          activate pointer . runLayoutDraw (\d -> (dExtents d, d)) <$>
+            view rctxLastLayout
+        zoom synExpr $ modify (updateExprPath p)
       handleCtrl_h = do
         KeyPress [Control] keyCode <- view rctxInputEvent
         guard $ keyLetter 'h' keyCode
