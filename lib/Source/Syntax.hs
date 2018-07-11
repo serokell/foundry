@@ -19,8 +19,6 @@ module Source.Syntax
     , rctxInputEvent
     , Collage
     , Draw
-    , LayoutDraw(..)
-    , runLayoutDraw
     ) where
 
 import Control.Lens
@@ -34,16 +32,9 @@ newtype Viewport = Viewport Extents
 
 makePrisms ''Viewport
 
-data LayoutDraw la =
-  LayoutDraw (forall s. s -/ Draw la => ElementRefl s (Draw la) -> Collage s)
-
-runLayoutDraw :: View (Draw la) (Draw la) -> LayoutDraw la -> CollageRep (Draw la)
-runLayoutDraw v (LayoutDraw mkCollage) =
-  withView (\er@ElementRefl -> getCollageRep (mkCollage er)) v
-
 data ReactCtx rp la syn = ReactCtx
   { _rctxAsyncReact :: ((syn -> syn) -> IO ())
-  , _rctxLastLayout :: LayoutDraw la
+  , _rctxLastLayout :: Layout Identity (Draw la)
   , _rctxInputEvent :: InputEvent Int
   , _rctxPayload    :: rp
   }
@@ -77,8 +68,7 @@ subreactToReact :: Subreact rp la syn -> React rp la syn
 subreactToReact = put <=< mapReaderT lift
 
 class SyntaxLayout la lctx syn | syn -> la, syn -> lctx where
-  -- TODO: remove (Element s ~ Draw la)
-  layout :: (s -/ Draw la, Element s ~ Draw la) => syn -> Reader lctx (Collage s)
+  layout :: s -/ Draw la => syn -> Reader lctx (Collage s)
 
 class SyntaxReact rp la syn | syn -> la where
   react :: React rp la syn

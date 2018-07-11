@@ -27,7 +27,7 @@ instance UndoEq SynVar where
      = on undoEq (view synVarName)  s1 s2
     && on (==)   (view synVarIndex) s1 s2
 
-instance SyntaxLayout ActiveZone LayoutCtx SynVar where
+instance SyntaxLayout Path LayoutCtx SynVar where
   layout v = reader $ \lctx ->
     let
       c = runReader (layout (v ^. synVarName)) lctx
@@ -51,7 +51,7 @@ instance SyntaxLayout ActiveZone LayoutCtx SynVar where
         '9' -> '₉'
         c   -> c
 
-instance SyntaxReact rp ActiveZone SynVar where
+instance SyntaxReact rp Path SynVar where
   react = asum handlers
     where
       handlers =

@@ -8,7 +8,6 @@ import Data.Function
 import Control.Monad.Reader
 import Control.Monad.State
 import Control.Lens
-import Data.Dynamic
 
 import Data.Vinyl
 
@@ -92,7 +91,7 @@ data SynTop = SynTop
 
 makeLenses ''SynTop
 
-instance SyntaxLayout ActiveZone Viewport SynTop where
+instance SyntaxLayout Path Viewport SynTop where
   layout syn = reader $ \viewport ->
     let
       hoverBar = do
@@ -101,14 +100,13 @@ instance SyntaxLayout ActiveZone Viewport SynTop where
       bars = concat [hoverBar]
       lctx = LayoutCtx True Seq.empty
     in flip (<>) (vertical bars)
-     . hover (outline light1) (syn ^. synPointer)
      . background dark1
      . center (viewport ^. _Viewport)
      . sel (lctx & lctxSelected &&~ synSelfSelected (syn ^. synExpr))
      . pad (LRTB 5 5 5 5)
      $ runReader (layout (syn ^. synExpr)) lctx
 
-instance SyntaxReact () ActiveZone SynTop where
+instance SyntaxReact () Path SynTop where
   react = asum handlers
     where
       handlers =
@@ -125,7 +123,7 @@ instance SyntaxReact () ActiveZone SynTop where
         ButtonPress <- view rctxInputEvent
         pointer <- use synPointer
         Just (_, _, p) <-
-          activate pointer . runLayoutDraw (\d -> (dExtents d, d)) <$>
+          activate pointer . runIdentity . layoutElements (\d -> (dExtents d, d)) <$>
             view rctxLastLayout
         zoom synExpr $ modify (updateExprPath p)
       handleCtrl_h = do
@@ -167,7 +165,7 @@ updateLamPath :: Path -> SynLam -> SynLam
 updateLamPath path e =
   case uncons path of
     Nothing -> e & synSelectionSelf .~ True
-    Just (fromDynamic -> Just sel', sels) -> e
+    Just (fromPathSegment -> Just sel', sels) -> e
       & synSelectionSelf .~ False
       & synSelection .~ sel'
       & case sel' of
@@ -180,7 +178,7 @@ updatePiPath :: Path -> SynPi -> SynPi
 updatePiPath path e =
   case uncons path of
     Nothing -> e & synSelectionSelf .~ True
-    Just (fromDynamic -> Just sel', sels) -> e
+    Just (fromPathSegment -> Just sel', sels) -> e
       & synSelectionSelf .~ False
       & synSelection .~ sel'
       & case sel' of
@@ -193,7 +191,7 @@ updateAppPath :: Path -> SynApp -> SynApp
 updateAppPath path e =
   case uncons path of
     Nothing -> e & synSelectionSelf .~ True
-    Just (fromDynamic -> Just sel', sels) -> e
+    Just (fromPathSegment -> Just sel', sels) -> e
       & synSelectionSelf .~ False
       & synSelection .~ sel'
       & case sel' of

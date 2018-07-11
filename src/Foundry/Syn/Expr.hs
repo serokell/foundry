@@ -53,7 +53,7 @@ instance SelLayout SelLam where
     SelLamExpr1 -> pad (LRTB 4 4 0 0)
     SelLamExpr2 -> id
 
-instance SyntaxLayout ActiveZone LayoutCtx SynLam where
+instance SyntaxLayout Path LayoutCtx SynLam where
   layout syn = reader $ \lctx ->
     let
       maxWidth = (max `on` extentsW . collageExtents) header body
@@ -71,7 +71,7 @@ instance SyntaxLayout ActiveZone LayoutCtx SynLam where
       , body
       ] & vertical
 
-instance SyntaxReact rp ActiveZone SynLam where
+instance SyntaxReact rp Path SynLam where
   react = $(recHandleSelRedirect ''SelLam) <|> handleArrows
   subreact
     = simpleSubreact 'L'
@@ -99,7 +99,7 @@ instance SelLayout SelPi where
     SelPiExpr1 -> pad (LRTB 4 4 0 0)
     SelPiExpr2 -> id
 
-instance SyntaxLayout ActiveZone LayoutCtx SynPi where
+instance SyntaxLayout Path LayoutCtx SynPi where
   layout syn = reader $ \lctx ->
     let
       maxWidth = (max `on` extentsW . collageExtents) header body
@@ -117,7 +117,7 @@ instance SyntaxLayout ActiveZone LayoutCtx SynPi where
       , body
       ] & vertical
 
-instance SyntaxReact rp ActiveZone SynPi where
+instance SyntaxReact rp Path SynPi where
   react = $(recHandleSelRedirect ''SelPi) <|> handleArrows
   subreact
     = simpleSubreact 'P'
@@ -143,14 +143,14 @@ instance SelLayout SelApp where
     SelAppExpr1 -> pad (LRTB 5 5 5 5)
     SelAppExpr2 -> outline dark2 . pad (LRTB 5 5 5 5)
 
-instance SyntaxLayout ActiveZone LayoutCtx SynApp where
+instance SyntaxLayout Path LayoutCtx SynApp where
   layout syn = reader $ \lctx ->
     [ runReader (selLayout SSelAppExpr1 syn) lctx
     , pad (LRTB 5 5 5 5)
       $ runReader (selLayout SSelAppExpr2 syn) lctx
     ] & horizontalCenter
 
-instance SyntaxReact rp ActiveZone SynApp where
+instance SyntaxReact rp Path SynApp where
   react = $(recHandleSelRedirect ''SelApp) <|> handleArrows
   subreact
     = simpleSubreact 'A'

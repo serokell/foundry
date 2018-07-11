@@ -1,6 +1,7 @@
 packages:
   foundry.cabal
-  submodules/slay/number-double
+  submodules/slay/non-negative
   submodules/slay/core
   submodules/slay/combinators
   submodules/slay/cairo
+  submodules/inj/inj-base

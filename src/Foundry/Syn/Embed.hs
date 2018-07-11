@@ -27,13 +27,13 @@ instance UndoEq SynEmbed where
   undoEq (SynEmbedURL      t1) (SynEmbedURL      t2) = undoEq t1 t2
   undoEq  _                     _                    = False
 
-instance SyntaxLayout ActiveZone LayoutCtx SynEmbed where
+instance SyntaxLayout Path LayoutCtx SynEmbed where
   layout (SynEmbedFilePath t) = reader $ \lctx ->
     punct "file:" `horizTop` runReader (layout t) lctx
   layout (SynEmbedURL t) = reader $ \lctx ->
     punct "url:" `horizTop` runReader (layout t) lctx
 
-instance SyntaxReact rp ActiveZone SynEmbed where
+instance SyntaxReact rp Path SynEmbed where
   react = asum handlers
     where
       handleShiftUp = do

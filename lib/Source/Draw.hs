@@ -1,4 +1,4 @@
-{-# LANGUAGE FunctionalDependencies, DeriveFunctor #-}
+{-# LANGUAGE FunctionalDependencies, DeriveFunctor, NamedFieldPuns, TypeApplications #-}
 module Source.Draw
   ( module Source.Draw,
     module Slay.Core,
@@ -9,12 +9,15 @@ module Source.Draw
     module Inj
   ) where
 
-import Control.Lens
 import Data.Text (Text)
 import Numeric.Natural (Natural)
+import Data.List.NonEmpty
+import Control.Monad
+import Data.Monoid
 import qualified Graphics.Rendering.Cairo.Matrix as Cairo.Matrix
 
 import Inj
+import Inj.Base ()
 
 import Slay.Core
 import Slay.Cairo.Prim.Color
@@ -24,18 +27,47 @@ import Slay.Cairo.Prim.PangoText
 import Slay.Combinators
 import Slay.Cairo.Render
 
-data Draw a
-  = DrawText (PangoText Identity)
-  | DrawRect (PrimRect Identity)
-  | DrawEmbed Extents a
-  deriving Functor
+data CursorBlink = CursorVisible | CursorInvisible
+
+blink :: CursorBlink -> CursorBlink
+blink = \case
+  CursorVisible -> CursorInvisible
+  CursorInvisible -> CursorVisible
+
+data DrawCtx path a = DrawCtx (Maybe path -> CursorBlink -> a)
+  deriving (Functor)
+
+instance Inj p a => Inj p (DrawCtx path a) where
+  inj p = DrawCtx (\_ _ -> inj p)
+
+withDrawCtx :: Maybe path -> CursorBlink -> DrawCtx path a -> a
+withDrawCtx mpath curBlink (DrawCtx f) = f mpath curBlink
+
+data Draw path
+  = DrawText (PangoText (DrawCtx path))
+  | DrawRect (PrimRect (DrawCtx path))
+  | DrawEmbed (PrimRect (DrawCtx path)) path
 
 instance p ~ Draw a => Inj p (Draw a)
 
-instance RenderElement Identity (Draw a) where
+data Empty t = Empty
+
+nothing :: Inj (Empty Maybe) a => a
+nothing = inj (Empty @Maybe)
+
+-- These two overlapping instances should make it into inj-base in a better
+-- form (no overlapping). Every functor needs to have a 'fmap inj' instance.
+
+instance {-# OVERLAPPING #-} t ~ Maybe => Inj (Empty t) (Maybe a) where
+  inj Empty = Nothing
+
+lrtb :: Inj (LRTB p) a => p -> p -> p -> p -> a
+lrtb left right top bottom = inj LRTB{left, right, top, bottom}
+
+instance RenderElement (DrawCtx path) (Draw path) where
   renderElement getG (offset, extents, d) =
     case d of
-      DrawEmbed _ _ -> return ()
+      DrawEmbed r _ -> renderElement getG (offset, extents, r)
       DrawRect r -> renderElement getG (offset, extents, r)
       DrawText t -> renderElement getG (offset, extents, t)
 
@@ -43,49 +75,43 @@ dExtents :: Draw a -> Extents
 dExtents = \case
   DrawText t -> ptextExtents t
   DrawRect r -> rectExtents r
-  DrawEmbed e _ -> e
+  DrawEmbed r _ -> rectExtents r
 
 phantom :: s -/ Draw a => Extents -> Collage s
-phantom e = inj (DrawRect (rect (Identity Nothing) (Identity Nothing) e))
+phantom e = inj (DrawRect (rect nothing nothing e))
 
 outline :: s -/ Draw a => Color -> Collage s -> Collage s
 outline color c =
-  c <> inj (DrawRect (rect (Identity (Just (LRTB 1 1 1 1))) (Identity (Just color)) (collageExtents c)))
+  c <> inj (DrawRect (rect (lrtb @Integer 1 1 1 1) (inj color) (collageExtents c)))
 
 background :: s -/ Draw a => Color -> Collage s -> Collage s
 background color c =
-  inj (DrawRect (rect (Identity Nothing) (Identity (Just color)) (collageExtents c))) <> c
+  inj (DrawRect (rect nothing (inj color) (collageExtents c))) <> c
 
-textline :: s -/ Draw a => Color -> Font -> Text -> Maybe Natural -> Collage s
-textline color font str mpos = inj $ DrawText $ primTextPango Cairo.Matrix.identity $
-  text font (Identity color) str (Identity mpos)
+textline :: s -/ Draw a => Color -> Font -> Text -> (CursorBlink -> Maybe Natural) -> Collage s
+textline color font str cur = inj $ DrawText $ primTextPango Cairo.Matrix.identity $
+  text font (inj color) str (DrawCtx (\_ -> cur))
 
-line :: s -/ Draw a => Color -> Unsigned -> Collage s
-line color w = inj (DrawRect (rect (Identity Nothing) (Identity (Just color)) (Extents w 1)))
+line :: s -/ Draw a => Color -> Natural -> Collage s
+line color w = inj (DrawRect (rect nothing (inj color) (Extents w 1)))
 
-pad :: s -/ Draw a => LRTB Unsigned -> Collage s -> Collage s
-pad lrtb = substrate lrtb (\e -> DrawRect $ rect (Identity Nothing) (Identity Nothing) e)
+pad :: s -/ Draw a => LRTB Natural -> Collage s -> Collage s
+pad padding = substrate padding (\e -> DrawRect $ rect nothing nothing e)
 
 center :: s -/ Draw a => Extents -> Collage s -> Collage s
 center (Extents vacantWidth vacantHeight) collage =
   let
     Extents width height = collageExtents collage
-    excessWidth =
-      if vacantWidth >= width then vacantWidth - width else 0
-    excessHeight =
-      if vacantHeight >= height then vacantHeight - height else 0
-    excessWidth1 = fromInteger (ceil (excessWidth/2))
-    excessWidth2 = excessWidth - excessWidth1
-    excessHeight1 = fromInteger (ceil (excessHeight/2))
-    excessHeight2 = excessHeight - excessHeight1
-    lrtb =
+    (excessWidth1, excessWidth2) = integralDistribExcess vacantWidth width
+    (excessHeight1, excessHeight2) = integralDistribExcess vacantHeight height
+    padding =
       LRTB
         { left = excessWidth1,
           right = excessWidth2,
           top = excessHeight1,
           bottom = excessHeight2 }
   in
-    pad lrtb collage
+    pad padding collage
 
 horizontal :: s -/ Draw a => [Collage s] -> Collage s
 horizontal [] = phantom (Extents 0 0)
@@ -105,8 +131,8 @@ horizontalCenter xs =
 
 align ::
   s -/ Draw a =>
-  (Unsigned -> Unsigned -> Unsigned) ->
-  (Unsigned -> Unsigned -> Unsigned) ->
+  (Natural -> Natural -> Natural) ->
+  (Natural -> Natural -> Natural) ->
   (Extents -> Offset) ->
   (Collage s -> Collage s -> Collage s)
 align adj1 adj2 move c1 c2 =
@@ -119,3 +145,24 @@ align adj1 adj2 move c1 c2 =
         (extentsH e1 `adj2` extentsH e2)
   in
     collageCompose (move e1) (center vacant c1) (center vacant c2)
+
+activate ::
+  Offset ->
+  NonEmpty (Offset, Extents, Draw path) ->
+  Maybe (Offset, Extents, path)
+activate o c =
+  getFirst $ foldMap (First . check) c
+  where
+    check (o', e, d) = do
+      DrawEmbed _ p <- Just d
+      guard $ insideBox (o', e) o
+      Just (o', e, p)
+
+active :: (s -/ Draw path, Eq path) => Color -> path -> Collage s -> Collage s
+active color p c = c <> inj activeZone
+  where
+    mkColor (Just path) | path == p = Just color
+    mkColor _ = Nothing
+    outlineRect =
+      rect (lrtb @Integer 1 1 1 1) (DrawCtx $ \mpath _ -> mkColor mpath) (collageExtents c)
+    activeZone = DrawEmbed outlineRect p

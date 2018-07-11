@@ -19,10 +19,10 @@ instance UndoEq SynArg where
 instance SynSelfSelected SynArg where
   synSelfSelected = const True
 
-instance SyntaxLayout ActiveZone LayoutCtx SynArg where
+instance SyntaxLayout Path LayoutCtx SynArg where
   layout (SynArg t) = layout t
 
-instance SyntaxReact rp ActiveZone SynArg where
+instance SyntaxReact rp Path SynArg where
   react = asum handlers
     where
       handlers = [reactRedirect _SynArg, handle_x]

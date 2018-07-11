@@ -3,9 +3,9 @@ module Foundry.Syn.Common where
 import Data.Text (Text)
 import Numeric.Natural (Natural)
 import Data.Sequence (Seq)
-import Data.Monoid
 import Data.Vinyl
-import Data.Dynamic
+import Type.Reflection
+import Data.Type.Equality
 
 import Control.Lens
 import Control.Applicative
@@ -25,14 +25,14 @@ dark3  = RGB 64 64 64
 light1 = RGB 179 179 179
 white  = RGB 255 255 255
 
-textWithCursor :: s -/ Draw ActiveZone => Text -> Maybe Natural -> Collage s
+textWithCursor :: s -/ Draw Path => Text -> (CursorBlink -> Maybe Natural) -> Collage s
 textWithCursor = textline white font
 
-text :: s -/ Draw ActiveZone => Text -> Collage s
-text t = textWithCursor t Nothing
+text :: s -/ Draw Path => Text -> Collage s
+text t = textWithCursor t (\_ -> Nothing)
 
-punct :: s -/ Draw ActiveZone => Text -> Collage s
-punct t = textline light1 font t Nothing
+punct :: s -/ Draw Path => Text -> Collage s
+punct t = textline light1 font t (\_ -> Nothing)
 
 font :: Font
 font = Font "Ubuntu" 12 FontWeightNormal
@@ -45,39 +45,22 @@ keyCodeLetter kc c = \case
   KeyPress [] keyCode -> keyCode == kc || keyLetter c keyCode
   _ -> False
 
-type Path = Seq Dynamic
+data PathSegment where
+  PathSegment :: Eq a => TypeRep a -> a -> PathSegment
 
-newtype ActiveZone = ActiveZone Path
+instance Eq PathSegment where
+  PathSegment t1 a1 == PathSegment t2 a2 =
+    case testEquality t1 t2 of
+      Nothing -> False
+      Just Refl -> a1 == a2
 
-active :: s -/ Draw ActiveZone => Path -> Collage s -> Collage s
-active p c = inj activeZone <> c
-  where
-    activeZone = DrawEmbed (collageExtents c) (ActiveZone p)
+fromPathSegment :: forall a. Typeable a => PathSegment -> Maybe a
+fromPathSegment (PathSegment t a) =
+  case testEquality t (typeRep @a) of
+    Nothing -> Nothing
+    Just Refl -> Just a
 
-activate ::
-  Offset ->
-  CollageRep (Draw ActiveZone) ->
-  Maybe (Offset, Extents, Path)
-activate o c =
-  getLast . foldMap (Last . check) $ collageRepElements c
-  where
-    check (o', e, d) = do
-      DrawEmbed _ (ActiveZone p) <- Just d
-      guard $ insideBox (o', e) o
-      Just (o', e, p)
-
--- TODO: remove (Element s ~ Draw ActiveZone) by a using a different hover
---       system (adding hover intersection into prim context perhaps)
-hover ::
-  (s -/ Draw ActiveZone, Element s ~ Draw ActiveZone) =>
-  (Collage s -> Collage s) ->
-  Offset ->
-  Collage s ->
-  Collage s
-hover f o c =
-  case activate o (getCollageRep c) of
-    Nothing -> c
-    Just (o', e, _) -> collageCompose o' c (f (phantom e))
+type Path = Seq PathSegment
 
 data LayoutCtx = LayoutCtx
   { _lctxSelected :: Bool
@@ -86,9 +69,9 @@ data LayoutCtx = LayoutCtx
 
 makeLenses ''LayoutCtx
 
-sel :: s -/ Draw ActiveZone => LayoutCtx -> Collage s -> Collage s
+sel :: s -/ Draw Path => LayoutCtx -> Collage s -> Collage s
 sel lctx
-  = active (lctx ^. lctxPath)
+  = active light1 (lctx ^. lctxPath)
   . if lctx ^. lctxSelected
     then outline dark2 . background dark3
     else id

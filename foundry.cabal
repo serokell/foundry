@@ -10,6 +10,7 @@ library
                        Source.Input
                        Source.Input.KeyCode
                        Source.Syntax
+                       Source.Phaser
 
   build-depends:       base >=4.7
                ,       lens >=4.11
@@ -25,12 +26,8 @@ library
                ,       inj
                ,       inj-base
                ,       slay-core
-               ,       slay-number-double
                ,       slay-combinators
                ,       slay-cairo
-
-  mixins:
-    slay-number-double (Slay.Number.Double as Slay.Number)
 
   hs-source-dirs:      lib
 

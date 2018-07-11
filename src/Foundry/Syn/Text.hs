@@ -53,19 +53,21 @@ instance UndoEq SynText where
     | view synTextEditMode syn2 = False
     | otherwise = on (==) (view synTextContent) syn1 syn2
 
-instance SyntaxLayout ActiveZone LayoutCtx SynText where
+instance SyntaxLayout Path LayoutCtx SynText where
   layout syn = do
     lctx <- ask
     let
       layoutActive =
         textWithCursor
           (syn ^. synTextContent)
-          (Just . fromIntegral $ syn ^. synTextPosition)
+          (\case
+              CursorVisible -> Just . fromIntegral $ syn ^. synTextPosition
+              CursorInvisible -> Nothing)
       layoutInactive = text (syn ^. synTextContent)
       isActive = (lctx ^. lctxSelected) && (syn ^. synTextEditMode)
     return $ if isActive then layoutActive else layoutInactive
 
-instance SyntaxReact rp ActiveZone SynText where
+instance SyntaxReact rp Path SynText where
   react = do asum handlers; modify normalizeSynText
     where
       handlers =

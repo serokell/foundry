@@ -4,7 +4,7 @@ import Data.Kind (Type)
 import Data.Foldable
 import Control.Monad.Reader
 import Control.Lens
-import Data.Dynamic
+import Type.Reflection
 
 import Data.Singletons.Prelude
 import Data.Singletons.Prelude.List
@@ -63,7 +63,7 @@ selNext = lookupNext selOrder
 selPrev = lookupNext selRevOrder
 
 class SelLayout s where
-  selLayoutHook :: s' -/ Draw ActiveZone => s -> Collage s' -> Collage s'
+  selLayoutHook :: s' -/ Draw Path => s -> Collage s' -> Collage s'
 
 handleArrowUp :: SynSelection syn sel => React rp la syn
 handleArrowUp = do
@@ -123,11 +123,11 @@ selLayout ::
   forall t (a :: t).
      (Demote t ~ t, SelLayout t, Enum t,
       (a ∈ EnumFromTo MinBound MaxBound),
-      SingKind t, SyntaxLayout ActiveZone LayoutCtx (FieldTypes t !! FromEnum a),
+      SingKind t, SyntaxLayout Path LayoutCtx (FieldTypes t !! FromEnum a),
       SynSelfSelected (FieldTypes t !! FromEnum a), Typeable t, Eq t)
   => Sing a
   -> SynRecord t
-  -> forall s. (s -/ Draw ActiveZone, Element s ~ Draw ActiveZone)
+  -> forall s. (s -/ Draw Path)
   => Reader LayoutCtx (Collage s)
 selLayout ssel syn = do
   let
@@ -136,7 +136,7 @@ selLayout ssel syn = do
     appendSelection
       = (lctxSelected &&~ (view synSelection syn == sel'))
       . (lctxSelected &&~ (synSelfSelected syn == False))
-      . (lctxPath %~ (`snoc` toDyn sel'))
+      . (lctxPath %~ (`snoc` PathSegment typeRep sel'))
     enforceSelfSelection
       = lctxSelected &&~ synSelfSelected sub
   local appendSelection $ do

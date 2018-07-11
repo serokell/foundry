@@ -5,13 +5,14 @@ module Source
 import Control.Monad.Reader
 import Control.Monad.State
 import Control.Monad.Trans.Maybe
-import Data.Functor.Identity
 import qualified Graphics.UI.Gtk as Gtk
 import Data.IORef
+import Data.Functor.Identity
 
 import Slay.Core
 import Slay.Cairo.Render
 import qualified Source.Syntax as Syn
+import Source.Phaser
 import Source.Draw
 import Source.Input (InputEvent(..), Modifier(..))
 
@@ -46,8 +47,14 @@ createMainWindow synRef = do
       , Gtk.ButtonPressMask
       ]
 
-  layoutRef :: IORef (Syn.LayoutDraw la)
+  layoutRef :: IORef (Layout Identity (Draw la))
     <- newIORef (error "layoutRef used before initialization")
+
+  pointerRef :: IORef (Maybe Offset)
+    <- newIORef Nothing
+
+  cursorPhaser <- newPhaser 530000 CursorVisible blink
+    (\_ -> Gtk.postGUIAsync (Gtk.widgetQueueDraw canvas))
 
   let
 
@@ -57,10 +64,18 @@ createMainWindow synRef = do
 
     updateCanvas viewport = do
       syn <- liftIO $ readIORef synRef
-      let layout = Syn.LayoutDraw (\ElementRefl -> runReader (Syn.layout syn) viewport)
+      let layout = mkLayout (Identity (runReader (Syn.layout syn) viewport))
       liftIO $ writeIORef layoutRef layout
-      renderElements runIdentity . collageRepElements $
-        Syn.runLayoutDraw (\d -> (dExtents d, d)) layout
+      cursorVisible <- liftIO $ phaserCurrent cursorPhaser
+      mpointer <- liftIO $ readIORef pointerRef
+      let
+        elements = runIdentity $
+          layoutElements (\d -> (dExtents d, d)) layout
+        mpath = do
+          pointer <- mpointer
+          (_, _, path) <- activate pointer elements
+          Just path
+      renderElements (withDrawCtx mpath cursorVisible) elements
 
     handleInputEvent inputEvent = do
       syn <- liftIO $ readIORef synRef
@@ -74,6 +89,7 @@ createMainWindow synRef = do
       case msyn' of
         Nothing -> return False
         Just syn' -> do
+          liftIO $ phaserReset cursorPhaser CursorVisible
           atomicWriteIORef synRef syn'
           Gtk.widgetQueueDraw canvas
           return True
@@ -98,7 +114,9 @@ createMainWindow synRef = do
 
   void $ Gtk.on canvas Gtk.motionNotifyEvent $ do
     (x, y) <- Gtk.eventCoordinates
-    let event = PointerMotion (round x) (round y)
+    let (x', y') = (round x, round y)
+    liftIO $ atomicWriteIORef pointerRef (Just (Offset x' y'))
+    let event = PointerMotion (fromInteger x') (fromInteger y')
     liftIO (handleInputEvent event)
 
   void $ Gtk.on canvas Gtk.buttonPressEvent $ do
