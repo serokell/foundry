@@ -68,7 +68,7 @@ instance SyntaxLayout Path LayoutCtx SynText where
     return $ if isActive then layoutActive else layoutInactive
 
 instance SyntaxReact rp Path SynText where
-  react = do asum handlers; modify normalizeSynText
+  react = do asum @[] handlers; modify normalizeSynText
     where
       handlers =
         [ handle_i

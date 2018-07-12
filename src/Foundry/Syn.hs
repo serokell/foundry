@@ -8,6 +8,7 @@ import Data.Function
 import Control.Monad.Reader
 import Control.Monad.State
 import Control.Lens
+import Data.List.NonEmpty (nonEmpty)
 
 import Data.Vinyl
 
@@ -97,17 +98,26 @@ instance SyntaxLayout Path Viewport SynTop where
       hoverBar = do
         guard $ syn ^. synHoverBarEnabled
         [text . Text.pack . show $ syn ^. synPointer]
-      bars = concat [hoverBar]
+      bars = concat @[] [hoverBar]
+      withBars =
+        case nonEmpty bars of
+          Nothing -> id
+          Just bars' -> (<> vertical bars')
+      centered c =
+        let
+          padding = centerOf (viewport ^. _Viewport) c
+          backgroundRect = rect nothing (inj dark1)
+        in
+          substrate padding backgroundRect c
       lctx = LayoutCtx True Seq.empty
-    in flip (<>) (vertical bars)
-     . background dark1
-     . center (viewport ^. _Viewport)
+    in withBars
+     . centered
      . sel (lctx & lctxSelected &&~ synSelfSelected (syn ^. synExpr))
      . pad (LRTB 5 5 5 5)
      $ runReader (layout (syn ^. synExpr)) lctx
 
 instance SyntaxReact () Path SynTop where
-  react = asum handlers
+  react = asum @[] handlers
     where
       handlers =
         [ handlePointerMotion

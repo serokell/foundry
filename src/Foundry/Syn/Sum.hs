@@ -32,8 +32,8 @@ instance (SyntaxLayout la lctx s1, SyntaxLayout la lctx s2)
 
 instance (SyntaxReact rp la s1, SyntaxReact rp la s2)
       => SyntaxReact rp la (SynAdd s1 s2) where
-  react = asum [reactRedirect _SynAugend, reactRedirect _SynAddend]
-  subreact = asum [subreactRedirect _SynAugend, subreactRedirect _SynAddend]
+  react = asum @[] [reactRedirect _SynAugend, reactRedirect _SynAddend]
+  subreact = asum @[] [subreactRedirect _SynAugend, subreactRedirect _SynAddend]
 
 type family SynSum (s :: [Type]) :: Type where
   SynSum '[s] = s

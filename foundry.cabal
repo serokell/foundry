@@ -38,6 +38,8 @@ library
                        RecordWildCards
                        RankNTypes
                        ScopedTypeVariables
+                       OverloadedStrings
+                       OverloadedLists
                        TypeFamilies
                        GADTs
                        PatternSynonyms
@@ -93,6 +95,7 @@ executable foundry
   default-extensions:  LambdaCase
                        ScopedTypeVariables
                        OverloadedStrings
+                       OverloadedLists
                        RecordWildCards
                        RankNTypes
                        GADTs

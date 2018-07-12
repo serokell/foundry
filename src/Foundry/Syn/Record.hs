@@ -100,7 +100,7 @@ handleArrowRight = do
 handleArrows
   :: (SynSelection syn sel, Enum sel, Bounded sel, Eq sel)
   => React rp la syn
-handleArrows = asum
+handleArrows = asum @[]
   [handleArrowUp, handleArrowDown, handleArrowLeft, handleArrowRight]
 
 instance (SingKind sel, Demote sel ~ sel, Enum sel)

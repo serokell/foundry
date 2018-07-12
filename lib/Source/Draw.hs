@@ -48,7 +48,11 @@ data Draw path
   | DrawRect (PrimRect (DrawCtx path))
   | DrawEmbed (PrimRect (DrawCtx path)) path
 
-instance p ~ Draw a => Inj p (Draw a)
+instance c ~ DrawCtx path => Inj (PangoText c) (Draw path) where
+  inj = DrawText
+
+instance c ~ DrawCtx path => Inj (PrimRect c) (Draw path) where
+  inj = DrawRect
 
 data Empty t = Empty
 
@@ -77,74 +81,33 @@ dExtents = \case
   DrawRect r -> rectExtents r
   DrawEmbed r _ -> rectExtents r
 
-phantom :: s -/ Draw a => Extents -> Collage s
-phantom e = inj (DrawRect (rect nothing nothing e))
-
-outline :: s -/ Draw a => Color -> Collage s -> Collage s
-outline color c =
-  c <> inj (DrawRect (rect (lrtb @Integer 1 1 1 1) (inj color) (collageExtents c)))
-
-background :: s -/ Draw a => Color -> Collage s -> Collage s
-background color c =
-  inj (DrawRect (rect nothing (inj color) (collageExtents c))) <> c
-
 textline :: s -/ Draw a => Color -> Font -> Text -> (CursorBlink -> Maybe Natural) -> Collage s
-textline color font str cur = inj $ DrawText $ primTextPango Cairo.Matrix.identity $
+textline color font str cur = inj $ primTextPango Cairo.Matrix.identity $
   text font (inj color) str (DrawCtx (\_ -> cur))
 
 line :: s -/ Draw a => Color -> Natural -> Collage s
-line color w = inj (DrawRect (rect nothing (inj color) (Extents w 1)))
+line color w = rect nothing (inj color) (Extents w 1)
 
 pad :: s -/ Draw a => LRTB Natural -> Collage s -> Collage s
-pad padding = substrate padding (\e -> DrawRect $ rect nothing nothing e)
+pad padding = substrate padding (\e -> rect (inj padding) nothing e)
 
-center :: s -/ Draw a => Extents -> Collage s -> Collage s
-center (Extents vacantWidth vacantHeight) collage =
+centerOf :: s -/ Draw a => Extents -> Collage s -> LRTB Natural
+centerOf (Extents vacantWidth vacantHeight) collage =
   let
     Extents width height = collageExtents collage
     (excessWidth1, excessWidth2) = integralDistribExcess vacantWidth width
     (excessHeight1, excessHeight2) = integralDistribExcess vacantHeight height
-    padding =
-      LRTB
-        { left = excessWidth1,
-          right = excessWidth2,
-          top = excessHeight1,
-          bottom = excessHeight2 }
   in
-    pad padding collage
+    LRTB
+      { left = excessWidth1,
+        right = excessWidth2,
+        top = excessHeight1,
+        bottom = excessHeight2 }
 
-horizontal :: s -/ Draw a => [Collage s] -> Collage s
-horizontal [] = phantom (Extents 0 0)
-horizontal xs = foldr1 horizTop xs
-
-vertical :: s -/ Draw a => [Collage s] -> Collage s
-vertical [] = phantom (Extents 0 0)
-vertical xs = foldr1 vertLeft xs
-
-horizontalCenter, verticalCenter :: s -/ Draw a => [Collage s] -> Collage s
-verticalCenter [] = phantom (Extents 0 0)
-verticalCenter xs =
-  foldr1 (align max (\_ _ -> 0) (\e -> (extentsOffset e) { offsetX = 0 })) xs
-horizontalCenter [] = phantom (Extents 0 0)
-horizontalCenter xs =
-  foldr1 (align (\_ _ -> 0) max (\e -> (extentsOffset e) { offsetY = 0 })) xs
-
-align ::
-  s -/ Draw a =>
-  (Natural -> Natural -> Natural) ->
-  (Natural -> Natural -> Natural) ->
-  (Extents -> Offset) ->
-  (Collage s -> Collage s -> Collage s)
-align adj1 adj2 move c1 c2 =
-  let
-    e1 = collageExtents c1
-    e2 = collageExtents c2
-    vacant =
-      Extents
-        (extentsW e1 `adj1` extentsW e2)
-        (extentsH e1 `adj2` extentsH e2)
-  in
-    collageCompose (move e1) (center vacant c1) (center vacant c2)
+horizontal, vertical, horizontalCenter :: NonEmpty (Collage s) -> Collage s
+horizontal = foldr1 @NonEmpty horizTop
+vertical = foldr1 @NonEmpty vertLeft
+horizontalCenter = foldr1 @NonEmpty horizCenter
 
 activate ::
   Offset ->
@@ -159,10 +122,10 @@ activate o c =
       Just (o', e, p)
 
 active :: (s -/ Draw path, Eq path) => Color -> path -> Collage s -> Collage s
-active color p c = c <> inj activeZone
+active color p c = c <> collageSingleton activeZone
   where
     mkColor (Just path) | path == p = Just color
     mkColor _ = Nothing
     outlineRect =
-      rect (lrtb @Integer 1 1 1 1) (DrawCtx $ \mpath _ -> mkColor mpath) (collageExtents c)
+      rect (lrtb @Natural 1 1 1 1) (DrawCtx $ \mpath _ -> mkColor mpath) (collageExtents c)
     activeZone = DrawEmbed outlineRect p

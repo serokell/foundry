@@ -34,7 +34,7 @@ instance SyntaxLayout Path LayoutCtx SynEmbed where
     punct "url:" `horizTop` runReader (layout t) lctx
 
 instance SyntaxReact rp Path SynEmbed where
-  react = asum handlers
+  react = asum @[] handlers
     where
       handleShiftUp = do
         KeyPress [Shift] keyCode <- view rctxInputEvent

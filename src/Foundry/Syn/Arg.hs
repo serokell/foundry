@@ -23,7 +23,7 @@ instance SyntaxLayout Path LayoutCtx SynArg where
   layout (SynArg t) = layout t
 
 instance SyntaxReact rp Path SynArg where
-  react = asum handlers
+  react = asum @[] handlers
     where
       handlers = [reactRedirect _SynArg, handle_x]
       handle_x = do

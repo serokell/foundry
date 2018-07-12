@@ -1,5 +1,6 @@
 module Foundry.Syn.Expr where
 
+import Numeric.Natural
 import Data.Function
 import Control.Applicative
 import Control.Monad.Reader
@@ -140,8 +141,12 @@ type instance FieldTypes SelApp =
 
 instance SelLayout SelApp where
   selLayoutHook = \case
-    SelAppExpr1 -> pad (LRTB 5 5 5 5)
-    SelAppExpr2 -> outline dark2 . pad (LRTB 5 5 5 5)
+    SelAppExpr1 ->
+      pad (LRTB 5 5 5 5)
+    SelAppExpr2 ->
+      substrate
+        (lrtb @Natural 5 5 5 5)
+        (rect (lrtb @Natural 1 1 1 1) (inj dark2))
 
 instance SyntaxLayout Path LayoutCtx SynApp where
   layout syn = reader $ \lctx ->
