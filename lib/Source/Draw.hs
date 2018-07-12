@@ -55,8 +55,8 @@ data Empty t = Empty
 nothing :: Inj (Empty Maybe) a => a
 nothing = inj (Empty @Maybe)
 
--- These two overlapping instances should make it into inj-base in a better
--- form (no overlapping). Every functor needs to have a 'fmap inj' instance.
+-- This overlapping instance should make it into inj-base in a better
+-- form (no overlapping).
 
 instance {-# OVERLAPPING #-} t ~ Maybe => Inj (Empty t) (Maybe a) where
   inj Empty = Nothing
