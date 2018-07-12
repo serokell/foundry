@@ -52,7 +52,7 @@ instance SyntaxLayout Path LayoutCtx SynVar where
         c   -> c
 
 instance SyntaxReact rp Path SynVar where
-  react = asum handlers
+  react = asum @[] handlers
     where
       handlers =
         [ handleShiftUp

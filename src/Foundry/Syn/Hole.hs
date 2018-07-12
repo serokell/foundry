@@ -31,7 +31,7 @@ instance (SyntaxLayout Path lctx sub)
 
 instance SyntaxReact rp Path sub
       => SyntaxReact rp Path (SynHole sub) where
-  react = asum handlers
+  react = asum @[] handlers
     where
       handlers =
         [ reactRedirect _SynSolid

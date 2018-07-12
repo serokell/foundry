@@ -73,7 +73,10 @@ sel :: s -/ Draw Path => LayoutCtx -> Collage s -> Collage s
 sel lctx
   = active light1 (lctx ^. lctxPath)
   . if lctx ^. lctxSelected
-    then outline dark2 . background dark3
+    then
+      substrate (lrtb @Natural 0 0 0 0) (\e ->
+        rect nothing (inj dark3) e <>
+        rect (lrtb @Natural 1 1 1 1) (inj dark2) e)
     else id
 
 simpleSubreact :: Char -> syn -> Subreact rp la syn
