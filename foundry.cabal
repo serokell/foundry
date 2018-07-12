@@ -86,7 +86,7 @@ executable foundry
                ,       singletons
                ,       vinyl
                ,       morte
-               ,       template-haskell
+               ,       constraints
                ,       foundry
 
   hs-source-dirs:      src

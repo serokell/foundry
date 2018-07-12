@@ -8,10 +8,8 @@ import Type.Reflection
 
 import Data.Singletons.Prelude
 import Data.Singletons.Prelude.List
-import Data.Vinyl
-
-import qualified Data.Singletons.TH as Sing
-import qualified Language.Haskell.TH as TH
+import Data.Vinyl hiding (Dict)
+import Data.Constraint
 
 import Source.Syntax
 import Source.Draw
@@ -62,7 +60,13 @@ selNext, selPrev :: (Enum s, Bounded s, Eq s) => s -> Maybe s
 selNext = lookupNext selOrder
 selPrev = lookupNext selRevOrder
 
-class SelLayout s where
+class SelLayout la s | s -> la where
+  selLayoutC ::
+    forall rp a.
+    Sing (a :: s) ->
+    Dict
+      (SyntaxReact rp la (FieldTypes s !! FromEnum a),
+       a ∈ EnumFromTo MinBound MaxBound)
   selLayoutHook :: s' -/ Draw Path => s -> Collage s' -> Collage s'
 
 handleArrowUp :: SynSelection syn sel => React rp la syn
@@ -111,17 +115,19 @@ instance (SingKind sel, Demote sel ~ sel, Enum sel)
   synSelection = synRecSel . iso (toEnum . fromIntegral) (toInteger . fromEnum)
   synSelectionSelf = synRecSelSelf
 
-recHandleSelRedirect :: TH.Name -> TH.ExpQ
-recHandleSelRedirect selTypeName =
-  [e| do False <- use synSelectionSelf
-         SomeSing selection <- uses synRecSel (toSing . toEnum . fromIntegral)
-         $(Sing.sCases selTypeName [e|selection|]
-             [e|reactRedirect (synField selection)|])
-   |]
+recHandleSelRedirect ::
+  forall t rp la.
+     (Demote t ~ t, SingKind t, Enum t, SelLayout la t) =>
+  React rp la (SynRecord t)
+recHandleSelRedirect = do
+  False <- use synSelectionSelf
+  SomeSing selection <- uses synRecSel (toSing . toEnum . fromIntegral)
+  case selLayoutC @la @_ @rp selection of
+    Dict -> reactRedirect (synField selection)
 
 selLayout ::
-  forall t (a :: t).
-     (Demote t ~ t, SelLayout t, Enum t,
+  forall t (a :: t) la.
+     (Demote t ~ t, SelLayout la t, Enum t,
       (a ∈ EnumFromTo MinBound MaxBound),
       SingKind t, SyntaxLayout Path LayoutCtx (FieldTypes t !! FromEnum a),
       SynSelfSelected (FieldTypes t !! FromEnum a), Typeable t, Eq t)

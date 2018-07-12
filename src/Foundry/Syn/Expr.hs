@@ -8,7 +8,8 @@ import Control.Monad.Reader
 import qualified Data.Singletons.TH as Sing
 import Data.Singletons.Prelude
 
-import Data.Vinyl
+import Data.Constraint
+import Data.Vinyl hiding (Dict)
 
 import Source.Syntax
 import Source.Draw
@@ -48,7 +49,11 @@ type instance FieldTypes SelLam =
    , SynHole SynExpr
    , SynHole SynExpr ]
 
-instance SelLayout SelLam where
+instance SelLayout Path SelLam where
+  selLayoutC = \case
+    SSelLamArg -> Dict
+    SSelLamExpr1 -> Dict
+    SSelLamExpr2 -> Dict
   selLayoutHook = \case
     SelLamArg   -> pad (LRTB 4 4 0 0)
     SelLamExpr1 -> pad (LRTB 4 4 0 0)
@@ -73,7 +78,7 @@ instance SyntaxLayout Path LayoutCtx SynLam where
       ] & vertical
 
 instance SyntaxReact rp Path SynLam where
-  react = $(recHandleSelRedirect ''SelLam) <|> handleArrows
+  react = recHandleSelRedirect <|> handleArrows
   subreact
     = simpleSubreact 'L'
     $ SynRecord
@@ -94,7 +99,11 @@ type instance FieldTypes SelPi =
    , SynHole SynExpr
    , SynHole SynExpr ]
 
-instance SelLayout SelPi where
+instance SelLayout Path SelPi where
+  selLayoutC = \case
+    SSelPiArg -> Dict
+    SSelPiExpr1 -> Dict
+    SSelPiExpr2 -> Dict
   selLayoutHook = \case
     SelPiArg   -> pad (LRTB 4 4 0 0)
     SelPiExpr1 -> pad (LRTB 4 4 0 0)
@@ -119,7 +128,7 @@ instance SyntaxLayout Path LayoutCtx SynPi where
       ] & vertical
 
 instance SyntaxReact rp Path SynPi where
-  react = $(recHandleSelRedirect ''SelPi) <|> handleArrows
+  react = recHandleSelRedirect <|> handleArrows
   subreact
     = simpleSubreact 'P'
     $ SynRecord
@@ -139,7 +148,10 @@ type instance FieldTypes SelApp =
   '[ SynHole SynExpr
    , SynHole SynExpr ]
 
-instance SelLayout SelApp where
+instance SelLayout Path SelApp where
+  selLayoutC = \case
+    SSelAppExpr1 -> Dict
+    SSelAppExpr2 -> Dict
   selLayoutHook = \case
     SelAppExpr1 ->
       pad (LRTB 5 5 5 5)
@@ -156,7 +168,7 @@ instance SyntaxLayout Path LayoutCtx SynApp where
     ] & horizontalCenter
 
 instance SyntaxReact rp Path SynApp where
-  react = $(recHandleSelRedirect ''SelApp) <|> handleArrows
+  react = recHandleSelRedirect <|> handleArrows
   subreact
     = simpleSubreact 'A'
     $ SynRecord
