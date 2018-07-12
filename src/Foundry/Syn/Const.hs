@@ -13,12 +13,12 @@ instance SynSelfSelected SynConst where
 instance UndoEq SynConst where
   undoEq = (==)
 
-instance n ~ Int => SyntaxLayout n ActiveZone LayoutCtx SynConst where
+instance n ~ Int => SyntaxLayout Path LayoutCtx SynConst where
   layout = pure . \case
     SynConstStar -> punct "★"
     SynConstBox  -> punct "□"
 
-instance SyntaxReact n rp ActiveZone SynConst where
+instance SyntaxReact rp Path SynConst where
   subreact
      =  simpleSubreact 'S' SynConstStar
     <|> simpleSubreact 'B' SynConstBox

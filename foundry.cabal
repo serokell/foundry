@@ -1,20 +1,16 @@
+cabal-version:       2.1
 name:                foundry
 version:             0.1.0.0
 build-type:          Simple
-cabal-version:       >=1.10
 
 library
 
   exposed-modules:     Source
-                       Source.Point
-                       Source.Collage
-                       Source.Collage.Builder
                        Source.Draw
-                       Source.Style
-                       Source.Render
                        Source.Input
                        Source.Input.KeyCode
                        Source.Syntax
+                       Source.Phaser
 
   build-depends:       base >=4.7
                ,       lens >=4.11
@@ -27,6 +23,11 @@ library
                ,       semigroups >=0.16
                ,       mtl >= 2.2.1
                ,       bifunctors
+               ,       inj
+               ,       inj-base
+               ,       slay-core
+               ,       slay-combinators
+               ,       slay-cairo
 
   hs-source-dirs:      lib
 

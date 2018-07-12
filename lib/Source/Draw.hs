@@ -1,89 +1,168 @@
-{-# LANGUAGE FunctionalDependencies #-}
+{-# LANGUAGE FunctionalDependencies, DeriveFunctor, NamedFieldPuns, TypeApplications #-}
 module Source.Draw
-  ( module Source.Collage
-  , module Source.Draw
+  ( module Source.Draw,
+    module Slay.Core,
+    module Slay.Combinators,
+    module Slay.Cairo.Prim.Color,
+    module Slay.Cairo.Prim.Rect,
+    FontWeight(..), Font(..),
+    module Inj
   ) where
 
-import Control.Lens
 import Data.Text (Text)
-import qualified Data.Text as Text
-import qualified Graphics.Rendering.Pango as Pango
-import System.IO.Unsafe (unsafePerformIO)
+import Numeric.Natural (Natural)
+import Data.List.NonEmpty
+import Control.Monad
+import Data.Monoid
+import qualified Graphics.Rendering.Cairo.Matrix as Cairo.Matrix
 
-import Source.Style
-import Source.Collage
+import Inj
+import Inj.Base ()
 
-import Source.Collage.Builder (CollageBuilder, collageBuilder1)
-import qualified Source.Collage.Builder as B
+import Slay.Core
+import Slay.Cairo.Prim.Color
+import Slay.Cairo.Prim.Rect
+import Slay.Cairo.Prim.Text
+import Slay.Cairo.Prim.PangoText
+import Slay.Combinators
+import Slay.Cairo.Render
 
-data Draw a
-  = DrawText Color Pango.PangoLayout
-  | DrawPhantom
-  | DrawOutline Color
-  | DrawBackground Color
-  | DrawEmbed a
+data CursorBlink = CursorVisible | CursorInvisible
 
-type CollageBuilderDraw n a = CollageBuilder n (Draw a)
+blink :: CursorBlink -> CursorBlink
+blink = \case
+  CursorVisible -> CursorInvisible
+  CursorInvisible -> CursorVisible
 
-phantom :: (Num n, Ord n) => Extents n -> CollageBuilderDraw n a
-phantom e = collageBuilder1 e DrawPhantom
+data DrawCtx path a = DrawCtx (Maybe path -> CursorBlink -> a)
+  deriving (Functor)
 
-extend :: (Num n, Ord n) => Extents n -> Op1 (CollageBuilderDraw n a)
-extend o c = phantom (pointAdd o (B.getExtents c)) <> c
+instance Inj p a => Inj p (DrawCtx path a) where
+  inj p = DrawCtx (\_ _ -> inj p)
 
-outline :: (Num n, Ord n) => Color -> Op1 (CollageBuilderDraw n a)
+withDrawCtx :: Maybe path -> CursorBlink -> DrawCtx path a -> a
+withDrawCtx mpath curBlink (DrawCtx f) = f mpath curBlink
+
+data Draw path
+  = DrawText (PangoText (DrawCtx path))
+  | DrawRect (PrimRect (DrawCtx path))
+  | DrawEmbed (PrimRect (DrawCtx path)) path
+
+instance p ~ Draw a => Inj p (Draw a)
+
+data Empty t = Empty
+
+nothing :: Inj (Empty Maybe) a => a
+nothing = inj (Empty @Maybe)
+
+-- This overlapping instance should make it into inj-base in a better
+-- form (no overlapping).
+
+instance {-# OVERLAPPING #-} t ~ Maybe => Inj (Empty t) (Maybe a) where
+  inj Empty = Nothing
+
+lrtb :: Inj (LRTB p) a => p -> p -> p -> p -> a
+lrtb left right top bottom = inj LRTB{left, right, top, bottom}
+
+instance RenderElement (DrawCtx path) (Draw path) where
+  renderElement getG (offset, extents, d) =
+    case d of
+      DrawEmbed r _ -> renderElement getG (offset, extents, r)
+      DrawRect r -> renderElement getG (offset, extents, r)
+      DrawText t -> renderElement getG (offset, extents, t)
+
+dExtents :: Draw a -> Extents
+dExtents = \case
+  DrawText t -> ptextExtents t
+  DrawRect r -> rectExtents r
+  DrawEmbed r _ -> rectExtents r
+
+phantom :: s -/ Draw a => Extents -> Collage s
+phantom e = inj (DrawRect (rect nothing nothing e))
+
+outline :: s -/ Draw a => Color -> Collage s -> Collage s
 outline color c =
-  c <> collageBuilder1 (B.getExtents c) (DrawOutline color)
+  c <> inj (DrawRect (rect (lrtb @Integer 1 1 1 1) (inj color) (collageExtents c)))
 
-background :: (Num n, Ord n) => Color -> Op1 (CollageBuilderDraw n a)
+background :: s -/ Draw a => Color -> Collage s -> Collage s
 background color c =
-  collageBuilder1 (B.getExtents c) (DrawBackground color) <> c
+  inj (DrawRect (rect nothing (inj color) (collageExtents c))) <> c
 
-textline :: Integral n => Font -> Text -> CollageBuilderDraw n a
-textline font text =
-  let (e, a) = drawText font text
-  in collageBuilder1 e a
+textline :: s -/ Draw a => Color -> Font -> Text -> (CursorBlink -> Maybe Natural) -> Collage s
+textline color font str cur = inj $ DrawText $ primTextPango Cairo.Matrix.identity $
+  text font (inj color) str (DrawCtx (\_ -> cur))
 
-drawText :: Integral n => Font -> Text -> (Extents n, Draw a)
-drawText font text = unsafePerformIO $ do
-  cairoContext <- Pango.cairoCreateContext Nothing
-  pangoFont <- Pango.fontDescriptionNew
-  pangoFont `Pango.fontDescriptionSetFamily` Text.unpack (fontFamily font)
-  pangoFont `Pango.fontDescriptionSetSize` fontSize font
-  pangoFont `Pango.fontDescriptionSetWeight` (case fontWeight font of
-      FontWeightNormal -> Pango.WeightNormal
-      FontWeightBold -> Pango.WeightBold)
-  pangoLayout <- Pango.layoutEmpty cairoContext
-  pangoLayout `Pango.layoutSetText` Text.unpack text
-  pangoLayout `Pango.layoutSetFontDescription` Just pangoFont
-  -- TODO: handle x y
-  (_, Pango.PangoRectangle _x _y w h) <- Pango.layoutGetExtents pangoLayout
-  return
-    ( Point (ceiling w) (ceiling h)
-    , DrawText (fontColor font) pangoLayout )
+line :: s -/ Draw a => Color -> Natural -> Collage s
+line color w = inj (DrawRect (rect nothing (inj color) (Extents w 1)))
 
-line :: (Num n, Ord n) => Color -> n -> CollageBuilderDraw n a
-line color w = collageBuilder1 (Point w 1) (DrawBackground color)
+pad :: s -/ Draw a => LRTB Natural -> Collage s -> Collage s
+pad padding = substrate padding (\e -> DrawRect $ rect nothing nothing e)
 
-pad :: (Num n, Ord n) => Offset n -> Offset n -> Op1 (CollageBuilderDraw n a)
-pad o1 o2 = B.offset o1 . extend o2
-
-center :: Integral n => Extents n -> Op1 (CollageBuilderDraw n a)
-center (Point vacantWidth vacantHeight) collage =
+center :: s -/ Draw a => Extents -> Collage s -> Collage s
+center (Extents vacantWidth vacantHeight) collage =
   let
-    Point width height = B.getExtents collage
-    (excessWidth1,  excessWidth2)  = getExcess vacantWidth  width
-    (excessHeight1, excessHeight2) = getExcess vacantHeight height
+    Extents width height = collageExtents collage
+    (excessWidth1, excessWidth2) = integralDistribExcess vacantWidth width
+    (excessHeight1, excessHeight2) = integralDistribExcess vacantHeight height
+    padding =
+      LRTB
+        { left = excessWidth1,
+          right = excessWidth2,
+          top = excessHeight1,
+          bottom = excessHeight2 }
   in
-    collage & pad
-      (Point excessWidth1 excessHeight1)
-      (Point excessWidth2 excessHeight2)
+    pad padding collage
 
-align :: Integral n => Op2 n -> Op2 n -> (Extents n -> Offset n) -> Op2 (CollageBuilderDraw n a)
+horizontal :: s -/ Draw a => [Collage s] -> Collage s
+horizontal [] = phantom (Extents 0 0)
+horizontal xs = foldr1 horizTop xs
+
+vertical :: s -/ Draw a => [Collage s] -> Collage s
+vertical [] = phantom (Extents 0 0)
+vertical xs = foldr1 vertLeft xs
+
+horizontalCenter, verticalCenter :: s -/ Draw a => [Collage s] -> Collage s
+verticalCenter [] = phantom (Extents 0 0)
+verticalCenter xs =
+  foldr1 (align max (\_ _ -> 0) (\e -> (extentsOffset e) { offsetX = 0 })) xs
+horizontalCenter [] = phantom (Extents 0 0)
+horizontalCenter xs =
+  foldr1 (align (\_ _ -> 0) max (\e -> (extentsOffset e) { offsetY = 0 })) xs
+
+align ::
+  s -/ Draw a =>
+  (Natural -> Natural -> Natural) ->
+  (Natural -> Natural -> Natural) ->
+  (Extents -> Offset) ->
+  (Collage s -> Collage s -> Collage s)
 align adj1 adj2 move c1 c2 =
-  let vacant = Point adj1 adj2 <*> B.getExtents c1 <*> B.getExtents c2
-  in B.overlay move (center vacant c1) (center vacant c2)
+  let
+    e1 = collageExtents c1
+    e2 = collageExtents c2
+    vacant =
+      Extents
+        (extentsW e1 `adj1` extentsW e2)
+        (extentsH e1 `adj2` extentsH e2)
+  in
+    collageCompose (move e1) (center vacant c1) (center vacant c2)
 
-verticalCenter, horizontalCenter :: Integral n => OpN (CollageBuilderDraw n a)
-verticalCenter   = foldr (align max (\_ _ -> 0) (set pointX 0)) mempty
-horizontalCenter = foldr (align (\_ _ -> 0) max (set pointY 0)) mempty
+activate ::
+  Offset ->
+  NonEmpty (Offset, Extents, Draw path) ->
+  Maybe (Offset, Extents, path)
+activate o c =
+  getFirst $ foldMap (First . check) c
+  where
+    check (o', e, d) = do
+      DrawEmbed _ p <- Just d
+      guard $ insideBox (o', e) o
+      Just (o', e, p)
+
+active :: (s -/ Draw path, Eq path) => Color -> path -> Collage s -> Collage s
+active color p c = c <> inj activeZone
+  where
+    mkColor (Just path) | path == p = Just color
+    mkColor _ = Nothing
+    outlineRect =
+      rect (lrtb @Integer 1 1 1 1) (DrawCtx $ \mpath _ -> mkColor mpath) (collageExtents c)
+    activeZone = DrawEmbed outlineRect p

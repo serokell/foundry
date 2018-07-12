@@ -24,14 +24,14 @@ instance (UndoEq s1, UndoEq s2)
   undoEq (SynAddend s1) (SynAddend s2) = undoEq s1 s2
   undoEq  _              _             = False
 
-instance (SyntaxLayout n la lctx s1, SyntaxLayout n la lctx s2)
-      => SyntaxLayout n la lctx (SynAdd s1 s2) where
+instance (SyntaxLayout la lctx s1, SyntaxLayout la lctx s2)
+      => SyntaxLayout la lctx (SynAdd s1 s2) where
   layout = \case
     SynAugend s -> layout s
     SynAddend s -> layout s
 
-instance (SyntaxReact n rp la s1, SyntaxReact n rp la s2)
-      => SyntaxReact n rp la (SynAdd s1 s2) where
+instance (SyntaxReact rp la s1, SyntaxReact rp la s2)
+      => SyntaxReact rp la (SynAdd s1 s2) where
   react = asum [reactRedirect _SynAugend, reactRedirect _SynAddend]
   subreact = asum [subreactRedirect _SynAugend, subreactRedirect _SynAddend]
 

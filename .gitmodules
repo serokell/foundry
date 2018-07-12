@@ -1,0 +1,6 @@
+[submodule "slay"]
+	path = submodules/slay
+	url = https://github.com/int-index/slay/
+[submodule "inj"]
+	path = submodules/inj
+	url = https://github.com/int-index/inj/

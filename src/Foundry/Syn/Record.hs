@@ -4,7 +4,7 @@ import Data.Kind (Type)
 import Data.Foldable
 import Control.Monad.Reader
 import Control.Lens
-import Data.Dynamic
+import Type.Reflection
 
 import Data.Singletons.Prelude
 import Data.Singletons.Prelude.List
@@ -14,7 +14,7 @@ import qualified Data.Singletons.TH as Sing
 import qualified Language.Haskell.TH as TH
 
 import Source.Syntax
-import Source.Collage
+import Source.Draw
 import qualified Source.Input.KeyCode as KeyCode
 
 import Foundry.Syn.Common
@@ -63,15 +63,15 @@ selNext = lookupNext selOrder
 selPrev = lookupNext selRevOrder
 
 class SelLayout s where
-  selLayoutHook :: s -> Op1 (CollageDraw' Int)
+  selLayoutHook :: s' -/ Draw Path => s -> Collage s' -> Collage s'
 
-handleArrowUp :: SynSelection syn sel => React n rp la syn
+handleArrowUp :: SynSelection syn sel => React rp la syn
 handleArrowUp = do
   guardInputEvent $ keyCodeLetter KeyCode.ArrowUp 'k'
   False <- use synSelectionSelf
   synSelectionSelf .= True
 
-handleArrowDown :: SynSelection syn sel => React n rp la syn
+handleArrowDown :: SynSelection syn sel => React rp la syn
 handleArrowDown = do
   guardInputEvent $ keyCodeLetter KeyCode.ArrowDown 'j'
   True <- use synSelectionSelf
@@ -79,7 +79,7 @@ handleArrowDown = do
 
 handleArrowLeft
   :: (SynSelection syn sel, Enum sel, Bounded sel, Eq sel)
-  => React n rp la syn
+  => React rp la syn
 handleArrowLeft = do
   guardInputEvent $ keyCodeLetter KeyCode.ArrowLeft 'h'
   False <- use synSelectionSelf
@@ -89,7 +89,7 @@ handleArrowLeft = do
 
 handleArrowRight
   :: (SynSelection syn sel, Enum sel, Bounded sel, Eq sel)
-  => React n rp la syn
+  => React rp la syn
 handleArrowRight = do
   guardInputEvent $ keyCodeLetter KeyCode.ArrowRight 'l'
   False <- use synSelectionSelf
@@ -99,7 +99,7 @@ handleArrowRight = do
 
 handleArrows
   :: (SynSelection syn sel, Enum sel, Bounded sel, Eq sel)
-  => React n rp la syn
+  => React rp la syn
 handleArrows = asum
   [handleArrowUp, handleArrowDown, handleArrowLeft, handleArrowRight]
 
@@ -123,11 +123,12 @@ selLayout ::
   forall t (a :: t).
      (Demote t ~ t, SelLayout t, Enum t,
       (a ∈ EnumFromTo MinBound MaxBound),
-      SingKind t, SyntaxLayout Int ActiveZone LayoutCtx (FieldTypes t !! FromEnum a),
+      SingKind t, SyntaxLayout Path LayoutCtx (FieldTypes t !! FromEnum a),
       SynSelfSelected (FieldTypes t !! FromEnum a), Typeable t, Eq t)
   => Sing a
   -> SynRecord t
-  -> Reader LayoutCtx (CollageDraw' Int)
+  -> forall s. (s -/ Draw Path)
+  => Reader LayoutCtx (Collage s)
 selLayout ssel syn = do
   let
     sel' = fromSing ssel
@@ -135,7 +136,7 @@ selLayout ssel syn = do
     appendSelection
       = (lctxSelected &&~ (view synSelection syn == sel'))
       . (lctxSelected &&~ (synSelfSelected syn == False))
-      . (lctxPath %~ (`snoc` toDyn sel'))
+      . (lctxPath %~ (`snoc` PathSegment typeRep sel'))
     enforceSelfSelection
       = lctxSelected &&~ synSelfSelected sub
   local appendSelection $ do
