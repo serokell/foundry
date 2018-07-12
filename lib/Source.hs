@@ -89,7 +89,6 @@ createMainWindow synRef = do
       case msyn' of
         Nothing -> return False
         Just syn' -> do
-          liftIO $ phaserReset cursorPhaser CursorVisible
           atomicWriteIORef synRef syn'
           Gtk.widgetQueueDraw canvas
           return True
@@ -110,7 +109,9 @@ createMainWindow synRef = do
         Gtk.Shift -> [Shift]
         Gtk.Alt -> [Alt]
         _ -> []
-    liftIO (handleInputEvent event)
+    liftIO $ do
+      liftIO $ phaserReset cursorPhaser CursorVisible
+      handleInputEvent event
 
   void $ Gtk.on canvas Gtk.motionNotifyEvent $ do
     (x, y) <- Gtk.eventCoordinates
