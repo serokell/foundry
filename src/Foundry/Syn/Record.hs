@@ -1,17 +1,15 @@
+{-# LANGUAGE AllowAmbiguousTypes #-}
+{-# OPTIONS -fno-warn-unticked-promoted-constructors #-}
+
 module Foundry.Syn.Record where
 
-import Data.Kind (Type)
+import Data.Kind (Type, Constraint)
 import Data.Foldable
 import Control.Monad.Reader
 import Control.Lens
+import Control.Applicative
+import GHC.TypeLits
 import Type.Reflection
-
-import Data.Singletons.Prelude
-import Data.Singletons.Prelude.List
-import Data.Vinyl
-
-import qualified Data.Singletons.TH as Sing
-import qualified Language.Haskell.TH as TH
 
 import Source.Syntax
 import Source.Draw
@@ -19,51 +17,161 @@ import qualified Source.Input.KeyCode as KeyCode
 
 import Foundry.Syn.Common
 
-type family FieldTypes (sel :: Type) :: [Type]
+type family NN n where
+  NN 0 = Z
+  NN n = S (NN (n - 1))
 
-newtype SynRecField k (sel :: k) = SynRecField (FieldTypes k !! FromEnum sel)
+data N = Z | S N
 
-deriving instance UndoEq (FieldTypes k !! FromEnum sel) => UndoEq (SynRecField k sel)
+data Spine xs where
+  SpN :: Spine '[]
+  Sp :: Spine xs -> Spine (x : xs)
 
-makePrisms ''SynRecField
+deriving instance Show (Spine xs)
 
-type SynRec sel =
-  Rec (SynRecField sel) (EnumFromTo MinBound MaxBound)
+class KnownSpine xs where
+  spine :: Spine xs
 
-data SynRecord sel = SynRecord
-  { _synRec :: SynRec sel
-  , _synRecSel :: Integer
-  , _synRecSelSelf :: Bool
-  }
+instance KnownSpine '[] where
+  spine = SpN
+
+instance KnownSpine xs => KnownSpine (x : xs) where
+  spine = Sp spine
+
+data Idx xs where
+  IZ :: Idx (x : xs)
+  IS :: Idx xs -> Idx (x : xs)
+
+deriving instance Show (Idx xs)
+deriving instance Eq (Idx xs)
+
+idxSucc' :: Spine xs -> Idx xs -> Maybe (Idx xs)
+idxSucc' sp IZ =
+  case sp of
+    Sp (Sp _) -> Just (IS IZ)
+    _ -> Nothing
+idxSucc' (Sp sp) (IS i) =
+  IS <$> idxSucc' sp i
+
+idxSucc :: KnownSpine xs => Idx xs -> Maybe (Idx xs)
+idxSucc = idxSucc' spine
+
+idxPred :: Idx xs -> Maybe (Idx xs)
+idxPred IZ = Nothing
+idxPred (IS IZ) = Just IZ
+idxPred (IS i) = IS <$> idxPred i
+
+data Idx_n xs n where
+  IZ_n :: Idx_n (x : xs) Z
+  IS_n :: Idx_n xs n -> Idx_n (x : xs) (S n)
+
+data Some f where
+  Some :: f a -> Some f
+
+toSomeIdx :: Idx xs -> Some (Idx_n xs)
+toSomeIdx IZ = Some IZ_n
+toSomeIdx (IS i) =
+  case toSomeIdx i of
+    Some i' -> Some (IS_n i')
+
+type family Apply f x
+
+data IdSym
+data ConstSym a
+data TupSym s1 s2
+
+type instance Apply IdSym x = x
+type instance Apply (ConstSym a) x = a
+type instance Apply (TupSym s1 s2) x = (Apply s1 x, Apply s2 x)
+
+data Rec f xs where
+  RNil :: Rec f '[]
+  (:&) :: Apply f x -> Rec f xs -> Rec f (x : xs)
+
+infixr :&
+
+zipWithIdx :: forall f xs. Rec f xs -> Rec (TupSym (ConstSym (Idx xs)) f) xs
+zipWithIdx = go id
+  where
+    go :: forall xs'. (Idx xs' -> Idx xs) -> Rec f xs' -> Rec (TupSym (ConstSym (Idx xs)) f) xs'
+    go _ RNil = RNil
+    go f (x :& xs) = (f IZ, x) :& go (f . IS) xs
+
+type HList = Rec IdSym
+
+type family AllConstrained c ts :: Constraint where
+  AllConstrained c '[] = ()
+  AllConstrained c (t ': ts) = (c t, AllConstrained c ts)
+
+instance AllConstrained UndoEq xs => UndoEq (HList xs) where
+  undoEq RNil RNil = True
+  undoEq (x1 :& xs1) (x2 :& xs2) = undoEq x1 x2 && undoEq xs1 xs2
+
+type family xs !! n where
+  (x : _) !! Z = x
+  (_ : xs) !! (S i) = xs !! i
+
+class HasIdx_n n xs where
+  idx_n :: Idx_n xs n
+
+instance xs ~ (x':xs') => HasIdx_n Z xs where
+  idx_n = IZ_n
+
+instance (xs ~ (x':xs'), HasIdx_n n xs') => HasIdx_n (S n) xs where
+  idx_n = IS_n idx_n
+
+hlens :: Idx_n xs n -> Lens' (HList xs) (xs !! n)
+hlens IZ_n = \f (x :& xs) -> fmap (:& xs) (f x)
+hlens (IS_n i) = \f (x :& xs) -> fmap (x :&) (hlens i f xs)
+
+type family Fields (label :: Type) :: [Type]
+
+data SynRecord label =
+  SynRecord
+    { _synRec :: HList (Fields label),
+      _synRecSel :: Idx (Fields label),
+      _synRecSelSelf :: Bool
+    }
 
 makeLenses ''SynRecord
 
-instance UndoEq (SynRec sel) => UndoEq (SynRecord sel) where
-  undoEq a1 a2 = undoEq (a1 ^. synRec) (a2 ^. synRec)
+synField ::
+  forall n label.
+  HasIdx_n n (Fields label) =>
+  Lens' (SynRecord label) (Fields label !! n)
+synField = synRec . hlens (idx_n @n)
 
-synField
-  :: ((r :: sel) ∈ EnumFromTo MinBound MaxBound)
-  => Sing r
-  -> Lens' (SynRecord sel) (FieldTypes sel !! FromEnum r)
-synField s = synRec . rlens s . _SynRecField
+instance AllConstrained UndoEq (Fields label) => UndoEq (SynRecord label) where
+  undoEq r1 r2 = undoEq (r1 ^. synRec) (r2 ^. synRec)
 
--- Selection-related classes
+instance SynSelfSelected (SynRecord label)
 
-selOrder :: (Enum s, Bounded s) => [s]
-selOrder = [minBound .. maxBound]
+instance xs ~ Fields label => SynSelection (SynRecord label) (Idx xs) where
+  synSelection = synRecSel
+  synSelectionSelf = synRecSelSelf
 
-lookupNext :: Eq s => [s] -> s -> Maybe s
-lookupNext ss s = lookup s (ss `zip` tail ss)
+class SyntaxRecReact label where
+  recChar :: Char
+  recDefaultValue :: SynRecord label
 
-selRevOrder :: (Enum s, Bounded s) => [s]
-selRevOrder = reverse selOrder
+deduceC ::
+  forall c xs n r.
+  AllConstrained c xs =>
+  Idx_n xs n ->
+  (c (xs !! n) => r) ->
+  r
+deduceC IZ_n r = r
+deduceC (IS_n i) r = deduceC @c i r
 
-selNext, selPrev :: (Enum s, Bounded s, Eq s) => s -> Maybe s
-selNext = lookupNext selOrder
-selPrev = lookupNext selRevOrder
-
-class SelLayout s where
-  selLayoutHook :: s' -/ Draw Path => s -> Collage s' -> Collage s'
+recHandleSelRedirect ::
+  forall rp la label.
+  AllConstrained (SyntaxReact rp la) (Fields label) =>
+  React rp la (SynRecord label)
+recHandleSelRedirect = do
+  False <- use synSelectionSelf
+  Some sel <- uses synRecSel toSomeIdx
+  deduceC @(SyntaxReact rp la) sel $
+    reactRedirect (synRec . hlens sel)
 
 handleArrowUp :: SynSelection syn sel => React rp la syn
 handleArrowUp = do
@@ -77,70 +185,73 @@ handleArrowDown = do
   True <- use synSelectionSelf
   synSelectionSelf .= False
 
-handleArrowLeft
-  :: (SynSelection syn sel, Enum sel, Bounded sel, Eq sel)
-  => React rp la syn
+handleArrowLeft :: SynSelection syn (Idx xs) => React rp la syn
 handleArrowLeft = do
   guardInputEvent $ keyCodeLetter KeyCode.ArrowLeft 'h'
   False <- use synSelectionSelf
   selection <- use synSelection
-  selection' <- maybeA (selPrev selection)
+  selection' <- maybeA (idxPred selection)
   synSelection .= selection'
 
-handleArrowRight
-  :: (SynSelection syn sel, Enum sel, Bounded sel, Eq sel)
-  => React rp la syn
+handleArrowRight :: KnownSpine xs => SynSelection syn (Idx xs) => React rp la syn
 handleArrowRight = do
   guardInputEvent $ keyCodeLetter KeyCode.ArrowRight 'l'
   False <- use synSelectionSelf
   selection <- use synSelection
-  selection' <- maybeA (selNext selection)
+  selection' <- maybeA (idxSucc selection)
   synSelection .= selection'
 
-handleArrows
-  :: (SynSelection syn sel, Enum sel, Bounded sel, Eq sel)
-  => React rp la syn
+handleArrows :: (KnownSpine xs, SynSelection syn (Idx xs)) => React rp la syn
 handleArrows = asum @[]
   [handleArrowUp, handleArrowDown, handleArrowLeft, handleArrowRight]
 
-instance (SingKind sel, Demote sel ~ sel, Enum sel)
-      => SynSelfSelected (SynRecord sel)
+instance
+    ( AllConstrained (SyntaxReact rp Path) (Fields label),
+      KnownSpine (Fields label),
+      SyntaxRecReact label ) =>
+    SyntaxReact rp Path (SynRecord label)
+  where
+    react = recHandleSelRedirect <|> handleArrows
+    subreact = simpleSubreact (recChar @label) (recDefaultValue @label)
 
-instance (SingKind sel, Demote sel ~ sel, Enum sel)
-      => SynSelection (SynRecord sel) sel where
-  synSelection = synRecSel . iso (toEnum . fromIntegral) (toInteger . fromEnum)
-  synSelectionSelf = synRecSelSelf
+type CPS a = (a -> a) -> a
 
-recHandleSelRedirect :: TH.Name -> TH.ExpQ
-recHandleSelRedirect selTypeName =
-  [e| do False <- use synSelectionSelf
-         SomeSing selection <- uses synRecSel (toSing . toEnum . fromIntegral)
-         $(Sing.sCases selTypeName [e|selection|]
-             [e|reactRedirect (synField selection)|])
-   |]
+class SyntaxRecLayout label where
+  recLayout ::
+    s -/ Draw Path =>
+    Rec (ConstSym (CPS (Collage s))) (Fields label) ->
+    Collage s
 
-selLayout ::
-  forall t (a :: t).
-     (Demote t ~ t, SelLayout t, Enum t,
-      (a ∈ EnumFromTo MinBound MaxBound),
-      SingKind t, SyntaxLayout Path LayoutCtx (FieldTypes t !! FromEnum a),
-      SynSelfSelected (FieldTypes t !! FromEnum a), Typeable t, Eq t)
-  => Sing a
-  -> SynRecord t
-  -> forall s. (s -/ Draw Path)
-  => Reader LayoutCtx (Collage s)
-selLayout ssel syn = do
-  let
-    sel' = fromSing ssel
-    sub = view (synField ssel) syn
-    appendSelection
-      = (lctxSelected &&~ (view synSelection syn == sel'))
-      . (lctxSelected &&~ (synSelfSelected syn == False))
-      . (lctxPath %~ (`snoc` PathSegment typeRep sel'))
-    enforceSelfSelection
-      = lctxSelected &&~ synSelfSelected sub
-  local appendSelection $ do
-    a <- layout sub
-    reader $ \lctx ->
-       sel (enforceSelfSelection lctx)
-     $ selLayoutHook sel' a
+instance
+    ( SyntaxRecLayout label,
+      Typeable (Fields label),
+      AllConstrained (SyntaxLayout Path LayoutCtx) (Fields label),
+      AllConstrained SynSelfSelected (Fields label) ) =>
+    SyntaxLayout Path LayoutCtx (SynRecord label)
+  where
+    layout syn =
+      recLayout @label <$>
+      fieldLayouts (zipWithIdx (syn ^. synRec))
+      where
+        fieldLayouts ::
+          forall s xs.
+          AllConstrained (SyntaxLayout Path LayoutCtx) xs =>
+          AllConstrained SynSelfSelected xs =>
+          s -/ Draw Path =>
+          Rec (TupSym (ConstSym (Idx (Fields label))) IdSym) xs ->
+          Reader LayoutCtx (Rec (ConstSym (CPS (Collage s))) xs)
+        fieldLayouts RNil = pure RNil
+        fieldLayouts ((sel', x) :& xs) = do
+          let
+            appendSelection =
+              (lctxSelected &&~ (view synSelection syn == sel')) .
+              (lctxSelected &&~ (synSelfSelected syn == False)) .
+              (lctxPath %~ (`snoc` PathSegment typeRep sel'))
+            enforceSelfSelection =
+              lctxSelected &&~ synSelfSelected x
+            xLayout :: Reader LayoutCtx (CPS (Collage s))
+            xLayout = local appendSelection $ do
+              a <- layout x
+              local enforceSelfSelection $
+                reader $ \lctx hook -> layoutSel lctx (hook a)
+          (:&) <$> xLayout <*> fieldLayouts xs

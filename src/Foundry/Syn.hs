@@ -10,8 +10,6 @@ import Control.Monad.State
 import Control.Lens
 import Data.List.NonEmpty (nonEmpty)
 
-import Data.Vinyl
-
 import Source.Syntax
 import Source.Draw
 import Source.Input
@@ -47,30 +45,36 @@ synImportArg :: Text.Lazy.Text -> SynArg
 synImportArg t = SynArg (synImportText t)
 
 synImportLam :: Text.Lazy.Text -> M.Expr M.X -> M.Expr M.X -> SynLam
-synImportLam x _A  b = SynRecord
-   ( SynRecField (synImportArg x)
-  :& SynRecField (SynSolid (synImportExpr _A))
-  :& SynRecField (SynSolid (synImportExpr b))
-  :& RNil )
-  2
-  True
+synImportLam x _A  b =
+  SynRecord
+    { _synRec =
+        synImportArg x :&
+        SynSolid (synImportExpr _A) :&
+        SynSolid (synImportExpr b) :&
+        RNil,
+      _synRecSel = IS (IS IZ),
+      _synRecSelSelf = True }
 
 synImportPi :: Text.Lazy.Text -> M.Expr M.X -> M.Expr M.X -> SynPi
-synImportPi  x _A _B = SynRecord
-   ( SynRecField (synImportArg x)
-  :& SynRecField (SynSolid (synImportExpr _A))
-  :& SynRecField (SynSolid (synImportExpr _B))
-  :& RNil )
-  2
-  True
+synImportPi  x _A _B =
+  SynRecord
+    { _synRec =
+        synImportArg x :&
+        SynSolid (synImportExpr _A) :&
+        SynSolid (synImportExpr _B) :&
+        RNil,
+      _synRecSel = IS (IS IZ),
+      _synRecSelSelf = True }
 
 synImportApp :: M.Expr M.X -> M.Expr M.X -> SynApp
-synImportApp f a = SynRecord
-   ( SynRecField (SynSolid (synImportExpr f))
-  :& SynRecField (SynSolid (synImportExpr a))
-  :& RNil )
-  0
-  True
+synImportApp f a =
+  SynRecord
+    { _synRec =
+        SynSolid (synImportExpr f) :&
+        SynSolid (synImportExpr a) :&
+        RNil,
+      _synRecSel = IZ,
+      _synRecSelSelf = True }
 
 synImportExpr :: M.Expr M.X -> SynExpr
 synImportExpr = \case
@@ -112,7 +116,7 @@ instance SyntaxLayout Path Viewport SynTop where
       lctx = LayoutCtx True Seq.empty
     in withBars
      . centered
-     . sel (lctx & lctxSelected &&~ synSelfSelected (syn ^. synExpr))
+     . layoutSel (lctx & lctxSelected &&~ synSelfSelected (syn ^. synExpr))
      . pad (LRTB 5 5 5 5)
      $ runReader (layout (syn ^. synExpr)) lctx
 
@@ -175,38 +179,41 @@ updateLamPath :: Path -> SynLam -> SynLam
 updateLamPath path e =
   case uncons path of
     Nothing -> e & synSelectionSelf .~ True
-    Just (fromPathSegment -> Just sel', sels) -> e
-      & synSelectionSelf .~ False
-      & synSelection .~ sel'
-      & case sel' of
-          SelLamExpr1 -> synField SSelLamExpr1 %~ updateExprPath sels
-          SelLamExpr2 -> synField SSelLamExpr2 %~ updateExprPath sels
-          SelLamArg   -> id
+    Just (fromPathSegment -> Just idx, sels) ->
+      e & synSelectionSelf .~ False
+        & synSelection .~ idx
+        & case idx :: Idx (Fields LabelLam) of
+            IZ -> id
+            IS IZ -> synField @(NN 1) %~ updateExprPath sels
+            IS (IS IZ) -> synField @(NN 2) %~ updateExprPath sels
+            IS (IS (IS i)) -> case i of {}
     _ -> e
 
 updatePiPath :: Path -> SynPi -> SynPi
 updatePiPath path e =
   case uncons path of
     Nothing -> e & synSelectionSelf .~ True
-    Just (fromPathSegment -> Just sel', sels) -> e
-      & synSelectionSelf .~ False
-      & synSelection .~ sel'
-      & case sel' of
-          SelPiExpr1 -> synField SSelPiExpr1 %~ updateExprPath sels
-          SelPiExpr2 -> synField SSelPiExpr2 %~ updateExprPath sels
-          SelPiArg   -> id
+    Just (fromPathSegment -> Just idx, sels) ->
+      e & synSelectionSelf .~ False
+        & synSelection .~ idx
+        & case idx :: Idx (Fields LabelPi) of
+            IZ -> id
+            IS IZ -> synField @(NN 1) %~ updateExprPath sels
+            IS (IS IZ) -> synField @(NN 2) %~ updateExprPath sels
+            IS (IS (IS i)) -> case i of {}
     _ -> e
 
 updateAppPath :: Path -> SynApp -> SynApp
 updateAppPath path e =
   case uncons path of
     Nothing -> e & synSelectionSelf .~ True
-    Just (fromPathSegment -> Just sel', sels) -> e
-      & synSelectionSelf .~ False
-      & synSelection .~ sel'
-      & case sel' of
-          SelAppExpr1 -> synField SSelAppExpr1 %~ updateExprPath sels
-          SelAppExpr2 -> synField SSelAppExpr2 %~ updateExprPath sels
+    Just (fromPathSegment -> Just idx, sels) ->
+      e & synSelectionSelf .~ False
+        & synSelection .~ idx
+        & case idx :: Idx (Fields LabelApp) of
+            IZ -> synField @(NN 0) %~ updateExprPath sels
+            IS IZ -> synField @(NN 1) %~ updateExprPath sels
+            IS (IS i) -> case i of {}
     _ -> e
 
 instance SyntaxBlank SynTop where
