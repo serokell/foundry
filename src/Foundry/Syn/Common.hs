@@ -3,7 +3,6 @@ module Foundry.Syn.Common where
 import Data.Text (Text)
 import Numeric.Natural (Natural)
 import Data.Sequence (Seq)
-import Data.Vinyl
 import Type.Reflection
 import Data.Type.Equality
 
@@ -69,9 +68,9 @@ data LayoutCtx = LayoutCtx
 
 makeLenses ''LayoutCtx
 
-sel :: s -/ Draw Path => LayoutCtx -> Collage s -> Collage s
-sel lctx
-  = active light1 (lctx ^. lctxPath)
+layoutSel :: s -/ Draw Path => LayoutCtx -> Collage s -> Collage s
+layoutSel lctx =
+    active light1 (lctx ^. lctxPath)
   . if lctx ^. lctxSelected
     then
       substrate (lrtb @Natural 0 0 0 0) (\e ->
@@ -90,14 +89,6 @@ guardInputEvent = guard <=< views rctxInputEvent
 
 class UndoEq a where
   undoEq :: a -> a -> Bool
-
-instance UndoEq (Rec f '[]) where
-  undoEq RNil RNil = True
-
-instance (UndoEq (f a), UndoEq (Rec f as))
-      => UndoEq (Rec f (a ': as)) where
-  undoEq (a1 :& as1) (a2 :& as2) = undoEq a1 a2 && undoEq as1 as2
-
 
 class SynSelfSelected a where
   synSelfSelected :: a -> Bool

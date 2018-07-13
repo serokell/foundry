@@ -2,16 +2,7 @@ module Foundry.Syn.Expr where
 
 import Numeric.Natural
 import Data.Function
-import Control.Applicative
-import Control.Monad.Reader
 
-import qualified Data.Singletons.TH as Sing
-import Data.Singletons.Prelude
-
-import Data.Constraint
-import Data.Vinyl hiding (Dict)
-
-import Source.Syntax
 import Source.Draw
 
 import Foundry.Syn.Hole
@@ -23,154 +14,97 @@ import Foundry.Syn.Var
 import Foundry.Syn.Record
 import Foundry.Syn.Common
 
-Sing.singletons [d|
-  data SelLam = SelLamArg | SelLamExpr1 | SelLamExpr2
-    deriving (Eq, Ord, Enum, Bounded, Show)
-
-  data SelPi = SelPiArg | SelPiExpr1 | SelPiExpr2
-    deriving (Eq, Ord, Enum, Bounded, Show)
-
-  data SelApp = SelAppExpr1 | SelAppExpr2
-    deriving (Eq, Ord, Enum, Bounded, Show)
-  |]
-
-return []
-
 type SynExpr = SynSum
   '[SynLam, SynPi, SynApp, SynConst, SynVar, SynEmbed]
 
-
 ---- Lam ----
 
-type SynLam = SynRecord SelLam
+data LabelLam
 
-type instance FieldTypes SelLam =
-  '[ SynArg
-   , SynHole SynExpr
-   , SynHole SynExpr ]
+type SynLam = SynRecord LabelLam
 
-instance SelLayout Path SelLam where
-  selLayoutC = \case
-    SSelLamArg -> Dict
-    SSelLamExpr1 -> Dict
-    SSelLamExpr2 -> Dict
-  selLayoutHook = \case
-    SelLamArg   -> pad (LRTB 4 4 0 0)
-    SelLamExpr1 -> pad (LRTB 4 4 0 0)
-    SelLamExpr2 -> id
+type instance Fields LabelLam =
+  '[ SynArg,
+     SynHole SynExpr,
+     SynHole SynExpr ]
 
-instance SyntaxLayout Path LayoutCtx SynLam where
-  layout syn = reader $ \lctx ->
+instance SyntaxRecReact LabelLam where
+  recChar = 'L'
+  recDefaultValue =
+    SynRecord (SynArg mempty :& SynHollow :& SynHollow :& RNil) IZ False
+
+instance SyntaxRecLayout LabelLam where
+  recLayout (arg :& expr1 :& expr2 :& RNil) =
     let
       maxWidth = (max `on` extentsW . collageExtents) header body
       header =
         [ pad (LRTB 0 4 0 0) (punct "λ")
-        , [ runReader (selLayout SSelLamArg syn) lctx
+        , [ arg (pad (LRTB 4 4 0 0))
           , pad (LRTB 4 4 0 0) (punct ":")
-          , runReader (selLayout SSelLamExpr1 syn) lctx
+          , expr1 (pad (LRTB 4 4 0 0))
           ] & horizontal
         ] & horizontal
-      body = runReader (selLayout SSelLamExpr2 syn) lctx
+      body = expr2 id
     in
       [ header
       , pad (LRTB 0 0 4 4) (line light1 maxWidth)
       , body
       ] & vertical
 
-instance SyntaxReact rp Path SynLam where
-  react = recHandleSelRedirect <|> handleArrows
-  subreact
-    = simpleSubreact 'L'
-    $ SynRecord
-       ( SynRecField (SynArg mempty)
-      :& SynRecField SynHollow
-      :& SynRecField SynHollow
-      :& RNil )
-      0
-      False
-
-
 ---- Pi ----
 
-type SynPi = SynRecord SelPi
+data LabelPi
 
-type instance FieldTypes SelPi =
-  '[ SynArg
-   , SynHole SynExpr
-   , SynHole SynExpr ]
+type SynPi = SynRecord LabelPi
 
-instance SelLayout Path SelPi where
-  selLayoutC = \case
-    SSelPiArg -> Dict
-    SSelPiExpr1 -> Dict
-    SSelPiExpr2 -> Dict
-  selLayoutHook = \case
-    SelPiArg   -> pad (LRTB 4 4 0 0)
-    SelPiExpr1 -> pad (LRTB 4 4 0 0)
-    SelPiExpr2 -> id
+type instance Fields LabelPi =
+  '[ SynArg,
+     SynHole SynExpr,
+     SynHole SynExpr ]
 
-instance SyntaxLayout Path LayoutCtx SynPi where
-  layout syn = reader $ \lctx ->
+instance SyntaxRecReact LabelPi where
+  recChar = 'P'
+  recDefaultValue =
+    SynRecord (SynArg mempty :& SynHollow :& SynHollow :& RNil) IZ False
+
+instance SyntaxRecLayout LabelPi where
+  recLayout (arg :& expr1 :& expr2 :& RNil) =
     let
       maxWidth = (max `on` extentsW . collageExtents) header body
       header =
         [ pad (LRTB 0 4 0 0) (punct "Π")
-        , [ runReader (selLayout SSelPiArg syn) lctx
+        , [ arg (pad (LRTB 4 4 0 0))
           , pad (LRTB 4 4 0 0) (punct ":")
-          , runReader (selLayout SSelPiExpr1 syn) lctx
+          , expr1 (pad (LRTB 4 4 0 0))
           ] & horizontal
         ] & horizontal
-      body = runReader (selLayout SSelPiExpr2 syn) lctx
+      body = expr2 id
     in
       [ header
       , pad (LRTB 0 0 4 4) (line light1 maxWidth)
       , body
       ] & vertical
 
-instance SyntaxReact rp Path SynPi where
-  react = recHandleSelRedirect <|> handleArrows
-  subreact
-    = simpleSubreact 'P'
-    $ SynRecord
-       ( SynRecField (SynArg mempty)
-      :& SynRecField SynHollow
-      :& SynRecField SynHollow
-      :& RNil )
-      0
-      False
-
-
 ---- App ----
 
-type SynApp = SynRecord SelApp
+data LabelApp
 
-type instance FieldTypes SelApp =
-  '[ SynHole SynExpr
-   , SynHole SynExpr ]
+type SynApp = SynRecord LabelApp
 
-instance SelLayout Path SelApp where
-  selLayoutC = \case
-    SSelAppExpr1 -> Dict
-    SSelAppExpr2 -> Dict
-  selLayoutHook = \case
-    SelAppExpr1 ->
-      pad (LRTB 5 5 5 5)
-    SelAppExpr2 ->
-      substrate
-        (lrtb @Natural 5 5 5 5)
-        (rect (lrtb @Natural 1 1 1 1) (inj dark2))
+type instance Fields LabelApp =
+  '[ SynHole SynExpr,
+     SynHole SynExpr ]
 
-instance SyntaxLayout Path LayoutCtx SynApp where
-  layout syn = reader $ \lctx ->
-    [ runReader (selLayout SSelAppExpr1 syn) lctx
-    , pad (LRTB 5 5 5 5)
-      $ runReader (selLayout SSelAppExpr2 syn) lctx
+instance SyntaxRecReact LabelApp where
+  recChar = 'A'
+  recDefaultValue =
+    SynRecord (SynHollow :& SynHollow :& RNil) IZ False
+
+instance SyntaxRecLayout LabelApp where
+  recLayout (expr1 :& expr2 :& RNil) =
+    [ expr1 (pad (LRTB 5 5 5 5)),
+      pad (LRTB 5 5 5 5) (expr2 (
+        substrate
+          (lrtb @Natural 5 5 5 5)
+          (rect (lrtb @Natural 1 1 1 1) (inj dark2))))
     ] & horizontalCenter
-
-instance SyntaxReact rp Path SynApp where
-  react = recHandleSelRedirect <|> handleArrows
-  subreact
-    = simpleSubreact 'A'
-    $ SynRecord
-      (SynRecField SynHollow :& SynRecField SynHollow :& RNil)
-      0 False

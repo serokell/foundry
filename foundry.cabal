@@ -83,10 +83,7 @@ executable foundry
                ,       text
                ,       lens
                ,       gtk3
-               ,       singletons
-               ,       vinyl
                ,       morte
-               ,       constraints
                ,       foundry
 
   hs-source-dirs:      src
