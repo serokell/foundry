@@ -79,6 +79,7 @@ executable foundry
                ,       transformers
                ,       mtl
                ,       bifunctors
+               ,       unwrapped-functors
                ,       semigroups
                ,       text
                ,       lens

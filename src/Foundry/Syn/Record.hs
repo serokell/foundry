@@ -5,11 +5,13 @@ module Foundry.Syn.Record where
 
 import Data.Kind (Type, Constraint)
 import Data.Foldable
+import Data.Functor.Product
 import Control.Monad.Reader
 import Control.Lens
 import Control.Applicative
-import GHC.TypeLits
+import GHC.TypeLits hiding (type (*))
 import Type.Reflection
+import qualified Data.Functor.Unwrapped as F
 
 import Source.Syntax
 import Source.Draw
@@ -74,30 +76,23 @@ toSomeIdx (IS i) =
   case toSomeIdx i of
     Some i' -> Some (IS_n i')
 
-type family Apply f x
-
-data IdSym
-data ConstSym a
-data TupSym s1 s2
-
-type instance Apply IdSym x = x
-type instance Apply (ConstSym a) x = a
-type instance Apply (TupSym s1 s2) x = (Apply s1 x, Apply s2 x)
+type (*) = Product
+type Id = Identity
 
 data Rec f xs where
   RNil :: Rec f '[]
-  (:&) :: Apply f x -> Rec f xs -> Rec f (x : xs)
+  (:&) :: F.Unwrapped f x -> Rec f xs -> Rec f (x : xs)
 
 infixr :&
 
-zipWithIdx :: forall f xs. Rec f xs -> Rec (TupSym (ConstSym (Idx xs)) f) xs
+zipWithIdx :: forall f xs. Rec f xs -> Rec (Const (Idx xs) * f) xs
 zipWithIdx = go id
   where
-    go :: forall xs'. (Idx xs' -> Idx xs) -> Rec f xs' -> Rec (TupSym (ConstSym (Idx xs)) f) xs'
+    go :: forall xs'. (Idx xs' -> Idx xs) -> Rec f xs' -> Rec (Const (Idx xs) * f) xs'
     go _ RNil = RNil
     go f (x :& xs) = (f IZ, x) :& go (f . IS) xs
 
-type HList = Rec IdSym
+type HList = Rec Identity
 
 type family AllConstrained c ts :: Constraint where
   AllConstrained c '[] = ()
@@ -219,7 +214,7 @@ type CPS a = (a -> a) -> a
 class SyntaxRecLayout label where
   recLayout ::
     s -/ Draw Path =>
-    Rec (ConstSym (CPS (Collage s))) (Fields label) ->
+    Rec (Const (CPS (Collage s))) (Fields label) ->
     Collage s
 
 instance
@@ -238,8 +233,8 @@ instance
           AllConstrained (SyntaxLayout Path LayoutCtx) xs =>
           AllConstrained SynSelfSelected xs =>
           s -/ Draw Path =>
-          Rec (TupSym (ConstSym (Idx (Fields label))) IdSym) xs ->
-          Reader LayoutCtx (Rec (ConstSym (CPS (Collage s))) xs)
+          Rec (Const (Idx (Fields label)) * Id) xs ->
+          Reader LayoutCtx (Rec (Const (CPS (Collage s))) xs)
         fieldLayouts RNil = pure RNil
         fieldLayouts ((sel', x) :& xs) = do
           let

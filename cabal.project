@@ -4,4 +4,3 @@ packages:
   submodules/slay/core
   submodules/slay/combinators
   submodules/slay/cairo
-  submodules/inj/inj-base
