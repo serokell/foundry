@@ -122,7 +122,7 @@ activate o c =
       Just (o', e, p)
 
 active :: (s -/ Draw path, Eq path) => Color -> path -> Collage s -> Collage s
-active color p c = c <> collageSingleton activeZone
+active color p c = collageCompose offsetZero c (collageSingleton activeZone)
   where
     mkColor (Just path) | path == p = Just color
     mkColor _ = Nothing

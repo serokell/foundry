@@ -106,7 +106,8 @@ instance SyntaxLayout Path Viewport SynTop where
       withBars =
         case nonEmpty bars of
           Nothing -> id
-          Just bars' -> (<> vertical bars')
+          Just bars' -> \c ->
+            collageCompose offsetZero c (vertical bars')
       centered c =
         let
           padding = centerOf (viewport ^. _Viewport) c

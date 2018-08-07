@@ -74,8 +74,11 @@ layoutSel lctx =
   . if lctx ^. lctxSelected
     then
       substrate (lrtb @Natural 0 0 0 0) (\e ->
-        rect nothing (inj dark3) e <>
-        rect (lrtb @Natural 1 1 1 1) (inj dark2) e)
+        let
+          background = rect nothing (inj dark3) e
+          border = rect (lrtb @Natural 1 1 1 1) (inj dark2) e
+        in
+          collageCompose offsetZero background border)
     else id
 
 simpleSubreact :: Char -> syn -> Subreact rp la syn
