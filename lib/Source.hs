@@ -7,7 +7,6 @@ import Control.Monad.State
 import Control.Monad.Trans.Maybe
 import qualified Graphics.UI.Gtk as Gtk
 import Data.IORef
-import Data.Functor.Identity
 
 import Slay.Core
 import Slay.Cairo.Render
@@ -47,7 +46,7 @@ createMainWindow synRef = do
       , Gtk.ButtonPressMask
       ]
 
-  layoutRef :: IORef (Layout Identity (Draw la))
+  layoutRef :: IORef (Collage (Draw la))
     <- newIORef (error "layoutRef used before initialization")
 
   pointerRef :: IORef (Maybe Offset)
@@ -64,18 +63,18 @@ createMainWindow synRef = do
 
     updateCanvas viewport = do
       syn <- liftIO $ readIORef synRef
-      let layout = mkLayout (Identity (runReader (Syn.layout syn) viewport))
+      let layout = runReader (Syn.layout syn) viewport
       liftIO $ writeIORef layoutRef layout
       cursorVisible <- liftIO $ phaserCurrent cursorPhaser
       mpointer <- liftIO $ readIORef pointerRef
       let
-        elements = runIdentity $
-          layoutElements (\d -> (dExtents d, d)) layout
+        elements = collageElements offsetZero layout
+        toCairoElements = (fmap.fmap) toCairoElementDraw
         mpath = do
           pointer <- mpointer
           (_, _, path) <- activate pointer elements
           Just path
-      renderElements (withDrawCtx mpath cursorVisible) elements
+      renderElements (withDrawCtx mpath cursorVisible) (toCairoElements elements)
 
     handleInputEvent inputEvent = do
       syn <- liftIO $ readIORef synRef

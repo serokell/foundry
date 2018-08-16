@@ -14,7 +14,6 @@ import Numeric.Natural (Natural)
 import Data.List.NonEmpty
 import Control.Monad
 import Data.Monoid
-import qualified Graphics.Rendering.Cairo.Matrix as Cairo.Matrix
 
 import Inj
 import Inj.Base ()
@@ -23,9 +22,8 @@ import Slay.Core
 import Slay.Cairo.Prim.Color
 import Slay.Cairo.Prim.Rect
 import Slay.Cairo.Prim.Text
-import Slay.Cairo.Prim.PangoText
 import Slay.Combinators
-import Slay.Cairo.Render
+import Slay.Cairo.Element
 
 data CursorBlink = CursorVisible | CursorInvisible
 
@@ -44,15 +42,19 @@ withDrawCtx :: Maybe path -> CursorBlink -> DrawCtx path a -> a
 withDrawCtx mpath curBlink (DrawCtx f) = f mpath curBlink
 
 data Draw path
-  = DrawText (PangoText (DrawCtx path))
-  | DrawRect (PrimRect (DrawCtx path))
-  | DrawEmbed (PrimRect (DrawCtx path)) path
+  = DrawCairoElement (CairoElement (DrawCtx path))
+  | DrawEmbed (CairoElement (DrawCtx path)) path
 
-instance c ~ DrawCtx path => Inj (PangoText c) (Draw path) where
-  inj = DrawText
+instance HasExtents (Draw path) where
+  extentsOf = extentsOf . toCairoElementDraw
 
-instance c ~ DrawCtx path => Inj (PrimRect c) (Draw path) where
-  inj = DrawRect
+toCairoElementDraw :: Draw path -> CairoElement (DrawCtx path)
+toCairoElementDraw = \case
+  DrawCairoElement ce -> ce
+  DrawEmbed ce _ -> ce
+
+instance g ~ DrawCtx path => Inj (CairoElement g) (Draw path) where
+  inj = DrawCairoElement
 
 data Empty t = Empty
 
@@ -68,30 +70,16 @@ instance {-# OVERLAPPING #-} t ~ Maybe => Inj (Empty t) (Maybe a) where
 lrtb :: Inj (LRTB p) a => p -> p -> p -> p -> a
 lrtb left right top bottom = inj LRTB{left, right, top, bottom}
 
-instance RenderElement (DrawCtx path) (Draw path) where
-  renderElement getG (offset, extents, d) =
-    case d of
-      DrawEmbed r _ -> renderElement getG (offset, extents, r)
-      DrawRect r -> renderElement getG (offset, extents, r)
-      DrawText t -> renderElement getG (offset, extents, t)
+textline :: Color -> Font -> Text -> (CursorBlink -> Maybe Natural) -> Collage (Draw a)
+textline color font str cur = text font (inj color) str (DrawCtx (\_ -> cur))
 
-dExtents :: Draw a -> Extents
-dExtents = \case
-  DrawText t -> ptextExtents t
-  DrawRect r -> rectExtents r
-  DrawEmbed r _ -> rectExtents r
-
-textline :: s -/ Draw a => Color -> Font -> Text -> (CursorBlink -> Maybe Natural) -> Collage s
-textline color font str cur = inj $ primTextPango Cairo.Matrix.identity $
-  text font (inj color) str (DrawCtx (\_ -> cur))
-
-line :: s -/ Draw a => Color -> Natural -> Collage s
+line :: Color -> Natural -> Collage (Draw a)
 line color w = rect nothing (inj color) (Extents w 1)
 
-pad :: s -/ Draw a => LRTB Natural -> Collage s -> Collage s
+pad :: LRTB Natural -> Collage (Draw a) -> Collage (Draw a)
 pad padding = substrate padding (\e -> rect (inj padding) nothing e)
 
-centerOf :: s -/ Draw a => Extents -> Collage s -> LRTB Natural
+centerOf :: Extents -> Collage (Draw a) -> LRTB Natural
 centerOf (Extents vacantWidth vacantHeight) collage =
   let
     Extents width height = collageExtents collage
@@ -104,24 +92,25 @@ centerOf (Extents vacantWidth vacantHeight) collage =
         top = excessHeight1,
         bottom = excessHeight2 }
 
-horizontal, vertical, horizontalCenter :: NonEmpty (Collage s) -> Collage s
+horizontal, vertical, horizontalCenter :: NonEmpty (Collage (Draw a)) -> Collage (Draw a)
 horizontal = foldr1 @NonEmpty horizTop
 vertical = foldr1 @NonEmpty vertLeft
 horizontalCenter = foldr1 @NonEmpty horizCenter
 
 activate ::
   Offset ->
-  NonEmpty (Offset, Extents, Draw path) ->
+  NonEmpty (Positioned (Draw path)) ->
   Maybe (Offset, Extents, path)
 activate o c =
   getFirst $ foldMap (First . check) c
   where
-    check (o', e, d) = do
+    check (At o' d) = do
+      let e = extentsOf d
       DrawEmbed _ p <- Just d
       guard $ insideBox (o', e) o
       Just (o', e, p)
 
-active :: (s -/ Draw path, Eq path) => Color -> path -> Collage s -> Collage s
+active :: Eq path => Color -> path -> Collage (Draw path) -> Collage (Draw path)
 active color p c = collageCompose offsetZero c (collageSingleton activeZone)
   where
     mkColor (Just path) | path == p = Just color

@@ -24,13 +24,13 @@ dark3  = RGB 64 64 64
 light1 = RGB 179 179 179
 white  = RGB 255 255 255
 
-textWithCursor :: s -/ Draw Path => Text -> (CursorBlink -> Maybe Natural) -> Collage s
+textWithCursor :: Text -> (CursorBlink -> Maybe Natural) -> Collage (Draw Path)
 textWithCursor = textline white font
 
-text :: s -/ Draw Path => Text -> Collage s
+text :: Text -> Collage (Draw Path)
 text t = textWithCursor t (\_ -> Nothing)
 
-punct :: s -/ Draw Path => Text -> Collage s
+punct :: Text -> Collage (Draw Path)
 punct t = textline light1 font t (\_ -> Nothing)
 
 font :: Font
@@ -68,7 +68,7 @@ data LayoutCtx = LayoutCtx
 
 makeLenses ''LayoutCtx
 
-layoutSel :: s -/ Draw Path => LayoutCtx -> Collage s -> Collage s
+layoutSel :: LayoutCtx -> Collage (Draw Path) -> Collage (Draw Path)
 layoutSel lctx =
     active light1 (lctx ^. lctxPath)
   . if lctx ^. lctxSelected

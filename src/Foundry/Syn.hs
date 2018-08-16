@@ -138,7 +138,7 @@ instance SyntaxReact () Path SynTop where
         ButtonPress <- view rctxInputEvent
         pointer <- use synPointer
         Just (_, _, p) <-
-          activate pointer . runIdentity . layoutElements (\d -> (dExtents d, d)) <$>
+          activate pointer . collageElements offsetZero <$>
             view rctxLastLayout
         zoom synExpr $ modify (updateExprPath p)
       handleCtrl_h = do

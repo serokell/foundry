@@ -34,7 +34,7 @@ makePrisms ''Viewport
 
 data ReactCtx rp la syn = ReactCtx
   { _rctxAsyncReact :: ((syn -> syn) -> IO ())
-  , _rctxLastLayout :: Layout Identity (Draw la)
+  , _rctxLastLayout :: Collage (Draw la)
   , _rctxInputEvent :: InputEvent Int
   , _rctxPayload    :: rp
   }
@@ -68,7 +68,7 @@ subreactToReact :: Subreact rp la syn -> React rp la syn
 subreactToReact = put <=< mapReaderT lift
 
 class SyntaxLayout la lctx syn | syn -> la, syn -> lctx where
-  layout :: s -/ Draw la => syn -> Reader lctx (Collage s)
+  layout :: syn -> Reader lctx (Collage (Draw la))
 
 class SyntaxReact rp la syn | syn -> la where
   react :: React rp la syn

@@ -14,7 +14,6 @@ import Type.Reflection
 import qualified Data.Functor.Unwrapped as F
 
 import Source.Syntax
-import Source.Draw
 import qualified Source.Input.KeyCode as KeyCode
 
 import Foundry.Syn.Common
@@ -213,9 +212,8 @@ type CPS a = (a -> a) -> a
 
 class SyntaxRecLayout label where
   recLayout ::
-    s -/ Draw Path =>
-    Rec (Const (CPS (Collage s))) (Fields label) ->
-    Collage s
+    Rec (Const (CPS (Collage (Draw Path)))) (Fields label) ->
+    Collage (Draw Path)
 
 instance
     ( SyntaxRecLayout label,
@@ -229,12 +227,10 @@ instance
       fieldLayouts (zipWithIdx (syn ^. synRec))
       where
         fieldLayouts ::
-          forall s xs.
           AllConstrained (SyntaxLayout Path LayoutCtx) xs =>
           AllConstrained SynSelfSelected xs =>
-          s -/ Draw Path =>
           Rec (Const (Idx (Fields label)) * Id) xs ->
-          Reader LayoutCtx (Rec (Const (CPS (Collage s))) xs)
+          Reader LayoutCtx (Rec (Const (CPS (Collage (Draw Path)))) xs)
         fieldLayouts RNil = pure RNil
         fieldLayouts ((sel', x) :& xs) = do
           let
@@ -244,7 +240,7 @@ instance
               (lctxPath %~ (`snoc` PathSegment typeRep sel'))
             enforceSelfSelection =
               lctxSelected &&~ synSelfSelected x
-            xLayout :: Reader LayoutCtx (CPS (Collage s))
+            xLayout :: Reader LayoutCtx (CPS (Collage (Draw Path)))
             xLayout = local appendSelection $ do
               a <- layout x
               local enforceSelfSelection $
