@@ -208,11 +208,9 @@ instance
     react = recHandleSelRedirect <|> handleArrows
     subreact = simpleSubreact (recChar @label) (recDefaultValue @label)
 
-type CPS a = (a -> a) -> a
-
 class SyntaxRecLayout label where
   recLayout ::
-    Rec (Const (CPS (Collage (Draw Path)))) (Fields label) ->
+    Rec (Const (Collage (Draw Path))) (Fields label) ->
     Collage (Draw Path)
 
 instance
@@ -230,7 +228,7 @@ instance
           AllConstrained (SyntaxLayout Path LayoutCtx) xs =>
           AllConstrained SynSelfSelected xs =>
           Rec (Const (Idx (Fields label)) * Id) xs ->
-          Reader LayoutCtx (Rec (Const (CPS (Collage (Draw Path)))) xs)
+          Reader LayoutCtx (Rec (Const (Collage (Draw Path))) xs)
         fieldLayouts RNil = pure RNil
         fieldLayouts ((sel', x) :& xs) = do
           let
@@ -240,9 +238,9 @@ instance
               (lctxPath %~ (`snoc` PathSegment typeRep sel'))
             enforceSelfSelection =
               lctxSelected &&~ synSelfSelected x
-            xLayout :: Reader LayoutCtx (CPS (Collage (Draw Path)))
+            xLayout :: Reader LayoutCtx (Collage (Draw Path))
             xLayout = local appendSelection $ do
               a <- layout x
               local enforceSelfSelection $
-                reader $ \lctx hook -> layoutSel lctx (hook a)
+                reader $ \lctx -> layoutSel lctx a
           (:&) <$> xLayout <*> fieldLayouts xs

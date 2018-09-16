@@ -2,6 +2,7 @@ module Foundry.Syn.Const where
 
 import Control.Applicative
 import Source.Syntax
+import Source.Draw
 import Foundry.Syn.Common
 
 data SynConst = SynConstStar | SynConstBox
@@ -14,9 +15,11 @@ instance UndoEq SynConst where
   undoEq = (==)
 
 instance n ~ Int => SyntaxLayout Path LayoutCtx SynConst where
-  layout = pure . \case
-    SynConstStar -> punct "★"
-    SynConstBox  -> punct "□"
+  layout =
+    pure . collageWithMargin (Margin 4 4 4 4) .
+    \case
+      SynConstStar -> punct "★"
+      SynConstBox  -> punct "□"
 
 instance SyntaxReact rp Path SynConst where
   subreact

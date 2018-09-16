@@ -38,16 +38,16 @@ instance SyntaxRecLayout LabelLam where
     let
       maxWidth = (max `on` extentsW . collageExtents) header body
       header =
-        [ pad (LRTB 0 4 0 0) (punct "λ")
-        , [ arg (pad (LRTB 4 4 0 0))
-          , pad (LRTB 4 4 0 0) (punct ":")
-          , expr1 (pad (LRTB 4 4 0 0))
-          ] & horizontal
+        [ punct "λ"
+        , arg
+        , punct ":"
+        , expr1
         ] & horizontal
-      body = expr2 id
+      body = expr2
     in
+      collageWithMargin (Margin 4 4 4 4) $
       [ header
-      , pad (LRTB 0 0 4 4) (line light1 maxWidth)
+      , line light1 maxWidth
       , body
       ] & vertical
 
@@ -72,16 +72,16 @@ instance SyntaxRecLayout LabelPi where
     let
       maxWidth = (max `on` extentsW . collageExtents) header body
       header =
-        [ pad (LRTB 0 4 0 0) (punct "Π")
-        , [ arg (pad (LRTB 4 4 0 0))
-          , pad (LRTB 4 4 0 0) (punct ":")
-          , expr1 (pad (LRTB 4 4 0 0))
-          ] & horizontal
+        [ punct "Π"
+        , arg
+        , punct ":"
+        , expr1
         ] & horizontal
-      body = expr2 id
+      body = expr2
     in
+      collageWithMargin (Margin 4 4 4 4) $
       [ header
-      , pad (LRTB 0 0 4 4) (line light1 maxWidth)
+      , line light1 maxWidth
       , body
       ] & vertical
 
@@ -102,9 +102,10 @@ instance SyntaxRecReact LabelApp where
 
 instance SyntaxRecLayout LabelApp where
   recLayout (expr1 :& expr2 :& RNil) =
-    [ expr1 (pad (LRTB 5 5 5 5)),
-      pad (LRTB 5 5 5 5) (expr2 (
-        substrate
-          (lrtb @Natural 5 5 5 5)
-          (rect (lrtb @Natural 1 1 1 1) (inj dark2))))
+    collageWithMargin (Margin 4 4 4 4) $
+    [ expr1,
+      substrate
+        (lrtb @Natural 5 5 5 5)
+        (rect (lrtb @Natural 1 1 1 1) (inj dark2))
+        expr2
     ] & horizontalCenter

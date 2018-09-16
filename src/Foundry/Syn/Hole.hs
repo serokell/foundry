@@ -5,6 +5,7 @@ import Control.Lens
 import Data.Foldable
 
 import Source.Syntax
+import Source.Draw
 import qualified Source.Input.KeyCode as KeyCode
 import Foundry.Syn.Common
 
@@ -26,7 +27,9 @@ instance UndoEq sub => UndoEq (SynHole sub) where
 instance (SyntaxLayout Path lctx sub)
       => SyntaxLayout Path lctx (SynHole sub) where
   layout = \case
-    SynHollow    -> return (punct "_")
+    SynHollow -> return $
+      collageWithMargin (Margin 4 4 4 4) $
+      punct "_"
     SynSolid syn -> layout syn
 
 instance SyntaxReact rp Path sub

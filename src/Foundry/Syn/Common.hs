@@ -71,15 +71,14 @@ makeLenses ''LayoutCtx
 layoutSel :: LayoutCtx -> Collage (Draw Path) -> Collage (Draw Path)
 layoutSel lctx =
     active light1 (lctx ^. lctxPath)
-  . if lctx ^. lctxSelected
-    then
-      substrate (lrtb @Natural 0 0 0 0) (\e ->
-        let
-          background = rect nothing (inj dark3) e
-          border = rect (lrtb @Natural 1 1 1 1) (inj dark2) e
-        in
-          collageCompose offsetZero background border)
-    else id
+  . substrate (lrtb @Natural 0 0 0 0) (\e ->
+      let
+        background = rect nothing (if sel then inj dark3 else nothing) e
+        border = rect (lrtb @Natural 1 1 1 1) (if sel then inj dark2 else nothing) e
+      in
+        collageCompose offsetZero background border)
+  where
+    sel = lctx ^. lctxSelected
 
 simpleSubreact :: Char -> syn -> Subreact rp la syn
 simpleSubreact c syn = do

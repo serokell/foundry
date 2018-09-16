@@ -76,9 +76,6 @@ textline color font str cur = text font (inj color) str (DrawCtx (\_ -> cur))
 line :: Color -> Natural -> Collage (Draw a)
 line color w = rect nothing (inj color) (Extents w 1)
 
-pad :: LRTB Natural -> Collage (Draw a) -> Collage (Draw a)
-pad padding = substrate padding (\e -> rect (inj padding) nothing e)
-
 centerOf :: Extents -> Collage (Draw a) -> LRTB Natural
 centerOf (Extents vacantWidth vacantHeight) collage =
   let

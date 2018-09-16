@@ -65,7 +65,9 @@ instance SyntaxLayout Path LayoutCtx SynText where
               CursorInvisible -> Nothing)
       layoutInactive = text (syn ^. synTextContent)
       isActive = (lctx ^. lctxSelected) && (syn ^. synTextEditMode)
-    return $ if isActive then layoutActive else layoutInactive
+    return $
+      collageWithMargin (Margin 4 4 4 4) $
+      if isActive then layoutActive else layoutInactive
 
 instance SyntaxReact rp Path SynText where
   react = do asum @[] handlers; modify normalizeSynText
