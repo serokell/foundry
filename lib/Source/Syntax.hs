@@ -3,7 +3,8 @@
 {-# LANGUAGE FunctionalDependencies #-}
 {-# LANGUAGE DefaultSignatures #-}
 module Source.Syntax
-    ( SyntaxLayout(..)
+    ( SyntaxSelection(..)
+    , SyntaxLayout(..)
     , SyntaxBlank(..)
     , SyntaxReact(..)
     , Viewport(..)
@@ -17,64 +18,83 @@ module Source.Syntax
     , rctxAsyncReact
     , rctxLastLayout
     , rctxInputEvent
+    , LayoutCtx(..)
+    , lctxPath
+    , lctxViewport
     , Collage
     , Draw
+    , PathSegment(..)
+    , Path
+    , fromPathSegment
+    , Fields
+    , Idx(..)
     ) where
 
 import Control.Lens
 import Control.Monad.Reader
 import Control.Monad.State
 import Control.Monad.Trans.Maybe
+
 import Source.Input
 import Source.Draw
+import Source.Path
 
 newtype Viewport = Viewport Extents
 
 makePrisms ''Viewport
 
-data ReactCtx rp la syn = ReactCtx
+data ReactCtx syn = ReactCtx
   { _rctxAsyncReact :: ((syn -> syn) -> IO ())
-  , _rctxLastLayout :: Collage (Draw la)
+  , _rctxLastLayout :: Collage Draw
   , _rctxInputEvent :: InputEvent Int
-  , _rctxPayload    :: rp
   }
 
 makeLenses ''ReactCtx
 
-type React rp la syn =
-  ReaderT (ReactCtx rp la syn) (StateT syn (MaybeT IO)) ()
+data LayoutCtx = LayoutCtx
+  { _lctxPath     :: Path
+  , _lctxViewport :: Viewport
+  }
 
-type Subreact rp la syn =
-  ReaderT (ReactCtx rp la syn) (MaybeT IO) syn
+makeLenses ''LayoutCtx
+
+type React syn =
+  ReaderT (ReactCtx syn) (StateT syn (MaybeT IO)) ()
+
+type Subreact syn =
+  ReaderT (ReactCtx syn) (MaybeT IO) syn
 
 reactRedirect
-  :: SyntaxReact rp la syn
+  :: SyntaxReact syn
   => Traversal' syn' syn
-  -> React rp la syn'
+  -> React syn'
 reactRedirect l = do
   let liftReactCtx = over rctxAsyncReact (. over l)
   guard =<< gets (notNullOf l)
   mapReaderT (zoom l) $ withReaderT liftReactCtx react
 
 subreactRedirect
-  :: SyntaxReact rp la syn
+  :: SyntaxReact syn
   => Prism' syn' syn
-  -> Subreact rp la syn'
+  -> Subreact syn'
 subreactRedirect l = do
   let liftReactCtx = over rctxAsyncReact (. over l)
   review l <$> withReaderT liftReactCtx subreact
 
-subreactToReact :: Subreact rp la syn -> React rp la syn
+subreactToReact :: Subreact syn -> React syn
 subreactToReact = put <=< mapReaderT lift
 
-class SyntaxLayout la lctx syn | syn -> la, syn -> lctx where
-  layout :: syn -> Reader lctx (Collage (Draw la))
+class SyntaxSelection syn where
+  selectionPath :: syn -> Path
 
-class SyntaxReact rp la syn | syn -> la where
-  react :: React rp la syn
+class SyntaxLayout syn where
+  layout :: syn -> Reader LayoutCtx (Collage Draw)
+
+class SyntaxReact syn where
+  react :: React syn
   react = mzero
 
-  subreact :: Subreact rp la syn
+  subreact :: Subreact syn
   subreact = mzero
 
 class SyntaxBlank syn where

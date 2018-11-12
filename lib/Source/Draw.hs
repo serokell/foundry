@@ -25,6 +25,8 @@ import Slay.Cairo.Prim.Text
 import Slay.Combinators
 import Slay.Cairo.Element
 
+import Source.Path
+
 data CursorBlink = CursorVisible | CursorInvisible
 
 blink :: CursorBlink -> CursorBlink
@@ -32,28 +34,33 @@ blink = \case
   CursorVisible -> CursorInvisible
   CursorInvisible -> CursorVisible
 
-data DrawCtx path a = DrawCtx (Maybe path -> CursorBlink -> a)
+data Paths =
+  Paths
+    { pathsCursor :: Maybe Path,
+      pathsSelection :: Path }
+
+data DrawCtx a = DrawCtx (Paths -> CursorBlink -> a)
   deriving (Functor)
 
-instance Inj p a => Inj p (DrawCtx path a) where
+instance Inj p a => Inj p (DrawCtx a) where
   inj p = DrawCtx (\_ _ -> inj p)
 
-withDrawCtx :: Maybe path -> CursorBlink -> DrawCtx path a -> a
-withDrawCtx mpath curBlink (DrawCtx f) = f mpath curBlink
+withDrawCtx :: Paths -> CursorBlink -> DrawCtx a -> a
+withDrawCtx paths curBlink (DrawCtx f) = f paths curBlink
 
-data Draw path
-  = DrawCairoElement (CairoElement (DrawCtx path))
-  | DrawEmbed (CairoElement (DrawCtx path)) path
+data Draw
+  = DrawCairoElement (CairoElement DrawCtx)
+  | DrawEmbed (CairoElement DrawCtx) Path
 
-instance HasExtents (Draw path) where
+instance HasExtents Draw where
   extentsOf = extentsOf . toCairoElementDraw
 
-toCairoElementDraw :: Draw path -> CairoElement (DrawCtx path)
+toCairoElementDraw :: Draw -> CairoElement DrawCtx
 toCairoElementDraw = \case
   DrawCairoElement ce -> ce
   DrawEmbed ce _ -> ce
 
-instance g ~ DrawCtx path => Inj (CairoElement g) (Draw path) where
+instance g ~ DrawCtx => Inj (CairoElement g) Draw where
   inj = DrawCairoElement
 
 data Empty t = Empty
@@ -70,13 +77,13 @@ instance {-# OVERLAPPING #-} t ~ Maybe => Inj (Empty t) (Maybe a) where
 lrtb :: Inj (LRTB p) a => p -> p -> p -> p -> a
 lrtb left right top bottom = inj LRTB{left, right, top, bottom}
 
-textline :: Color -> Font -> Text -> (CursorBlink -> Maybe Natural) -> Collage (Draw a)
-textline color font str cur = text font (inj color) str (DrawCtx (\_ -> cur))
+textline :: Color -> Font -> Text -> (Paths -> CursorBlink -> Maybe Natural) -> Collage Draw
+textline color font str cur = text font (inj color) str (DrawCtx cur)
 
-line :: Color -> Natural -> Collage (Draw a)
+line :: Color -> Natural -> Collage Draw
 line color w = rect nothing (inj color) (Extents w 1)
 
-centerOf :: Extents -> Collage (Draw a) -> LRTB Natural
+centerOf :: Extents -> Collage Draw -> LRTB Natural
 centerOf (Extents vacantWidth vacantHeight) collage =
   let
     Extents width height = collageExtents collage
@@ -89,29 +96,20 @@ centerOf (Extents vacantWidth vacantHeight) collage =
         top = excessHeight1,
         bottom = excessHeight2 }
 
-horizontal, vertical, horizontalCenter :: NonEmpty (Collage (Draw a)) -> Collage (Draw a)
+horizontal, vertical, horizontalCenter :: NonEmpty (Collage Draw) -> Collage Draw
 horizontal = foldr1 @NonEmpty horizTop
 vertical = foldr1 @NonEmpty vertLeft
 horizontalCenter = foldr1 @NonEmpty horizCenter
 
-activate ::
+findPath ::
   Offset ->
-  NonEmpty (Positioned (Draw path)) ->
-  Maybe (Offset, Extents, path)
-activate o c =
+  NonEmpty (Positioned Draw) ->
+  Maybe Path
+findPath o c =
   getFirst $ foldMap (First . check) c
   where
     check (At o' d) = do
       let e = extentsOf d
       DrawEmbed _ p <- Just d
       guard $ insideBox (o', e) o
-      Just (o', e, p)
-
-active :: Eq path => Color -> path -> Collage (Draw path) -> Collage (Draw path)
-active color p c = collageCompose offsetZero c (collageSingleton activeZone)
-  where
-    mkColor (Just path) | path == p = Just color
-    mkColor _ = Nothing
-    outlineRect =
-      rect (lrtb @Natural 1 1 1 1) (DrawCtx $ \mpath _ -> mkColor mpath) (collageExtents c)
-    activeZone = DrawEmbed outlineRect p
+      Just p

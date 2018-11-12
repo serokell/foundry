@@ -14,26 +14,24 @@ data SynHole sub = SynSolid sub | SynHollow
 
 makePrisms ''SynHole
 
-instance SynSelfSelected sub => SynSelfSelected (SynHole sub) where
-  synSelfSelected = \case
-    SynHollow -> True
-    SynSolid syn -> synSelfSelected syn
+instance SyntaxSelection sub => SyntaxSelection (SynHole sub) where
+  selectionPath = \case
+    SynHollow -> []
+    SynSolid syn -> selectionPath syn
 
 instance UndoEq sub => UndoEq (SynHole sub) where
   undoEq (SynSolid s1) (SynSolid s2) = undoEq s1 s2
   undoEq  SynHollow     SynHollow    = True
   undoEq  _             _            = False
 
-instance (SyntaxLayout Path lctx sub)
-      => SyntaxLayout Path lctx (SynHole sub) where
+instance SyntaxLayout sub => SyntaxLayout (SynHole sub) where
   layout = \case
     SynHollow -> return $
       collageWithMargin (Margin 4 4 4 4) $
       punct "_"
     SynSolid syn -> layout syn
 
-instance SyntaxReact rp Path sub
-      => SyntaxReact rp Path (SynHole sub) where
+instance SyntaxReact sub => SyntaxReact (SynHole sub) where
   react = asum @[] handlers
     where
       handlers =

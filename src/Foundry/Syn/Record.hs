@@ -3,7 +3,7 @@
 
 module Foundry.Syn.Record where
 
-import Data.Kind (Type, Constraint)
+import Data.Kind (Constraint)
 import Data.Foldable
 import Data.Functor.Product
 import Control.Monad.Reader
@@ -38,13 +38,6 @@ instance KnownSpine '[] where
 
 instance KnownSpine xs => KnownSpine (x : xs) where
   spine = Sp spine
-
-data Idx xs where
-  IZ :: Idx (x : xs)
-  IS :: Idx xs -> Idx (x : xs)
-
-deriving instance Show (Idx xs)
-deriving instance Eq (Idx xs)
 
 idxSucc' :: Spine xs -> Idx xs -> Maybe (Idx xs)
 idxSucc' sp IZ =
@@ -118,8 +111,6 @@ hlens :: Idx_n xs n -> Lens' (HList xs) (xs !! n)
 hlens IZ_n = \f (x :& xs) -> fmap (:& xs) (f x)
 hlens (IS_n i) = \f (x :& xs) -> fmap (x :&) (hlens i f xs)
 
-type family Fields (label :: Type) :: [Type]
-
 data SynRecord label =
   SynRecord
     { _synRec :: HList (Fields label),
@@ -137,8 +128,6 @@ synField = synRec . hlens (idx_n @n)
 
 instance AllConstrained UndoEq (Fields label) => UndoEq (SynRecord label) where
   undoEq r1 r2 = undoEq (r1 ^. synRec) (r2 ^. synRec)
-
-instance SynSelfSelected (SynRecord label)
 
 instance xs ~ Fields label => SynSelection (SynRecord label) (Idx xs) where
   synSelection = synRecSel
@@ -158,28 +147,28 @@ deduceC IZ_n r = r
 deduceC (IS_n i) r = deduceC @c i r
 
 recHandleSelRedirect ::
-  forall rp la label.
-  AllConstrained (SyntaxReact rp la) (Fields label) =>
-  React rp la (SynRecord label)
+  forall label.
+  AllConstrained SyntaxReact (Fields label) =>
+  React (SynRecord label)
 recHandleSelRedirect = do
   False <- use synSelectionSelf
   Some sel <- uses synRecSel toSomeIdx
-  deduceC @(SyntaxReact rp la) sel $
+  deduceC @SyntaxReact sel $
     reactRedirect (synRec . hlens sel)
 
-handleArrowUp :: SynSelection syn sel => React rp la syn
+handleArrowUp :: SynSelection syn sel => React syn
 handleArrowUp = do
   guardInputEvent $ keyCodeLetter KeyCode.ArrowUp 'k'
   False <- use synSelectionSelf
   synSelectionSelf .= True
 
-handleArrowDown :: SynSelection syn sel => React rp la syn
+handleArrowDown :: SynSelection syn sel => React syn
 handleArrowDown = do
   guardInputEvent $ keyCodeLetter KeyCode.ArrowDown 'j'
   True <- use synSelectionSelf
   synSelectionSelf .= False
 
-handleArrowLeft :: SynSelection syn (Idx xs) => React rp la syn
+handleArrowLeft :: SynSelection syn (Idx xs) => React syn
 handleArrowLeft = do
   guardInputEvent $ keyCodeLetter KeyCode.ArrowLeft 'h'
   False <- use synSelectionSelf
@@ -187,7 +176,7 @@ handleArrowLeft = do
   selection' <- maybeA (idxPred selection)
   synSelection .= selection'
 
-handleArrowRight :: KnownSpine xs => SynSelection syn (Idx xs) => React rp la syn
+handleArrowRight :: KnownSpine xs => SynSelection syn (Idx xs) => React syn
 handleArrowRight = do
   guardInputEvent $ keyCodeLetter KeyCode.ArrowRight 'l'
   False <- use synSelectionSelf
@@ -195,52 +184,62 @@ handleArrowRight = do
   selection' <- maybeA (idxSucc selection)
   synSelection .= selection'
 
-handleArrows :: (KnownSpine xs, SynSelection syn (Idx xs)) => React rp la syn
+handleArrows :: (KnownSpine xs, SynSelection syn (Idx xs)) => React syn
 handleArrows = asum @[]
   [handleArrowUp, handleArrowDown, handleArrowLeft, handleArrowRight]
 
 instance
-    ( AllConstrained (SyntaxReact rp Path) (Fields label),
+    ( AllConstrained SyntaxReact (Fields label),
       KnownSpine (Fields label),
       SyntaxRecReact label ) =>
-    SyntaxReact rp Path (SynRecord label)
+    SyntaxReact (SynRecord label)
   where
     react = recHandleSelRedirect <|> handleArrows
     subreact = simpleSubreact (recChar @label) (recDefaultValue @label)
 
 class SyntaxRecLayout label where
   recLayout ::
-    Rec (Const (Collage (Draw Path))) (Fields label) ->
-    Collage (Draw Path)
+    Rec (Const (Collage Draw)) (Fields label) ->
+    Collage Draw
+
+instance
+    ( AllConstrained SyntaxSelection (Fields label),
+      Typeable label ) =>
+    SyntaxSelection (SynRecord label)
+  where
+    selectionPath syn
+      | syn ^. synRecSelSelf = []
+      | otherwise = fieldSelectionPath (syn ^. synRecSel) (zipWithIdx (syn ^. synRec))
+      where
+        fieldSelectionPath ::
+          AllConstrained SyntaxSelection xs =>
+          Idx xs ->
+          Rec (Const (Idx (Fields label)) * Id) xs ->
+          Path
+        fieldSelectionPath IZ ((i, x) :& _) = PathSegment (typeRep @label) i `cons` selectionPath x
+        fieldSelectionPath (IS n) (_ :& xs) = fieldSelectionPath n xs
 
 instance
     ( SyntaxRecLayout label,
-      Typeable (Fields label),
-      AllConstrained (SyntaxLayout Path LayoutCtx) (Fields label),
-      AllConstrained SynSelfSelected (Fields label) ) =>
-    SyntaxLayout Path LayoutCtx (SynRecord label)
+      Typeable label,
+      AllConstrained SyntaxLayout (Fields label) ) =>
+    SyntaxLayout (SynRecord label)
   where
     layout syn =
       recLayout @label <$>
       fieldLayouts (zipWithIdx (syn ^. synRec))
       where
         fieldLayouts ::
-          AllConstrained (SyntaxLayout Path LayoutCtx) xs =>
-          AllConstrained SynSelfSelected xs =>
+          AllConstrained SyntaxLayout xs =>
           Rec (Const (Idx (Fields label)) * Id) xs ->
-          Reader LayoutCtx (Rec (Const (Collage (Draw Path))) xs)
+          Reader LayoutCtx (Rec (Const (Collage Draw)) xs)
         fieldLayouts RNil = pure RNil
         fieldLayouts ((sel', x) :& xs) = do
           let
             appendSelection =
-              (lctxSelected &&~ (view synSelection syn == sel')) .
-              (lctxSelected &&~ (synSelfSelected syn == False)) .
-              (lctxPath %~ (`snoc` PathSegment typeRep sel'))
-            enforceSelfSelection =
-              lctxSelected &&~ synSelfSelected x
-            xLayout :: Reader LayoutCtx (Collage (Draw Path))
+              lctxPath %~ (`snoc` PathSegment (typeRep @label) sel')
+            xLayout :: Reader LayoutCtx (Collage Draw)
             xLayout = local appendSelection $ do
               a <- layout x
-              local enforceSelfSelection $
-                reader $ \lctx -> layoutSel lctx a
+              reader $ \lctx -> layoutSel (lctx ^. lctxPath) a
           (:&) <$> xLayout <*> fieldLayouts xs

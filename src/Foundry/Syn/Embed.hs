@@ -19,21 +19,21 @@ data SynEmbed
 
 makePrisms ''SynEmbed
 
-instance SynSelfSelected SynEmbed where
-  synSelfSelected = const True
+instance SyntaxSelection SynEmbed where
+  selectionPath = const []
 
 instance UndoEq SynEmbed where
   undoEq (SynEmbedFilePath t1) (SynEmbedFilePath t2) = undoEq t1 t2
   undoEq (SynEmbedURL      t1) (SynEmbedURL      t2) = undoEq t1 t2
   undoEq  _                     _                    = False
 
-instance SyntaxLayout Path LayoutCtx SynEmbed where
+instance SyntaxLayout SynEmbed where
   layout (SynEmbedFilePath t) = reader $ \lctx ->
     punct "file:" `horizTop` runReader (layout t) lctx
   layout (SynEmbedURL t) = reader $ \lctx ->
     punct "url:" `horizTop` runReader (layout t) lctx
 
-instance SyntaxReact rp Path SynEmbed where
+instance SyntaxReact SynEmbed where
   react = asum @[] handlers
     where
       handleShiftUp = do

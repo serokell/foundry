@@ -16,13 +16,13 @@ makePrisms ''SynArg
 instance UndoEq SynArg where
   undoEq (SynArg s1) (SynArg s2) = undoEq s1 s2
 
-instance SynSelfSelected SynArg where
-  synSelfSelected = const True
+instance SyntaxSelection SynArg where
+  selectionPath = const []
 
-instance SyntaxLayout Path LayoutCtx SynArg where
+instance SyntaxLayout SynArg where
   layout (SynArg t) = layout t
 
-instance SyntaxReact rp Path SynArg where
+instance SyntaxReact SynArg where
   react = asum @[] handlers
     where
       handlers = [reactRedirect _SynArg, handle_x]
