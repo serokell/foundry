@@ -55,9 +55,9 @@ instance SyntaxReact rp Path SynVar where
   react = asum @[] handlers
     where
       handlers =
-        [ handleShiftUp
-        , handleShiftDown
-        , reactRedirect synVarName ]
+        [ reactRedirect synVarName
+        , handleShiftUp
+        , handleShiftDown ]
       handleShiftUp = do
         KeyPress [Shift] keyCode <- view rctxInputEvent
         guard $ keyLetter 'U' keyCode
