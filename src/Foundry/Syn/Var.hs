@@ -19,15 +19,15 @@ data SynVar = SynVar
 
 makeLenses ''SynVar
 
-instance SynSelfSelected SynVar where
-  synSelfSelected = const True
+instance SyntaxSelection SynVar where
+  selectionPath = const []
 
 instance UndoEq SynVar where
   undoEq s1 s2
      = on undoEq (view synVarName)  s1 s2
     && on (==)   (view synVarIndex) s1 s2
 
-instance SyntaxLayout Path LayoutCtx SynVar where
+instance SyntaxLayout SynVar where
   layout v = reader $ \lctx ->
     let
       c = runReader (layout (v ^. synVarName)) lctx
@@ -51,7 +51,7 @@ instance SyntaxLayout Path LayoutCtx SynVar where
         '9' -> '₉'
         c   -> c
 
-instance SyntaxReact rp Path SynVar where
+instance SyntaxReact SynVar where
   react = asum @[] handlers
     where
       handlers =

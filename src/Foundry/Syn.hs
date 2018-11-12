@@ -2,7 +2,6 @@ module Foundry.Syn where
 
 import qualified Data.Text as Text
 import qualified Data.Text.Lazy as Text.Lazy
-import qualified Data.Sequence as Seq
 import Data.Foldable
 import Data.Function
 import Control.Monad.Reader
@@ -96,8 +95,11 @@ data SynTop = SynTop
 
 makeLenses ''SynTop
 
-instance SyntaxLayout Path Viewport SynTop where
-  layout syn = reader $ \viewport ->
+instance SyntaxSelection SynTop where
+  selectionPath = selectionPath . view synExpr
+
+instance SyntaxLayout SynTop where
+  layout syn = reader $ \lctx ->
     let
       hoverBar = do
         guard $ syn ^. synHoverBarEnabled
@@ -110,17 +112,16 @@ instance SyntaxLayout Path Viewport SynTop where
             collageCompose offsetZero c (vertical bars')
       centered c =
         let
-          padding = centerOf (viewport ^. _Viewport) c
+          padding = centerOf (lctx ^. lctxViewport . _Viewport) c
           backgroundRect = rect nothing (inj dark1)
         in
           substrate padding backgroundRect c
-      lctx = LayoutCtx True Seq.empty
     in withBars
      . centered
-     . layoutSel (lctx & lctxSelected &&~ synSelfSelected (syn ^. synExpr))
+     . layoutSel (lctx ^. lctxPath)
      $ runReader (layout (syn ^. synExpr)) lctx
 
-instance SyntaxReact () Path SynTop where
+instance SyntaxReact SynTop where
   react = asum @[] handlers
     where
       handlers =
@@ -136,8 +137,8 @@ instance SyntaxReact () Path SynTop where
       handleButtonPress = do
         ButtonPress <- view rctxInputEvent
         pointer <- use synPointer
-        Just (_, _, p) <-
-          activate pointer . collageElements offsetZero <$>
+        Just p <-
+          findPath pointer . collageElements offsetZero <$>
             view rctxLastLayout
         zoom synExpr $ modify (updateExprPath p)
       handleCtrl_h = do
@@ -179,7 +180,7 @@ updateLamPath :: Path -> SynLam -> SynLam
 updateLamPath path e =
   case uncons path of
     Nothing -> e & synSelectionSelf .~ True
-    Just (fromPathSegment -> Just idx, sels) ->
+    Just (fromPathSegment @LabelLam -> Just idx, sels) ->
       e & synSelectionSelf .~ False
         & synSelection .~ idx
         & case idx :: Idx (Fields LabelLam) of
@@ -193,7 +194,7 @@ updatePiPath :: Path -> SynPi -> SynPi
 updatePiPath path e =
   case uncons path of
     Nothing -> e & synSelectionSelf .~ True
-    Just (fromPathSegment -> Just idx, sels) ->
+    Just (fromPathSegment @LabelPi -> Just idx, sels) ->
       e & synSelectionSelf .~ False
         & synSelection .~ idx
         & case idx :: Idx (Fields LabelPi) of
@@ -207,7 +208,7 @@ updateAppPath :: Path -> SynApp -> SynApp
 updateAppPath path e =
   case uncons path of
     Nothing -> e & synSelectionSelf .~ True
-    Just (fromPathSegment -> Just idx, sels) ->
+    Just (fromPathSegment @LabelApp -> Just idx, sels) ->
       e & synSelectionSelf .~ False
         & synSelection .~ idx
         & case idx :: Idx (Fields LabelApp) of

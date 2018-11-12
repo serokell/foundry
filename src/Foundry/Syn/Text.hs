@@ -53,23 +53,18 @@ instance UndoEq SynText where
     | view synTextEditMode syn2 = False
     | otherwise = on (==) (view synTextContent) syn1 syn2
 
-instance SyntaxLayout Path LayoutCtx SynText where
-  layout syn = do
-    lctx <- ask
-    let
-      layoutActive =
-        textWithCursor
-          (syn ^. synTextContent)
-          (\case
-              CursorVisible -> Just . fromIntegral $ syn ^. synTextPosition
-              CursorInvisible -> Nothing)
-      layoutInactive = text (syn ^. synTextContent)
-      isActive = (lctx ^. lctxSelected) && (syn ^. synTextEditMode)
-    return $
-      collageWithMargin (Margin 4 4 4 4) $
-      if isActive then layoutActive else layoutInactive
+instance SyntaxLayout SynText where
+  layout syn = reader $ \lctx ->
+    collageWithMargin (Margin 4 4 4 4) $
+    textWithCursor
+      (syn ^. synTextContent)
+      (\Paths{..} -> \case
+          _ | not (syn ^. synTextEditMode) -> Nothing
+          _ | pathsSelection /= lctx ^. lctxPath -> Nothing
+          CursorInvisible -> Nothing
+          CursorVisible -> Just . fromIntegral $ syn ^. synTextPosition)
 
-instance SyntaxReact rp Path SynText where
+instance SyntaxReact SynText where
   react = do asum @[] handlers; modify normalizeSynText
     where
       handlers =

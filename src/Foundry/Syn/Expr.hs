@@ -4,6 +4,7 @@ import Numeric.Natural
 import Data.Function
 
 import Source.Draw
+import Source.Path
 
 import Foundry.Syn.Hole
 import Foundry.Syn.Sum

@@ -10,9 +10,11 @@ library
                        Source.Input
                        Source.Input.KeyCode
                        Source.Syntax
+                       Source.Path
                        Source.Phaser
 
   build-depends:       base >=4.7
+               ,       containers
                ,       lens >=4.11
                ,       transformers >=0.4
                ,       gtk3 >=0.13

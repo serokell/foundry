@@ -5,6 +5,7 @@ module Source
 import Control.Monad.Reader
 import Control.Monad.State
 import Control.Monad.Trans.Maybe
+import qualified Data.Sequence as Seq
 import qualified Graphics.UI.Gtk as Gtk
 import Data.IORef
 
@@ -17,8 +18,9 @@ import Source.Input (InputEvent(..), Modifier(..))
 
 runGUI
   :: Syn.SyntaxBlank syn
-  => Syn.SyntaxLayout la Syn.Viewport syn
-  => Syn.SyntaxReact () la syn
+  => Syn.SyntaxSelection syn
+  => Syn.SyntaxLayout syn
+  => Syn.SyntaxReact syn
   => IO syn
 runGUI = do
   _ <- Gtk.initGUI
@@ -28,10 +30,11 @@ runGUI = do
   readIORef synRef
 
 createMainWindow
-  :: forall la syn.
+  :: forall syn.
      Syn.SyntaxBlank syn
-  => Syn.SyntaxLayout la Syn.Viewport syn
-  => Syn.SyntaxReact () la syn
+  => Syn.SyntaxSelection syn
+  => Syn.SyntaxLayout syn
+  => Syn.SyntaxReact syn
   => IORef syn
   -> IO Gtk.Window
 createMainWindow synRef = do
@@ -46,7 +49,7 @@ createMainWindow synRef = do
       , Gtk.ButtonPressMask
       ]
 
-  layoutRef :: IORef (Collage (Draw la))
+  layoutRef :: IORef (Collage Draw)
     <- newIORef (error "layoutRef used before initialization")
 
   pointerRef :: IORef (Maybe Offset)
@@ -63,23 +66,23 @@ createMainWindow synRef = do
 
     updateCanvas viewport = do
       syn <- liftIO $ readIORef synRef
-      let layout = runReader (Syn.layout syn) viewport
+      let layout = runReader (Syn.layout syn) (Syn.LayoutCtx Seq.empty viewport)
       liftIO $ writeIORef layoutRef layout
       cursorVisible <- liftIO $ phaserCurrent cursorPhaser
       mpointer <- liftIO $ readIORef pointerRef
       let
         elements = collageElements offsetZero layout
         toCairoElements = (fmap.fmap) toCairoElementDraw
-        mpath = do
+        pathsCursor = do
           pointer <- mpointer
-          (_, _, path) <- activate pointer elements
-          Just path
-      renderElements (withDrawCtx mpath cursorVisible) (toCairoElements elements)
+          findPath pointer elements
+        pathsSelection = Syn.selectionPath syn
+      renderElements (withDrawCtx Paths{..} cursorVisible) (toCairoElements elements)
 
     handleInputEvent inputEvent = do
       syn <- liftIO $ readIORef synRef
       layout <- liftIO $ readIORef layoutRef
-      let reactCtx = Syn.ReactCtx asyncReact layout inputEvent ()
+      let reactCtx = Syn.ReactCtx asyncReact layout inputEvent
       msyn'
         <- runMaybeT
          . flip execStateT syn

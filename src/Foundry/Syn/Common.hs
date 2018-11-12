@@ -2,9 +2,6 @@ module Foundry.Syn.Common where
 
 import Data.Text (Text)
 import Numeric.Natural (Natural)
-import Data.Sequence (Seq)
-import Type.Reflection
-import Data.Type.Equality
 
 import Control.Lens
 import Control.Applicative
@@ -24,14 +21,14 @@ dark3  = RGB 64 64 64
 light1 = RGB 179 179 179
 white  = RGB 255 255 255
 
-textWithCursor :: Text -> (CursorBlink -> Maybe Natural) -> Collage (Draw Path)
+textWithCursor :: Text -> (Paths -> CursorBlink -> Maybe Natural) -> Collage Draw
 textWithCursor = textline white font
 
-text :: Text -> Collage (Draw Path)
-text t = textWithCursor t (\_ -> Nothing)
+text :: Text -> Collage Draw
+text t = textWithCursor t (\_ _ -> Nothing)
 
-punct :: Text -> Collage (Draw Path)
-punct t = textline light1 font t (\_ -> Nothing)
+punct :: Text -> Collage Draw
+punct t = textline light1 font t (\_ _ -> Nothing)
 
 font :: Font
 font = Font "Ubuntu" 12 FontWeightNormal
@@ -44,59 +41,39 @@ keyCodeLetter kc c = \case
   KeyPress [] keyCode -> keyCode == kc || keyLetter c keyCode
   _ -> False
 
-data PathSegment where
-  PathSegment :: Eq a => TypeRep a -> a -> PathSegment
-
-instance Eq PathSegment where
-  PathSegment t1 a1 == PathSegment t2 a2 =
-    case testEquality t1 t2 of
-      Nothing -> False
-      Just Refl -> a1 == a2
-
-fromPathSegment :: forall a. Typeable a => PathSegment -> Maybe a
-fromPathSegment (PathSegment t a) =
-  case testEquality t (typeRep @a) of
-    Nothing -> Nothing
-    Just Refl -> Just a
-
-type Path = Seq PathSegment
-
-data LayoutCtx = LayoutCtx
-  { _lctxSelected :: Bool
-  , _lctxPath     :: Path
-  }
-
-makeLenses ''LayoutCtx
-
-layoutSel :: LayoutCtx -> Collage (Draw Path) -> Collage (Draw Path)
-layoutSel lctx =
-    active light1 (lctx ^. lctxPath)
+layoutSel :: Path -> Collage Draw -> Collage Draw
+layoutSel path =
+    active path
   . substrate (lrtb @Natural 0 0 0 0) (\e ->
       let
-        background = rect nothing (if sel then inj dark3 else nothing) e
-        border = rect (lrtb @Natural 1 1 1 1) (if sel then inj dark2 else nothing) e
+        mkColor color = DrawCtx $ \Paths{..} _ ->
+          if pathsSelection == path then inj color else nothing
+        background = rect nothing (mkColor dark3) e
+        border = rect (lrtb @Natural 1 1 1 1) (mkColor dark2) e
       in
         collageCompose offsetZero background border)
-  where
-    sel = lctx ^. lctxSelected
 
-simpleSubreact :: Char -> syn -> Subreact rp la syn
+active :: Path -> Collage Draw -> Collage Draw
+active p c = collageCompose offsetZero c (collageSingleton activeZone)
+  where
+    mkColor (Just path) | path == p = Just light1
+    mkColor _ = Nothing
+    outlineRect =
+      rect (lrtb @Natural 1 1 1 1) (DrawCtx $ \Paths{..} _ -> mkColor pathsCursor) (collageExtents c)
+    activeZone = DrawEmbed outlineRect p
+
+simpleSubreact :: Char -> syn -> Subreact syn
 simpleSubreact c syn = do
   KeyPress [Shift] keyCode <- view rctxInputEvent
   guard (keyLetter c keyCode)
   return syn
 
-guardInputEvent :: (InputEvent Int -> Bool) -> React rp la syn
+guardInputEvent :: (InputEvent Int -> Bool) -> React syn
 guardInputEvent = guard <=< views rctxInputEvent
 
 class UndoEq a where
   undoEq :: a -> a -> Bool
 
-class SynSelfSelected a where
-  synSelfSelected :: a -> Bool
-  default synSelfSelected :: SynSelection a sel => a -> Bool
-  synSelfSelected = view synSelectionSelf
-
-class SynSelfSelected a => SynSelection a sel | a -> sel where
+class SynSelection a sel | a -> sel where
   synSelection :: Lens' a sel
   synSelectionSelf :: Lens' a Bool
