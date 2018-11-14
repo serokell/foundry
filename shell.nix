@@ -1,19 +1,26 @@
-# { stdenv, pkgs, haskell }:
-with import <nixpkgs> { };
+{ pkgs ? import <nixpkgs> {},
+  hc ? "ghc844"
+}:
 
-stdenv.mkDerivation rec {
+pkgs.stdenv.mkDerivation rec {
   name = "foundry";
   buildInputs = [
-    haskell.compiler.ghc843
+    pkgs.haskell.compiler.${hc}
+    pkgs.cabal-install
     pkgs.git
     pkgs.zlib
-    pkgs.cabal-install
     pkgs.pkgconfig
     pkgs.cairo
     pkgs.pango
     pkgs.gtk3
+    pkgs.which # for CI
   ];
   shellHook = ''
-    export LD_LIBRARY_PATH=${lib.makeLibraryPath buildInputs}:$LD_LIBRARY_PATH
+    export LD_LIBRARY_PATH=${pkgs.lib.makeLibraryPath buildInputs}:$LD_LIBRARY_PATH
+    export LANG=en_US.UTF-8
   '';
+  LOCALE_ARCHIVE =
+    if pkgs.stdenv.isLinux
+    then "${pkgs.glibcLocales}/lib/locale/locale-archive"
+    else "";
 }
