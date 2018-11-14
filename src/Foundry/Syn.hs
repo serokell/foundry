@@ -4,6 +4,7 @@ import qualified Data.Text as Text
 import qualified Data.Text.Lazy as Text.Lazy
 import Data.Foldable
 import Data.Function
+import Data.Void
 import Control.Monad.Reader
 import Control.Monad.State
 import Control.Lens
@@ -43,7 +44,7 @@ synImportVar (M.V t n) = SynVar (synImportText t) n
 synImportArg :: Text.Lazy.Text -> SynArg
 synImportArg t = SynArg (synImportText t)
 
-synImportLam :: Text.Lazy.Text -> M.Expr M.X -> M.Expr M.X -> SynLam
+synImportLam :: Text.Lazy.Text -> M.Expr Void -> M.Expr Void -> SynLam
 synImportLam x _A  b =
   SynRecord
     { _synRec =
@@ -54,7 +55,7 @@ synImportLam x _A  b =
       _synRecSel = IS (IS IZ),
       _synRecSelSelf = True }
 
-synImportPi :: Text.Lazy.Text -> M.Expr M.X -> M.Expr M.X -> SynPi
+synImportPi :: Text.Lazy.Text -> M.Expr Void -> M.Expr Void -> SynPi
 synImportPi  x _A _B =
   SynRecord
     { _synRec =
@@ -65,7 +66,7 @@ synImportPi  x _A _B =
       _synRecSel = IS (IS IZ),
       _synRecSelSelf = True }
 
-synImportApp :: M.Expr M.X -> M.Expr M.X -> SynApp
+synImportApp :: M.Expr Void -> M.Expr Void -> SynApp
 synImportApp f a =
   SynRecord
     { _synRec =
@@ -75,7 +76,7 @@ synImportApp f a =
       _synRecSel = IZ,
       _synRecSelSelf = True }
 
-synImportExpr :: M.Expr M.X -> SynExpr
+synImportExpr :: M.Expr Void -> SynExpr
 synImportExpr = \case
   {- TODO: autolift '[SynLam, SynPi, SynApp, SynConst, SynVar, SynEmbed] -}
   M.Const c -> SynAddend . SynAddend . SynAddend . SynAugend $ synImportConst c
@@ -83,7 +84,7 @@ synImportExpr = \case
   M.Lam x _A b -> SynAugend $ synImportLam x _A b
   M.Pi  x _A _B -> SynAddend . SynAugend $ synImportPi x _A _B
   M.App f a -> SynAddend . SynAddend . SynAugend $ synImportApp f a
-  M.Embed e -> M.absurd e
+  M.Embed e -> absurd e
 
 data SynTop = SynTop
   { _synExpr            :: SynHole SynExpr
