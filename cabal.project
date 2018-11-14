@@ -4,23 +4,23 @@ packages:
 source-repository-package
   type: git
   location: https://github.com/int-index/slay
-  tag: 21d412b7a05ad5bc0157b51e9d003b1827393172
+  tag: 085860a785a70b1f6558e9a363c1a63eb97414bd
   subdir: non-negative
 
 source-repository-package
   type: git
   location: https://github.com/int-index/slay
-  tag: 21d412b7a05ad5bc0157b51e9d003b1827393172
+  tag: 085860a785a70b1f6558e9a363c1a63eb97414bd
   subdir: core
 
 source-repository-package
   type: git
   location: https://github.com/int-index/slay
-  tag: 21d412b7a05ad5bc0157b51e9d003b1827393172
+  tag: 085860a785a70b1f6558e9a363c1a63eb97414bd
   subdir: combinators
 
 source-repository-package
   type: git
   location: https://github.com/int-index/slay
-  tag: 21d412b7a05ad5bc0157b51e9d003b1827393172
+  tag: 085860a785a70b1f6558e9a363c1a63eb97414bd
   subdir: cairo
