@@ -29,8 +29,10 @@ instance UndoEq SynEmbed where
 
 instance SyntaxLayout SynEmbed where
   layout (SynEmbedFilePath t) = reader $ \lctx ->
+    collageWithMargin (Margin 4 4 4 4) $
     punct "file:" `horizTop` runReader (layout t) lctx
   layout (SynEmbedURL t) = reader $ \lctx ->
+    collageWithMargin (Margin 4 4 4 4) $
     punct "url:" `horizTop` runReader (layout t) lctx
 
 instance SyntaxReact SynEmbed where
