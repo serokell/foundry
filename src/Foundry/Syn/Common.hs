@@ -15,7 +15,8 @@ maybeA :: Alternative f => Maybe a -> f a
 maybeA = maybe empty pure
 
 dark1, dark2, dark3, light1, white :: Color
-dark1  = RGB 51 51 51
+dark1  = RGB 41 41 41
+--dark1  = RGB 51 51 51
 dark2  = RGB 77 77 77
 dark3  = RGB 64 64 64
 light1 = RGB 179 179 179
@@ -44,23 +45,25 @@ keyCodeLetter kc c = \case
 layoutSel :: Path -> Collage Draw -> Collage Draw
 layoutSel path =
     active path
-  . substrate (lrtb @Natural 0 0 0 0) (\e ->
+  . (decorateMargin . DecorationBelow) (\e ->
       let
         mkColor color = DrawCtx $ \Paths{..} _ ->
           if pathsSelection == path then inj color else nothing
         background = rect nothing (mkColor dark3) e
-        border = rect (lrtb @Natural 1 1 1 1) (mkColor dark2) e
+        border = rect (lrtb @Natural 1 1 1 1) (mkColor (rgb 94 80 134)) e
       in
         collageCompose offsetZero background border)
 
 active :: Path -> Collage Draw -> Collage Draw
-active p c = collageCompose offsetZero c (collageSingleton activeZone)
+active p = (decorateMargin . DecorationAbove) (collageSingleton . activeZone)
   where
     mkColor (Just path) | path == p = Just light1
     mkColor _ = Nothing
     outlineRect =
-      rect (lrtb @Natural 1 1 1 1) (DrawCtx $ \Paths{..} _ -> mkColor pathsCursor) (collageExtents c)
-    activeZone = DrawEmbed outlineRect p
+      rect
+        (lrtb @Natural 1 1 1 1)
+        (DrawCtx $ \Paths{..} _ -> mkColor pathsCursor)
+    activeZone e = DrawEmbed (outlineRect e) p
 
 simpleSubreact :: Char -> syn -> Subreact syn
 simpleSubreact c syn = do

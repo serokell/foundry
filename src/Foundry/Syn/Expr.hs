@@ -106,7 +106,10 @@ instance SyntaxRecLayout LabelApp where
     collageWithMargin (Margin 4 4 4 4) $
     [ expr1,
       substrate
-        (lrtb @Natural 5 5 5 5)
+        (lrtbMargin (collageMargin expr2))
         (rect (lrtb @Natural 1 1 1 1) (inj dark2))
         expr2
     ] & horizontalCenter
+
+lrtbMargin :: Margin -> LRTB Natural
+lrtbMargin (Margin l r t b) = lrtb l r t b
