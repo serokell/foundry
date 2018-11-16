@@ -6,12 +6,10 @@ build-type:          Simple
 library
 
   exposed-modules:     Source
-                       Source.Draw
                        Source.Input
                        Source.Input.KeyCode
-                       Source.Syntax
-                       Source.Path
                        Source.Phaser
+                       Source.NewGen
 
   build-depends:       base >=4.7
                ,       containers
@@ -55,6 +53,13 @@ library
                        FlexibleInstances
                        FlexibleContexts
                        UndecidableInstances
+                       TypeApplications
+                       DerivingStrategies
+                       NamedFieldPuns
+                       DeriveFunctor
+                       DeriveFoldable
+                       DeriveTraversable
+                       GeneralizedNewtypeDeriving
 
   ghc-options:         -Wall -threaded -O2
   ghc-prof-options:    -fprof-auto
@@ -64,24 +69,12 @@ library
 
 executable foundry
   main-is:             Main.hs
-  other-modules:       Foundry.Syn
-                       Foundry.Syn.Text
-                       Foundry.Syn.Hole
-                       Foundry.Syn.Sum
-                       Foundry.Syn.Const
-                       Foundry.Syn.Embed
-                       Foundry.Syn.Arg
-                       Foundry.Syn.Var
-                       Foundry.Syn.Expr
-                       Foundry.Syn.Record
-                       Foundry.Syn.Common
 
   build-depends:       base
                ,       containers
                ,       transformers
                ,       mtl
                ,       bifunctors
-               ,       unwrapped-functors
                ,       semigroups
                ,       text
                ,       lens

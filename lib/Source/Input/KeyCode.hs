@@ -1,3 +1,5 @@
+{-# OPTIONS -Wno-missing-pattern-synonym-signatures #-}
+
 module Source.Input.KeyCode where
 
 pattern Backspace = 65288
