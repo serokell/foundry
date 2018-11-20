@@ -16,8 +16,8 @@ type KeyCode = Word32
 keyChar :: KeyCode -> Maybe Char
 keyChar = Gtk.keyToChar
 
-data InputEvent n
+data InputEvent
   = KeyPress [Modifier] KeyCode
-  | PointerMotion n n
+  | PointerMotion Int Int
   | ButtonPress
   deriving (Eq, Show)

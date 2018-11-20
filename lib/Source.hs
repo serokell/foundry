@@ -2,42 +2,28 @@ module Source
     ( runGUI
     ) where
 
-import Control.Monad.Reader
-import Control.Monad.State
-import Control.Monad.Trans.Maybe
-import qualified Data.Sequence as Seq
+import Control.Monad
+import Control.Monad.IO.Class
 import qualified Graphics.UI.Gtk as Gtk
 import Data.IORef
+import Control.Lens ((^.))
 
 import Slay.Core
 import Slay.Cairo.Render
-import qualified Source.Syntax as Syn
 import Source.Phaser
-import Source.Draw
 import Source.Input (InputEvent(..), Modifier(..))
+import qualified Source.NewGen as NG
 
-runGUI
-  :: Syn.SyntaxBlank syn
-  => Syn.SyntaxSelection syn
-  => Syn.SyntaxLayout syn
-  => Syn.SyntaxReact syn
-  => IO syn
-runGUI = do
+runGUI :: NG.Plugin -> IO NG.EditorState -> IO ()
+runGUI plugin initEditorState = do
   _ <- Gtk.initGUI
-  synRef <- Syn.blank >>= newIORef
-  createMainWindow synRef >>= Gtk.widgetShowAll
+  esRef <- initEditorState >>= newIORef
+  window <- createMainWindow plugin esRef
+  Gtk.widgetShowAll window
   Gtk.mainGUI
-  readIORef synRef
 
-createMainWindow
-  :: forall syn.
-     Syn.SyntaxBlank syn
-  => Syn.SyntaxSelection syn
-  => Syn.SyntaxLayout syn
-  => Syn.SyntaxReact syn
-  => IORef syn
-  -> IO Gtk.Window
-createMainWindow synRef = do
+createMainWindow :: NG.Plugin -> IORef NG.EditorState -> IO Gtk.Window
+createMainWindow plugin esRef = do
   window <- Gtk.windowNew
   _ <- Gtk.on window Gtk.objectDestroy Gtk.mainQuit
 
@@ -49,56 +35,61 @@ createMainWindow synRef = do
       , Gtk.ButtonPressMask
       ]
 
-  layoutRef :: IORef (Collage Draw)
+  layoutRef :: IORef (Collage NG.Draw)
     <- newIORef (error "layoutRef used before initialization")
 
   pointerRef :: IORef (Maybe Offset)
     <- newIORef Nothing
 
-  cursorPhaser <- newPhaser 530000 CursorVisible blink
+  cursorPhaser <- newPhaser 530000 NG.CursorVisible NG.blink
     (\_ -> Gtk.postGUIAsync (Gtk.widgetQueueDraw canvas))
 
   let
 
-    asyncReact f = do
-      atomicModifyIORef' synRef (\syn -> (f syn, ()))
-      Gtk.postGUIAsync (Gtk.widgetQueueDraw canvas)
-
     updateCanvas viewport = do
-      syn <- liftIO $ readIORef synRef
-      let layout = runReader (Syn.layout syn) (Syn.LayoutCtx Seq.empty viewport)
+      es <- liftIO $ readIORef esRef
+      let
+        lctx =
+          NG.LayoutCtx
+            { _lctxPath = NG.emptyPath,
+              _lctxViewport = viewport,
+              _lctxRecLayouts = plugin ^. NG.pluginRecLayouts }
+        layout = NG.layoutEditorState lctx es
       liftIO $ writeIORef layoutRef layout
       cursorVisible <- liftIO $ phaserCurrent cursorPhaser
-      mpointer <- liftIO $ readIORef pointerRef
       let
         elements = collageElements offsetZero layout
-        toCairoElements = (fmap.fmap) toCairoElementDraw
-        pathsCursor = do
-          pointer <- mpointer
-          findPath pointer elements
-        pathsSelection = Syn.selectionPath syn
-      renderElements (withDrawCtx Paths{..} cursorVisible) (toCairoElements elements)
+        toCairoElements = (fmap.fmap) NG.toCairoElementDraw
+        pathsCursor = NG.findPath (es ^. NG.esPointer) elements
+        pathsSelection = NG.selectionPathEditorState es
+      renderElements
+        (NG.withDrawCtx NG.Paths{..} cursorVisible)
+        (toCairoElements elements)
 
     handleInputEvent inputEvent = do
-      syn <- liftIO $ readIORef synRef
-      layout <- liftIO $ readIORef layoutRef
-      let reactCtx = Syn.ReactCtx asyncReact layout inputEvent
-      msyn'
-        <- runMaybeT
-         . flip execStateT syn
-         . flip runReaderT reactCtx
-         $ Syn.react
-      case msyn' of
-        Nothing -> return False
-        Just syn' -> do
-          atomicWriteIORef synRef syn'
+      es <- readIORef esRef
+      layout <- readIORef layoutRef
+      let
+        rctx =
+          NG.ReactCtx
+            { _rctxLastLayout = layout,
+              _rctxInputEvent = inputEvent,
+              _rctxNodeFactory = plugin ^. NG.pluginNodeFactory,
+              _rctxTyEnv = plugin ^. NG.pluginTyEnv }
+      mEs' <- NG.reactEditorState rctx es
+      case mEs' of
+        Nothing -> do
+          print inputEvent
+          return False
+        Just es' -> do
+          atomicWriteIORef esRef es'
           Gtk.widgetQueueDraw canvas
           return True
 
   void $ Gtk.on canvas Gtk.draw $ do
     w <- liftIO $ Gtk.widgetGetAllocatedWidth  canvas
     h <- liftIO $ Gtk.widgetGetAllocatedHeight canvas
-    let viewport = Syn.Viewport (Extents (fromIntegral w) (fromIntegral h))
+    let viewport = Extents (fromIntegral w) (fromIntegral h)
     updateCanvas viewport
 
   void $ Gtk.on canvas Gtk.keyPressEvent $ do
@@ -112,7 +103,7 @@ createMainWindow synRef = do
         Gtk.Alt -> [Alt]
         _ -> []
     liftIO $ do
-      liftIO $ phaserReset cursorPhaser CursorVisible
+      phaserReset cursorPhaser NG.CursorVisible
       handleInputEvent event
 
   void $ Gtk.on canvas Gtk.motionNotifyEvent $ do
