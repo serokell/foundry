@@ -3,8 +3,8 @@
 module Source.NewGen
   (
   -- * Names
-  TyName(..),
-  FieldName(..),
+  TyName,
+  FieldName,
 
   -- * Types
   Env(..),
@@ -13,9 +13,9 @@ module Source.NewGen
   mkTyUnion,
 
   -- * Identifiers
-  TyId(..),
+  TyId,
   mkTyId,
-  FieldId(..),
+  FieldId,
   mkFieldId,
 
   -- * Values
@@ -96,7 +96,15 @@ module Source.NewGen
   rctxLastLayout,
   rctxInputEvent,
   rctxNodeFactory,
-  rctxTyEnv,
+  rctxDefaultValues,
+  rctxAllowedFieldTypes,
+  rctxRecMoveMaps,
+
+  mkDefaultValues,
+  mkAllowedFieldTypes,
+  mkRecMoveMaps,
+
+  RecMoveMap,
 
   layoutEditorState,
   selectionPathEditorState,
@@ -115,11 +123,9 @@ module Source.NewGen
 
   ) where
 
-import GHC.Fingerprint
 import Data.Map (Map)
 import Data.Set (Set)
 import Data.Sequence (Seq)
-import Data.String (IsString)
 import Data.Text (Text)
 import Numeric.Natural (Natural)
 import Data.List as List
@@ -150,15 +156,11 @@ import Slay.Cairo.Element
 import Source.Input
 import qualified Source.Input.KeyCode as KeyCode
 
---------------------------------------------------------------------------------
----- Names
---------------------------------------------------------------------------------
-
-newtype TyName = TyName { tyName :: String }
-  deriving newtype (Eq, Ord, Show, IsString)
-
-newtype FieldName = FieldName { fieldName :: String }
-  deriving newtype (Eq, Ord, Show, IsString)
+import Sdam.Core
+  ( TyName,
+    FieldName,
+    TyId, mkTyId,
+    FieldId, mkFieldId )
 
 --------------------------------------------------------------------------------
 ---- Types
@@ -183,26 +185,6 @@ instance Semigroup TyUnion where
 
 instance Monoid TyUnion where
   mempty = TyUnion Set.empty
-
---------------------------------------------------------------------------------
--- References
---------------------------------------------------------------------------------
-
-newtype TyId = TyId Fingerprint
-  deriving newtype (Eq, Ord, Show)
-
-mkTyId :: TyName -> TyId
-mkTyId (TyName str) =
-  TyId (fingerprintString str)
-
-newtype FieldId = FieldId Fingerprint
-  deriving newtype (Eq, Ord, Show)
-
-mkFieldId :: TyName -> FieldName -> FieldId
-mkFieldId (TyName str1) (FieldName str2) =
-  FieldId (fingerprintFingerprints
-    [ fingerprintString str1,
-      fingerprintString str2 ])
 
 --------------------------------------------------------------------------------
 -- Values
@@ -449,7 +431,15 @@ data ReactCtx =
     { _rctxLastLayout :: Collage Draw,
       _rctxInputEvent :: InputEvent,
       _rctxNodeFactory :: [NodeCreateFn],
-      _rctxTyEnv :: Env
+      _rctxDefaultValues :: Map TyId Value,
+      _rctxAllowedFieldTypes :: Map FieldId (Set TyId),
+      _rctxRecMoveMaps :: Map TyId RecMoveMap
+    }
+
+data RecMoveMap =
+  RecMoveMap
+    { rmmForward :: Map FieldId FieldId,
+      rmmBackward :: Map FieldId FieldId
     }
 
 --------------------------------------------------------------------------------
@@ -701,7 +691,7 @@ reactHoleyObject checkTyId = asum handlers
         Hole ->
           let
             objects =
-              [ Object tyId (mkDefaultValue (rctx ^. rctxTyEnv) tyId) |
+              [ Object tyId ((rctx ^. rctxDefaultValues) Map.! tyId) |
                 ncf <- rctx ^. rctxNodeFactory,
                 (ncf ^. ncfCheckInputEvent) (rctx ^. rctxInputEvent),
                 let tyId = ncf ^. ncfTyId,
@@ -714,13 +704,13 @@ reactHoleyObject checkTyId = asum handlers
           (undoFlag, a') <- runStateT (runReaderT reactObject rctx) a
           return (undoFlag, Solid a')
 
-mkDefaultValue :: Env -> TyId -> Value
-mkDefaultValue env tyId = defaultValue
+mkDefaultValues :: Env -> Map TyId Value
+mkDefaultValues env =
+  Map.fromList
+    [ (mkTyId tyName, mkDefVal tyName ty) |
+      (tyName, ty) <- Map.toList (envMap env) ]
   where
-    [defaultValue] =
-      [ mkDefVal tyName ty |
-        (tyName, ty) <- Map.toList (envMap env),
-        mkTyId tyName == tyId ]
+    mkDefVal :: TyName -> Ty -> Value
     mkDefVal tyName = \case
       TyStr -> ValueStr (SynStr "" 0 True)
       TyRec fieldTys ->
@@ -839,10 +829,10 @@ reactRec recTyId = asum handlers
     handleRedirect :: ReactM SynRec UndoFlag
     handleRedirect = do
       RecSelChild fieldId <- use synRecSel
-      env <- view rctxTyEnv
-      let checkTyId = checkFieldTyId env (recTyId, fieldId)
+      allowedFieldTypes <- view rctxAllowedFieldTypes
+      let checkTyId tyId = Set.member tyId (allowedFieldTypes Map.! fieldId)
       zoom
-        (synRecFields . at fieldId . _unsafeJust)
+        (synRecFields . at fieldId . unsafeSingular _Just)
         (reactHoleyObject checkTyId)
     handleArrowUp :: ReactM SynRec UndoFlag
     handleArrowUp = do
@@ -860,8 +850,8 @@ reactRec recTyId = asum handlers
     handleArrowLeft = do
       guardInputEvent $ keyCodeLetter KeyCode.ArrowLeft 'h'
       RecSelChild fieldId <- use synRecSel
-      env <- view rctxTyEnv
-      let moveMap = recMoveMap env recTyId DirectionBackward
+      recMoveMaps <- view rctxRecMoveMaps
+      let moveMap = rmmBackward (recMoveMaps Map.! recTyId)
       fieldId' <- maybeA (Map.lookup fieldId moveMap)
       synRecSel .= RecSelChild fieldId'
       return (UndoFlag False)
@@ -869,46 +859,38 @@ reactRec recTyId = asum handlers
     handleArrowRight = do
       guardInputEvent $ keyCodeLetter KeyCode.ArrowRight 'l'
       RecSelChild fieldId <- use synRecSel
-      env <- view rctxTyEnv
-      let moveMap = recMoveMap env recTyId DirectionForward
+      recMoveMaps <- view rctxRecMoveMaps
+      let moveMap = rmmForward (recMoveMaps Map.! recTyId)
       fieldId' <- maybeA (Map.lookup fieldId moveMap)
       synRecSel .= RecSelChild fieldId'
       return (UndoFlag False)
 
-_unsafeJust :: Lens' (Maybe a) a
-_unsafeJust f = \case
-  Nothing -> error "_unsafeJust"
-  Just a -> Just <$> f a
-
-checkFieldTyId :: Env -> (TyId, FieldId) -> TyId -> Bool
-checkFieldTyId env (recTyId, fieldId) targetTyId =
-  any (==targetTyId)
-    [ mkTyId allowedTyName |
+mkAllowedFieldTypes :: Env -> Map FieldId (Set TyId)
+mkAllowedFieldTypes env =
+  Map.fromList
+    [ (mkFieldId tyName fieldName, Set.map mkTyId tys) |
       (tyName, TyRec fields) <- Map.toList (envMap env),
-      mkTyId tyName == recTyId,
-      (fieldName, TyUnion tys) <- fields,
-      mkFieldId tyName fieldName == fieldId,
-      allowedTyName <- Set.toList tys ]
+      (fieldName, TyUnion tys) <- fields ]
 
-data Direction = DirectionBackward | DirectionForward
+mkRecMoveMaps :: Env -> Map TyId RecMoveMap
+mkRecMoveMaps env =
+  Map.fromList
+    [ (mkTyId tyName, mkRecMoveMap tyName fields) |
+      (tyName, TyRec fields) <- Map.toList (envMap env) ]
 
-recMoveMap :: Env -> TyId -> Direction -> Map FieldId FieldId
-recMoveMap env recTyId direction =
-    case recFields of
-      [] -> Map.empty
-      _:recFields' -> Map.fromList (List.zip recFields recFields')
+mkRecMoveMap :: TyName -> [(FieldName, u)] -> RecMoveMap
+mkRecMoveMap tyName fields =
+  RecMoveMap
+    { rmmForward = seqToMoveMap fieldIds,
+      rmmBackward = seqToMoveMap (List.reverse fieldIds) }
   where
-    directionFn =
-      case direction of
-        DirectionBackward -> List.reverse
-        DirectionForward -> id
-    recFields =
-      directionFn
+    seqToMoveMap xs =
+      case xs of
+        [] -> Map.empty
+        _:xs' -> Map.fromList (List.zip xs xs')
+    fieldIds =
       [ mkFieldId tyName fieldName |
-        (tyName, TyRec fields) <- Map.toList (envMap env),
-        mkTyId tyName == recTyId,
-        (fieldName, _) <- fields
-      ]
+        (fieldName, _) <- fields ]
 
 --------------------------------------------------------------------------------
 ---- Plugin

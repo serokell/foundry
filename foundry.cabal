@@ -28,6 +28,7 @@ library
                ,       slay-core
                ,       slay-combinators
                ,       slay-cairo
+               ,       sdam
 
   hs-source-dirs:      lib
 
