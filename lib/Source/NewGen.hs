@@ -51,13 +51,11 @@ module Source.NewGen
   toCairoElementDraw,
   rect,
   rgb,
-  lrtb,
   textline,
   line,
   centerOf,
   horizontal,
   vertical,
-  horizontalCenter,
   findPath,
   dark1, dark2, dark3, light1, white, -- colors
   textWithCursor,
@@ -281,6 +279,9 @@ data Draw
 instance HasExtents Draw where
   extentsOf = extentsOf . toCairoElementDraw
 
+instance HasBaseline Draw where
+  baselineOf = baselineOf . toCairoElementDraw
+
 toCairoElementDraw :: Draw -> CairoElement DrawCtx
 toCairoElementDraw = \case
   DrawCairoElement ce -> ce
@@ -288,9 +289,6 @@ toCairoElementDraw = \case
 
 instance g ~ DrawCtx => Inj (CairoElement g) Draw where
   inj = DrawCairoElement
-
-lrtb :: Inj (LRTB p) a => p -> p -> p -> p -> a
-lrtb left right top bottom = inj LRTB{left, right, top, bottom}
 
 textline :: Color -> Font -> Text -> (Paths -> CursorBlink -> Maybe Natural) -> Collage Draw
 textline color font str cur = text font (inj color) str (DrawCtx cur)
@@ -311,10 +309,9 @@ centerOf (Extents vacantWidth vacantHeight) collage =
         top = excessHeight1,
         bottom = excessHeight2 }
 
-horizontal, vertical, horizontalCenter :: NonEmpty (Collage Draw) -> Collage Draw
-horizontal = foldr1 @NonEmpty horizTop
+horizontal, vertical :: NonEmpty (Collage Draw) -> Collage Draw
+horizontal = foldr1 @NonEmpty horizBaseline
 vertical = foldr1 @NonEmpty vertLeft
-horizontalCenter = foldr1 @NonEmpty horizCenter
 
 findPath ::
   Offset ->

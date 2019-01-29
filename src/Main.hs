@@ -112,7 +112,7 @@ recLayoutPi m =
 
 recLayoutApp :: RecLayoutFn
 recLayoutApp m =
-  horizontalCenter
+  horizontal
   [ fn,
     substrate
       (lrtbMargin (collageMargin arg))
@@ -133,7 +133,7 @@ recLayoutBox _ = punct "□"
 
 recLayoutIVar :: RecLayoutFn
 recLayoutIVar m =
-  horizontalCenter [ var, punct "@", index ]
+  horizontal [ var, punct "@", index ]
   where
     var = m Map.! mkFieldId "IVar" "var"
     index = m Map.! mkFieldId "IVar" "index"
