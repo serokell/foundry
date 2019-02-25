@@ -1,0 +1,18 @@
+jobs:
+  - job: Linux
+    pool:
+      vmImage: 'Ubuntu 16.04'
+    steps:
+    - script: |
+        sudo add-apt-repository ppa:hvr/ghc
+        sudo apt-get update
+        sudo apt-get install ghc-8.4.4 cabal-install-2.4 libgtk-3-dev
+        sudo update-alternatives --config opt-ghc
+        sudo update-alternatives --config opt-cabal
+      displayName: 'Prepare system'
+    - script: |
+        export PATH=/opt/ghc/bin:$HOME/.cabal/bin:$PATH
+        cabal v2-update
+        cabal v2-build
+        cabal v2-exec which foundry
+      displayName: 'Build'
