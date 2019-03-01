@@ -71,14 +71,16 @@ createMainWindow plugin esRef = do
       layout <- readIORef layoutRef
       let
         tyEnv = plugin ^. NG.pluginTyEnv
+        recLayouts = plugin ^. NG.pluginRecLayouts
+        recMoveMaps = NG.mkRecMoveMaps tyEnv recLayouts
         rctx =
           NG.ReactCtx
             { _rctxLastLayout = layout,
               _rctxInputEvent = inputEvent,
               _rctxNodeFactory = plugin ^. NG.pluginNodeFactory,
-              _rctxDefaultValues = NG.mkDefaultValues tyEnv,
+              _rctxDefaultValues = NG.mkDefaultValues tyEnv recMoveMaps,
               _rctxAllowedFieldTypes = NG.mkAllowedFieldTypes tyEnv,
-              _rctxRecMoveMaps = NG.mkRecMoveMaps tyEnv }
+              _rctxRecMoveMaps = recMoveMaps }
       mEs' <- NG.reactEditorState rctx es
       case mEs' of
         Nothing -> do

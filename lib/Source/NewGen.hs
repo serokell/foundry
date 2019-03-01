@@ -126,8 +126,9 @@ import Data.Set (Set)
 import Data.Sequence (Seq)
 import Data.Text (Text)
 import Numeric.Natural (Natural)
+import Data.Ord
 import Data.List as List
-import Data.List.NonEmpty hiding (cons)
+import Data.List.NonEmpty as NonEmpty hiding (cons)
 import Control.Applicative
 import Control.Monad
 import Control.Monad.Reader
@@ -168,7 +169,7 @@ newtype Env = Env { envMap :: Map TyName Ty }
   deriving newtype Show
 
 data Ty =
-  TyRec [(FieldName, TyUnion)] |
+  TyRec (Map FieldName TyUnion) |
   TyStr
   deriving stock Show
 
@@ -435,7 +436,8 @@ data ReactCtx =
 
 data RecMoveMap =
   RecMoveMap
-    { rmmForward :: Map FieldId FieldId,
+    { rmmFieldOrder :: [FieldId],
+      rmmForward :: Map FieldId FieldId,
       rmmBackward :: Map FieldId FieldId
     }
 
@@ -701,8 +703,8 @@ reactHoleyObject checkTyId = asum handlers
           (undoFlag, a') <- runStateT (runReaderT reactObject rctx) a
           return (undoFlag, Solid a')
 
-mkDefaultValues :: Env -> Map TyId Value
-mkDefaultValues env =
+mkDefaultValues :: Env -> Map TyId RecMoveMap -> Map TyId Value
+mkDefaultValues env recMoveMaps =
   Map.fromList
     [ (mkTyId tyName, mkDefVal tyName ty) |
       (tyName, ty) <- Map.toList (envMap env) ]
@@ -714,12 +716,12 @@ mkDefaultValues env =
         let
           fields = Map.fromList
             [ (mkFieldId tyName fieldName, Hole) |
-              (fieldName, _) <- fieldTys ]
+              (fieldName, _) <- Map.toList fieldTys ]
+          recMoveMap = recMoveMaps Map.! mkTyId tyName
           sel =
-            case fieldTys of
+            case rmmFieldOrder recMoveMap of
               [] -> RecSelSelf SelfSelEmpty
-              (fieldName, _):_ ->
-                RecSelChild (mkFieldId tyName fieldName)
+              fieldId:_ -> RecSelChild fieldId
         in
           ValueRec (SynRec fields sel)
 
@@ -867,27 +869,72 @@ mkAllowedFieldTypes env =
   Map.fromList
     [ (mkFieldId tyName fieldName, Set.map mkTyId tys) |
       (tyName, TyRec fields) <- Map.toList (envMap env),
-      (fieldName, TyUnion tys) <- fields ]
+      (fieldName, TyUnion tys) <- Map.toList fields ]
 
-mkRecMoveMaps :: Env -> Map TyId RecMoveMap
-mkRecMoveMaps env =
+mkRecMoveMaps :: Env -> Map TyId RecLayoutFn -> Map TyId RecMoveMap
+mkRecMoveMaps env recLayouts =
   Map.fromList
-    [ (mkTyId tyName, mkRecMoveMap tyName fields) |
+    [ mkItem tyName fields |
       (tyName, TyRec fields) <- Map.toList (envMap env) ]
+  where
+    mkItem tyName fields =
+      let
+        tyId = mkTyId tyName
+        layoutFn = recLayouts Map.! tyId
+        fieldNames = Map.keysSet fields
+        fieldIds = Set.map (mkFieldId tyName) fieldNames
+      in
+        (tyId, mkRecMoveMap layoutFn fieldIds)
 
-mkRecMoveMap :: TyName -> [(FieldName, u)] -> RecMoveMap
-mkRecMoveMap tyName fields =
+mkRecMoveMap :: RecLayoutFn -> Set FieldId -> RecMoveMap
+mkRecMoveMap recLayoutFn fieldIds =
   RecMoveMap
-    { rmmForward = seqToMoveMap fieldIds,
-      rmmBackward = seqToMoveMap (List.reverse fieldIds) }
+    { rmmFieldOrder = sortedFieldIds,
+      rmmForward = seqToMoveMap sortedFieldIds,
+      rmmBackward = seqToMoveMap (List.reverse sortedFieldIds) }
   where
     seqToMoveMap xs =
       case xs of
         [] -> Map.empty
         _:xs' -> Map.fromList (List.zip xs xs')
-    fieldIds =
-      [ mkFieldId tyName fieldName |
-        (fieldName, _) <- fields ]
+    sortedFieldIds =
+      sortByVisualOrder recLayoutFn fieldIds
+
+sortByVisualOrder :: RecLayoutFn -> Set FieldId -> [FieldId]
+sortByVisualOrder recLayoutFn fields = sortedFields
+  where
+    sortedFields :: [FieldId]
+    sortedFields = (List.map snd . List.sortBy comparingOffset) templatePaths
+      where
+        comparingOffset =
+          comparing (offsetY . fst) <>
+          comparing (offsetX . fst)
+    templatePaths :: [(Offset, FieldId)]
+    templatePaths =
+      [ (offset, unwrapPath path) |
+        At offset (DrawEmbed _ path) <-
+          NonEmpty.toList $
+            collageElements offsetZero templateCollage ]
+    templateCollage :: Collage Draw
+    templateCollage =
+      recLayoutFn $
+        Map.fromList
+          [ (fieldId, templateItem fieldId) |
+            fieldId <- Set.toList fields ]
+    templateItem :: FieldId -> Collage Draw
+    templateItem fieldId =
+      active (wrapPath fieldId) $
+      textWithoutCursor "M" -- 1em
+    -- TODO (int-index): avoid conversion to Path
+    -- unwrapPath . wrapPath = id
+    wrapPath :: FieldId -> Path
+    unwrapPath :: Path -> FieldId
+    wrapPath fieldId =
+      PathSegment fieldId `consPath` emptyPath
+    unwrapPath path =
+      case unconsPath path of
+        Nothing -> error "sortByVisualOrder: unwrapPath"
+        Just (PathSegment fieldId, _) -> fieldId
 
 --------------------------------------------------------------------------------
 ---- Plugin
