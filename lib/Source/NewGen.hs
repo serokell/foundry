@@ -159,31 +159,13 @@ import Sdam.Core
   ( TyName,
     FieldName,
     TyId, mkTyId,
-    FieldId, mkFieldId )
-
---------------------------------------------------------------------------------
----- Types
---------------------------------------------------------------------------------
-
-newtype Env = Env { envMap :: Map TyName Ty }
-  deriving newtype Show
-
-data Ty =
-  TyRec (Map FieldName TyUnion) |
-  TyStr
-  deriving stock Show
-
-data TyUnion = TyUnion (Set TyName)
-  deriving stock Show
+    FieldId, mkFieldId,
+    TyUnion(TyUnion),
+    Ty(TyRec,TySeq,TyStr),
+    Env(Env,envMap) )
 
 mkTyUnion :: [TyName] -> TyUnion
 mkTyUnion = TyUnion . Set.fromList
-
-instance Semigroup TyUnion where
-  TyUnion tns1 <> TyUnion tns2 = TyUnion (Set.union tns1 tns2)
-
-instance Monoid TyUnion where
-  mempty = TyUnion Set.empty
 
 --------------------------------------------------------------------------------
 -- Values
@@ -712,6 +694,7 @@ mkDefaultValues env recMoveMaps =
     mkDefVal :: TyName -> Ty -> Value
     mkDefVal tyName = \case
       TyStr -> ValueStr (SynStr "" 0 True)
+      TySeq _ -> error "TODO (int-index): mkDefVal TySeq"
       TyRec fieldTys ->
         let
           fields = Map.fromList
