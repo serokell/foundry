@@ -38,6 +38,7 @@ module Source.NewGen
   PathSegment(..),
   Path(..),
   emptyPath,
+  PathBuilder,
 
   -- * Draw
   module Slay.Core,
@@ -123,7 +124,6 @@ module Source.NewGen
 
 import Data.Map (Map)
 import Data.Set (Set)
-import Data.Sequence (Seq)
 import Data.Text (Text)
 import Numeric.Natural (Natural)
 import Data.Ord
@@ -143,7 +143,6 @@ import Inj.Base ()
 import qualified Data.Set as Set
 import qualified Data.Map as Map
 import qualified Data.Text as Text
-import qualified Data.Sequence as Seq
 
 import Slay.Core
 import Slay.Cairo.Prim.Color
@@ -155,14 +154,7 @@ import Slay.Cairo.Element
 import Source.Input
 import qualified Source.Input.KeyCode as KeyCode
 
-import Sdam.Core
-  ( TyName,
-    FieldName,
-    TyId, mkTyId,
-    FieldId, mkFieldId,
-    TyUnion(TyUnion),
-    Ty(TyRec,TySeq,TyStr),
-    Env(Env,envMap) )
+import Sdam.Core hiding (Value(ValueRec, ValueStr), Object(Object))
 
 mkTyUnion :: [TyName] -> TyUnion
 mkTyUnion = TyUnion . Set.fromList
@@ -204,31 +196,6 @@ data SynRec =
     { _synRecFields :: Map FieldId (Holey Object),
       _synRecSel :: RecSel
     }
-
---------------------------------------------------------------------------------
--- Path
---------------------------------------------------------------------------------
-
-newtype PathSegment = PathSegment FieldId
-  deriving newtype (Eq, Show)
-
-newtype Path = Path (Seq PathSegment)
-  deriving newtype (Eq, Show)
-
-emptyPath :: Path
-emptyPath = Path Seq.empty
-
-consPath :: PathSegment -> Path -> Path
-consPath ps (Path p) = Path (ps `cons` p)
-
-snocPath :: PathSegment -> Path -> Path
-snocPath ps (Path p) = Path (p `snoc` ps)
-
-unconsPath :: Path -> Maybe (PathSegment, Path)
-unconsPath (Path p) =
-  case Lens.uncons p of
-    Nothing -> Nothing
-    Just (ps, p') -> Just (ps, Path p')
 
 --------------------------------------------------------------------------------
 ---- Drawing
@@ -401,7 +368,7 @@ type RecLayoutFn =
 
 data LayoutCtx =
   LayoutCtx
-    { _lctxPath :: Path,
+    { _lctxPath :: PathBuilder,
       _lctxViewport :: Extents,
       _lctxRecLayouts :: Map TyId RecLayoutFn
     }
@@ -488,11 +455,13 @@ layoutEditorState lctx es =
 layoutHoleyObject :: LayoutCtx -> Holey Object -> Collage Draw
 layoutHoleyObject lctx = \case
   Hole ->
-    layoutSel (lctx ^. lctxPath) $
+    layoutSel path $
     collageWithMargin (Margin 4 4 4 4) $
     punct "_"
   Solid syn ->
     layoutObject lctx syn
+  where
+    path = buildPath (lctx ^. lctxPath)
 
 layoutObject :: LayoutCtx -> Object -> Collage Draw
 layoutObject lctx = \case
@@ -501,19 +470,21 @@ layoutObject lctx = \case
 
 layoutStr :: LayoutCtx -> SynStr -> Collage Draw
 layoutStr lctx syn =
-  layoutSel (lctx ^. lctxPath) $
+  layoutSel path $
   collageWithMargin (Margin 4 4 4 4) $
   textWithCursor
     (syn ^. synStrContent)
     (\Paths{..} -> \case
         _ | not (syn ^. synStrEditMode) -> Nothing
-        _ | pathsSelection /= lctx ^. lctxPath -> Nothing
+        _ | pathsSelection /= path -> Nothing
         CursorInvisible -> Nothing
         CursorVisible -> Just . fromIntegral $ syn ^. synStrPosition)
+  where
+    path = buildPath (lctx ^. lctxPath)
 
 layoutRec :: LayoutCtx -> TyId -> SynRec -> Collage Draw
 layoutRec lctx tyId syn =
-  layoutSel (lctx ^. lctxPath) $
+  layoutSel path $
   collageWithMargin (Margin 4 4 4 4) $
     let
       layoutFields :: RecLayoutFn
@@ -526,13 +497,15 @@ layoutRec lctx tyId syn =
         Map.mapWithKey
           (\fieldId ->
             let
-              pathSegment = PathSegment fieldId
-              lctx' = lctx & lctxPath %~ snocPath pathSegment
+              pathSegment = PathSegmentRec fieldId
+              lctx' = lctx & lctxPath %~ (<> mkPathBuilder pathSegment)
             in
               layoutHoleyObject lctx')
           (syn ^. synRecFields)
     in
       layoutFields drawnFields
+  where
+    path = buildPath (lctx ^. lctxPath)
 
 --------------------------------------------------------------------------------
 ---- Editor - Selection
@@ -555,7 +528,7 @@ selectionPathRec syn =
     RecSelSelf _ -> emptyPath
     RecSelChild fieldId ->
       let
-        pathSegment = PathSegment fieldId
+        pathSegment = PathSegmentRec fieldId
         field = (syn ^. synRecFields) Map.! fieldId
         pathTail = selectionPathHoleyObject field
       in
@@ -576,7 +549,9 @@ updatePathRec :: Path -> SynRec -> SynRec
 updatePathRec path syn =
   case unconsPath path of
     Nothing -> syn & synRecSel %~ toRecSelSelf
-    Just (PathSegment fieldId, path') ->
+    Just (PathSegmentSeq _, _) ->
+      error "TODO (int-index): updatePathRec PathSegmentSeq"
+    Just (PathSegmentRec fieldId, path') ->
       case syn ^. synRecFields . at fieldId of
         Nothing -> syn
         Just a ->
@@ -912,12 +887,9 @@ sortByVisualOrder recLayoutFn fields = sortedFields
     -- unwrapPath . wrapPath = id
     wrapPath :: FieldId -> Path
     unwrapPath :: Path -> FieldId
-    wrapPath fieldId =
-      PathSegment fieldId `consPath` emptyPath
-    unwrapPath path =
-      case unconsPath path of
-        Nothing -> error "sortByVisualOrder: unwrapPath"
-        Just (PathSegment fieldId, _) -> fieldId
+    wrapPath fieldId = Path [PathSegmentRec fieldId]
+    unwrapPath (Path [PathSegmentRec fieldId]) = fieldId
+    unwrapPath _ = "sortByVisualOrder: unwrapPath"
 
 --------------------------------------------------------------------------------
 ---- Plugin

@@ -51,7 +51,7 @@ createMainWindow plugin esRef = do
       let
         lctx =
           NG.LayoutCtx
-            { _lctxPath = NG.emptyPath,
+            { _lctxPath = mempty @NG.PathBuilder,
               _lctxViewport = viewport,
               _lctxRecLayouts = plugin ^. NG.pluginRecLayouts }
         layout = NG.layoutEditorState lctx es
