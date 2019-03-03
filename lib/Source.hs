@@ -49,11 +49,13 @@ createMainWindow plugin esRef = do
     updateCanvas viewport = do
       es <- liftIO $ readIORef esRef
       let
+        tyEnv = plugin ^. NG.pluginTyEnv
         lctx =
           NG.LayoutCtx
             { _lctxPath = mempty @NG.PathBuilder,
               _lctxViewport = viewport,
-              _lctxRecLayouts = plugin ^. NG.pluginRecLayouts }
+              _lctxRecLayouts = plugin ^. NG.pluginRecLayouts,
+              _lctxEnvNameInfo = NG.buildEnvNameInfo tyEnv }
         layout = NG.layoutEditorState lctx es
       liftIO $ writeIORef layoutRef layout
       cursorVisible <- liftIO $ phaserCurrent cursorPhaser

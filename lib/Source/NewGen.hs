@@ -90,6 +90,7 @@ module Source.NewGen
   lctxPath,
   lctxViewport,
   lctxRecLayouts,
+  lctxEnvNameInfo,
 
   ReactCtx(..),
   rctxLastLayout,
@@ -102,6 +103,7 @@ module Source.NewGen
   mkDefaultValues,
   mkAllowedFieldTypes,
   mkRecMoveMaps,
+  buildEnvNameInfo,
 
   RecMoveMap,
 
@@ -155,6 +157,7 @@ import Source.Input
 import qualified Source.Input.KeyCode as KeyCode
 
 import Sdam.Core hiding (Value(ValueRec, ValueStr), Object(Object))
+import Sdam.NameInfo
 
 mkTyUnion :: [TyName] -> TyUnion
 mkTyUnion = TyUnion . Set.fromList
@@ -196,6 +199,18 @@ data SynRec =
     { _synRecFields :: Map FieldId (Holey Object),
       _synRecSel :: RecSel
     }
+
+atPath :: Path -> Holey Object -> Maybe TyId
+atPath (Path p0) = goHoleyObject p0
+  where
+    goHoleyObject _ Hole = Nothing
+    goHoleyObject p (Solid a) = goObject p a
+    goObject [] (Object tyId _) = Just tyId
+    goObject (ps:p) (Object _ v) = goValue ps p v
+    goValue (PathSegmentRec fieldId) p (ValueRec r) = goRec fieldId p r
+    goValue _ _ _ = Nothing
+    goRec fieldId p SynRec{_synRecFields=fields} =
+      Map.lookup fieldId fields >>= goHoleyObject p
 
 --------------------------------------------------------------------------------
 ---- Drawing
@@ -370,7 +385,8 @@ data LayoutCtx =
   LayoutCtx
     { _lctxPath :: PathBuilder,
       _lctxViewport :: Extents,
-      _lctxRecLayouts :: Map TyId RecLayoutFn
+      _lctxRecLayouts :: Map TyId RecLayoutFn,
+      _lctxEnvNameInfo :: EnvNameInfo
     }
 
 data ReactCtx =
@@ -431,6 +447,10 @@ guardInputEvent = guard <=< views rctxInputEvent
 ---- Editor - Layout
 --------------------------------------------------------------------------------
 
+pprPointer :: Offset -> Text
+pprPointer Offset{offsetX,offsetY} =
+  Text.pack $ (shows offsetX . (',':) . shows offsetY) ""
+
 layoutEditorState :: LayoutCtx -> EditorState -> Collage Draw
 layoutEditorState lctx es =
   withBars . centered $
@@ -438,8 +458,14 @@ layoutEditorState lctx es =
   where
     hoverBar = do
       guard $ es ^. esHoverBarEnabled
-      [textWithoutCursor (Text.pack . show $ es ^. esPointer)]
-    bars = concat @[] [hoverBar]
+      [textWithoutCursor (pprPointer $ es ^. esPointer)]
+    selectionBar = do
+      let
+        path = selectionPathEditorState es
+        el = atPath path (es ^. esExpr)
+        pathStr = pprPath (lctx ^. lctxEnvNameInfo) path el
+      [textWithoutCursor pathStr]
+    bars = concat @[] [hoverBar, selectionBar]
     withBars =
       case nonEmpty bars of
         Nothing -> id
@@ -576,6 +602,29 @@ runReactM m rctx a = runMaybeT (execStateT (runReaderT m rctx) a)
 
 newtype UndoFlag = UndoFlag Bool
 
+pprPath :: EnvNameInfo -> Path -> Maybe TyId -> Text
+pprPath nameInfo p0 tip = Text.pack ('/' : goPath p0 "")
+  where
+    goPath p =
+      case unconsPath p of
+        Nothing -> goTip
+        Just (ps, p') -> goPathSegment ps . ('/':) . goPath p'
+    goTip =
+      case tip of
+        Nothing -> id
+        Just tyId ->
+          case Map.lookup tyId (envNameInfoTypes nameInfo) of
+            Nothing -> shows tyId
+            Just tyName -> (tyNameStr tyName++)
+    goPathSegment ps =
+      case ps of
+        PathSegmentRec fieldId ->
+          case Map.lookup fieldId (envNameInfoFields nameInfo) of
+            Nothing -> shows fieldId
+            Just (tyName, fieldName) ->
+              (tyNameStr tyName++) . ('.':) . (fieldNameStr fieldName++)
+        PathSegmentSeq i -> shows (indexToInt i)
+
 reactEditorState :: ReactCtx -> EditorState -> IO (Maybe EditorState)
 reactEditorState = runReactM (asum handlers)
   where
@@ -596,7 +645,6 @@ reactEditorState = runReactM (asum handlers)
       Just p <-
         findPath pointer . collageElements offsetZero <$>
           view rctxLastLayout
-      liftIO (print p)
       modify (updatePathEditorState p)
     handleCtrl_h = do
       KeyPress [Control] keyCode <- view rctxInputEvent
