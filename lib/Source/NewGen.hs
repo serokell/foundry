@@ -96,17 +96,12 @@ module Source.NewGen
   lctxEnvNameInfo,
 
   ReactCtx(..),
-  rctxLastLayout,
+  rctxFindPath,
   rctxInputEvent,
   rctxNodeFactory,
   rctxDefaultValues,
   rctxAllowedFieldTypes,
   rctxRecMoveMaps,
-
-  mkDefaultValues,
-  mkAllowedFieldTypes,
-  mkRecMoveMaps,
-  buildEnvNameInfo,
 
   RecMoveMap,
 
@@ -119,6 +114,16 @@ module Source.NewGen
   pluginTyEnv,
   pluginRecLayouts,
   pluginNodeFactory,
+
+  PluginInfo(..),
+  pluginInfoTyEnv,
+  pluginInfoRecLayouts,
+  pluginInfoNodeFactory,
+  pluginInfoEnvNameInfo,
+  pluginInfoRecMoveMaps,
+  pluginInfoDefaultValues,
+  pluginInfoAllowedFieldTypes,
+  mkPluginInfo,
 
   -- * Utils
   inj,
@@ -296,10 +301,10 @@ horizontal = foldr1 @NonEmpty horizBaseline
 vertical = foldr1 @NonEmpty vertLeft
 
 findPath ::
-  Offset ->
   NonEmpty (Positioned Draw) ->
+  Offset ->
   Maybe Path
-findPath o c =
+findPath c o =
   getFirst $ foldMap (First . check) c
   where
     check (At o' d) = do
@@ -428,7 +433,7 @@ data LayoutCtx =
 
 data ReactCtx =
   ReactCtx
-    { _rctxLastLayout :: Collage Draw,
+    { _rctxFindPath :: Offset -> Maybe Path,
       _rctxInputEvent :: InputEvent,
       _rctxNodeFactory :: [NodeCreateFn],
       _rctxDefaultValues :: Map TyId Value,
@@ -679,10 +684,7 @@ reactEditorState = runReactM (asum handlers)
       esPointer .= Offset (fromIntegral x) (fromIntegral y)
     handleButtonPress = do
       ButtonPress <- view rctxInputEvent
-      pointer <- use esPointer
-      Just p <-
-        findPath pointer . collageElements offsetZero <$>
-          view rctxLastLayout
+      Just p <- view rctxFindPath <*> use esPointer
       modify (updatePathEditorState p)
     handleCtrl_h = do
       KeyPress [Control] keyCode <- view rctxInputEvent
@@ -988,6 +990,7 @@ sortByVisualOrder recLayoutFn fields = sortedFields
 ---- Plugin
 --------------------------------------------------------------------------------
 
+-- | A plugin as specified by the user.
 data Plugin =
   Plugin
     { _pluginTyEnv :: Env,
@@ -995,4 +998,38 @@ data Plugin =
       _pluginNodeFactory :: [NodeCreateFn]
     }
 
+-- | A plugin as consumed by the editor, with additional information
+-- derived from the user specification.
+data PluginInfo =
+  PluginInfo
+    { _pluginInfoTyEnv :: Env,
+      _pluginInfoRecLayouts :: Map TyId RecLayoutFn,
+      _pluginInfoNodeFactory :: [NodeCreateFn],
+      _pluginInfoEnvNameInfo :: EnvNameInfo,
+      _pluginInfoRecMoveMaps :: Map TyId RecMoveMap,
+      _pluginInfoDefaultValues :: Map TyId Value,
+      _pluginInfoAllowedFieldTypes :: Map FieldId (Set TyId)
+    }
+
 makeLenses ''Plugin
+makeLenses ''PluginInfo
+
+mkPluginInfo :: Plugin -> PluginInfo
+mkPluginInfo plugin =
+  PluginInfo
+    { _pluginInfoTyEnv = tyEnv,
+      _pluginInfoRecLayouts = recLayouts,
+      _pluginInfoNodeFactory = nodeFactory,
+      _pluginInfoEnvNameInfo = envNameInfo,
+      _pluginInfoRecMoveMaps = recMoveMaps,
+      _pluginInfoDefaultValues = defaultValues,
+      _pluginInfoAllowedFieldTypes = allowedFieldTypes
+    }
+  where
+    tyEnv = plugin ^. pluginTyEnv
+    recLayouts = plugin ^. pluginRecLayouts
+    nodeFactory = plugin ^. pluginNodeFactory
+    envNameInfo = buildEnvNameInfo tyEnv
+    recMoveMaps = mkRecMoveMaps tyEnv recLayouts
+    defaultValues = mkDefaultValues tyEnv recMoveMaps
+    allowedFieldTypes = mkAllowedFieldTypes tyEnv

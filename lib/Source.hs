@@ -17,14 +17,15 @@ import qualified Source.NewGen as NG
 
 runGUI :: NG.Plugin -> IO NG.EditorState -> IO ()
 runGUI plugin initEditorState = do
+  let pluginInfo = NG.mkPluginInfo plugin
   _ <- Gtk.initGUI
   esRef <- initEditorState >>= newIORef
-  window <- createMainWindow plugin esRef
+  window <- createMainWindow pluginInfo esRef
   Gtk.widgetShowAll window
   Gtk.mainGUI
 
-createMainWindow :: NG.Plugin -> IORef NG.EditorState -> IO Gtk.Window
-createMainWindow plugin esRef = do
+createMainWindow :: NG.PluginInfo -> IORef NG.EditorState -> IO Gtk.Window
+createMainWindow pluginInfo esRef = do
   window <- Gtk.windowNew
   _ <- Gtk.on window Gtk.objectDestroy Gtk.mainQuit
 
@@ -46,24 +47,22 @@ createMainWindow plugin esRef = do
     (\_ -> Gtk.postGUIAsync (Gtk.widgetQueueDraw canvas))
 
   let
-
     updateCanvas viewport = do
       es <- liftIO $ readIORef esRef
       let
-        tyEnv = plugin ^. NG.pluginTyEnv
         lctx =
           NG.LayoutCtx
             { _lctxPath = mempty @NG.PathBuilder,
               _lctxViewport = viewport,
               _lctxPrecBordersAlways = es ^. NG.esPrecBordersAlways,
-              _lctxRecLayouts = plugin ^. NG.pluginRecLayouts,
-              _lctxEnvNameInfo = NG.buildEnvNameInfo tyEnv }
+              _lctxRecLayouts = pluginInfo ^. NG.pluginInfoRecLayouts,
+              _lctxEnvNameInfo = pluginInfo ^. NG.pluginInfoEnvNameInfo }
         layout = NG.layoutEditorState lctx es
       liftIO $ writeIORef layoutRef layout
       cursorVisible <- liftIO $ phaserCurrent cursorPhaser
       let
         elements = collageElements offsetZero layout
-        pathsCursor = NG.findPath (es ^. NG.esPointer) elements
+        pathsCursor = NG.findPath elements (es ^. NG.esPointer)
         pathsSelection = NG.selectionPathEditorState es
       renderElements
         (NG.withDrawCtx NG.Paths{..} cursorVisible)
@@ -73,17 +72,15 @@ createMainWindow plugin esRef = do
       es <- readIORef esRef
       layout <- readIORef layoutRef
       let
-        tyEnv = plugin ^. NG.pluginTyEnv
-        recLayouts = plugin ^. NG.pluginRecLayouts
-        recMoveMaps = NG.mkRecMoveMaps tyEnv recLayouts
+        elements = collageElements offsetZero layout
         rctx =
           NG.ReactCtx
-            { _rctxLastLayout = layout,
+            { _rctxFindPath = NG.findPath elements,
               _rctxInputEvent = inputEvent,
-              _rctxNodeFactory = plugin ^. NG.pluginNodeFactory,
-              _rctxDefaultValues = NG.mkDefaultValues tyEnv recMoveMaps,
-              _rctxAllowedFieldTypes = NG.mkAllowedFieldTypes tyEnv,
-              _rctxRecMoveMaps = recMoveMaps }
+              _rctxNodeFactory = pluginInfo ^. NG.pluginInfoNodeFactory,
+              _rctxDefaultValues = pluginInfo ^. NG.pluginInfoDefaultValues,
+              _rctxAllowedFieldTypes = pluginInfo ^. NG.pluginInfoAllowedFieldTypes,
+              _rctxRecMoveMaps = pluginInfo ^. NG.pluginInfoRecMoveMaps }
       mEs' <- NG.reactEditorState rctx es
       case mEs' of
         Nothing -> do
