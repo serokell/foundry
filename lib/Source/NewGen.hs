@@ -50,6 +50,7 @@ module Source.NewGen
   withDrawCtx,
   Draw(..),
   toCairoElementDraw,
+  toCairoElementsDraw,
   rect,
   rgb,
   textline,
@@ -77,6 +78,7 @@ module Source.NewGen
   esExpr,
   esPointer,
   esHoverBarEnabled,
+  esPrecBordersAlways,
   esUndo,
   esRedo,
 
@@ -89,6 +91,7 @@ module Source.NewGen
   LayoutCtx(..),
   lctxPath,
   lctxViewport,
+  lctxPrecBordersAlways,
   lctxRecLayouts,
   lctxEnvNameInfo,
 
@@ -129,6 +132,7 @@ import Data.Set (Set)
 import Data.Text (Text)
 import Numeric.Natural (Natural)
 import Data.Ord
+import Data.Either
 import Data.List as List
 import Data.List.NonEmpty as NonEmpty hiding (cons)
 import Control.Applicative
@@ -136,7 +140,7 @@ import Control.Monad
 import Control.Monad.Reader
 import Control.Monad.State
 import Control.Monad.Trans.Maybe
-import Control.Lens as Lens
+import Control.Lens as Lens hiding (elements)
 import Data.Monoid
 import Data.Foldable
 import Inj
@@ -252,6 +256,19 @@ toCairoElementDraw = \case
   DrawCairoElement ce -> ce
   DrawEmbed ce _ -> ce
 
+toCairoElementsDraw :: [Positioned Draw] -> [Positioned (CairoElement DrawCtx)]
+toCairoElementsDraw elements =
+    -- We want DrawEmbed elements to have a higher z-index,
+    -- so we place them after all other elements.
+    otherElements ++ embedElements
+  where
+    toEither (At o el) =
+      case el of
+        DrawEmbed ce _ -> Left (At o ce)
+        DrawCairoElement ce -> Right (At o ce)
+    (embedElements, otherElements) =
+      partitionEithers (List.map toEither elements)
+
 instance g ~ DrawCtx => Inj (CairoElement g) Draw where
   inj = DrawCairoElement
 
@@ -305,33 +322,51 @@ textWithoutCursor :: Text -> Collage Draw
 textWithoutCursor t =
   textWithCursor t (\_ _ -> Nothing)
 
+outline ::
+  Inj (CairoElement DrawCtx) a =>
+  Natural -> DrawCtx (Maybe Color) -> Extents -> a
+outline width = rect (inj (pure width :: LRTB Natural))
+
 punct :: Text -> Collage Draw
 punct t = textline light1 ubuntuFont t (\_ _ -> Nothing)
 
 ubuntuFont :: Font
 ubuntuFont = Font "Ubuntu" 12 FontWeightNormal
 
-layoutSel :: Path -> Collage Draw -> Collage Draw
-layoutSel path =
-    active path
-  . (decorateMargin . DecorationBelow) (\e ->
-      let
-        mkColor color = DrawCtx $ \Paths{..} _ ->
-          if pathsSelection == path then inj color else nothing
-        background = rect nothing (mkColor dark3) e
-        border = rect (lrtb @Natural 1 1 1 1) (mkColor (rgb 94 80 134)) e
-      in
-        collageCompose offsetZero background border)
+newtype PrecBorder = PrecBorder Bool
 
-active :: Path -> Collage Draw -> Collage Draw
-active p = (decorateMargin . DecorationAbove) (collageSingleton . activeZone)
+layoutSel :: PrecBorder -> Path -> Collage Draw -> Collage Draw
+layoutSel (PrecBorder precBorder) path =
+  collageWithMargin (mkMargin (marginWidth - precBorderWidth)) .
+  active outlineWidth path .
+  (decorateMargin . DecorationAbove) (outline outlineWidth borderColor) .
+  (if precBorder then precedenceBorder precBorderWidth else id) .
+  collageWithMargin (mkMargin marginWidth)
   where
-    mkColor (Just path) | path == p = Just light1
+    mkMargin a = Margin a a a a
+    (marginWidth, precBorderWidth) = (4, 1)
+    outlineWidth = 2
+    borderColor = mkColor (rgb 94 80 134)
+    mkColor color = DrawCtx $ \Paths{..} _ ->
+      if pathsSelection == path then color else nothing
+
+precedenceBorder :: Natural -> Collage Draw -> Collage Draw
+precedenceBorder width a =
+  substrate
+    (lrtbMargin (collageMargin a))
+    (outline width (inj dark2))
+    a
+
+lrtbMargin :: Margin -> LRTB Natural
+lrtbMargin (Margin l r t b) = lrtb l r t b
+
+active :: Natural -> Path -> Collage Draw -> Collage Draw
+active width p =
+    (decorateMargin . DecorationAbove) (collageSingleton . activeZone)
+  where
+    mkColor (Just path) | path == p = Just (rgb 255 127 80)
     mkColor _ = Nothing
-    outlineRect =
-      rect
-        (lrtb @Natural 1 1 1 1)
-        (DrawCtx $ \Paths{..} _ -> mkColor pathsCursor)
+    outlineRect = outline width (DrawCtx $ \Paths{..} _ -> mkColor pathsCursor)
     activeZone e = DrawEmbed (outlineRect e) p
 
 --------------------------------------------------------------------------------
@@ -368,6 +403,7 @@ data EditorState =
     { _esExpr :: Holey Object,
       _esPointer :: Offset,
       _esHoverBarEnabled :: Bool,
+      _esPrecBordersAlways :: Bool,
       _esUndo :: [Holey Object],
       _esRedo :: [Holey Object]
     }
@@ -385,6 +421,7 @@ data LayoutCtx =
   LayoutCtx
     { _lctxPath :: PathBuilder,
       _lctxViewport :: Extents,
+      _lctxPrecBordersAlways :: Bool,
       _lctxRecLayouts :: Map TyId RecLayoutFn,
       _lctxEnvNameInfo :: EnvNameInfo
     }
@@ -481,12 +518,12 @@ layoutEditorState lctx es =
 layoutHoleyObject :: LayoutCtx -> Holey Object -> Collage Draw
 layoutHoleyObject lctx = \case
   Hole ->
-    layoutSel path $
-    collageWithMargin (Margin 4 4 4 4) $
+    layoutSel precBorder path $
     punct "_"
   Solid syn ->
     layoutObject lctx syn
   where
+    precBorder = PrecBorder (lctx ^. lctxPrecBordersAlways)
     path = buildPath (lctx ^. lctxPath)
 
 layoutObject :: LayoutCtx -> Object -> Collage Draw
@@ -496,8 +533,7 @@ layoutObject lctx = \case
 
 layoutStr :: LayoutCtx -> SynStr -> Collage Draw
 layoutStr lctx syn =
-  layoutSel path $
-  collageWithMargin (Margin 4 4 4 4) $
+  layoutSel precBorder path $
   textWithCursor
     (syn ^. synStrContent)
     (\Paths{..} -> \case
@@ -506,31 +542,32 @@ layoutStr lctx syn =
         CursorInvisible -> Nothing
         CursorVisible -> Just . fromIntegral $ syn ^. synStrPosition)
   where
+    precBorder = PrecBorder (lctx ^. lctxPrecBordersAlways)
     path = buildPath (lctx ^. lctxPath)
 
 layoutRec :: LayoutCtx -> TyId -> SynRec -> Collage Draw
 layoutRec lctx tyId syn =
-  layoutSel path $
-  collageWithMargin (Margin 4 4 4 4) $
-    let
-      layoutFields :: RecLayoutFn
-      layoutFields =
-        case Map.lookup tyId (lctx ^. lctxRecLayouts) of
-          Nothing -> \_ -> punct (Text.pack (show tyId))
-          Just fn -> fn
-      drawnFields :: Map FieldId (Collage Draw)
-      drawnFields =
-        Map.mapWithKey
-          (\fieldId ->
-            let
-              pathSegment = PathSegmentRec fieldId
-              lctx' = lctx & lctxPath %~ (<> mkPathBuilder pathSegment)
-            in
-              layoutHoleyObject lctx')
-          (syn ^. synRecFields)
-    in
-      layoutFields drawnFields
+  layoutSel precBorder path $
+  let
+    layoutFields :: RecLayoutFn
+    layoutFields =
+      case Map.lookup tyId (lctx ^. lctxRecLayouts) of
+        Nothing -> \_ -> punct (Text.pack (show tyId))
+        Just fn -> fn
+    drawnFields :: Map FieldId (Collage Draw)
+    drawnFields =
+      Map.mapWithKey
+        (\fieldId ->
+          let
+            pathSegment = PathSegmentRec fieldId
+            lctx' = lctx & lctxPath %~ (<> mkPathBuilder pathSegment)
+          in
+            layoutHoleyObject lctx')
+        (syn ^. synRecFields)
+  in
+    layoutFields drawnFields
   where
+    precBorder = PrecBorder (lctx ^. lctxPrecBordersAlways)
     path = buildPath (lctx ^. lctxPath)
 
 --------------------------------------------------------------------------------
@@ -633,6 +670,7 @@ reactEditorState = runReactM (asum handlers)
       [ handlePointerMotion,
         handleButtonPress,
         handleCtrl_h,
+        handleCtrl_b,
         handleRedirectExpr,
         handleCtrl_z,
         handleCtrl_r ]
@@ -650,6 +688,10 @@ reactEditorState = runReactM (asum handlers)
       KeyPress [Control] keyCode <- view rctxInputEvent
       guard $ keyLetter 'h' keyCode
       esHoverBarEnabled %= not
+    handleCtrl_b = do
+      KeyPress [Control] keyCode <- view rctxInputEvent
+      guard $ keyLetter 'b' keyCode
+      esPrecBordersAlways %= not
     handleCtrl_z = do
       KeyPress [Control] keyCode <- view rctxInputEvent
       guard $ keyLetter 'z' keyCode
@@ -929,8 +971,11 @@ sortByVisualOrder recLayoutFn fields = sortedFields
             fieldId <- Set.toList fields ]
     templateItem :: FieldId -> Collage Draw
     templateItem fieldId =
-      active (wrapPath fieldId) $
-      textWithoutCursor "M" -- 1em
+      collageSingleton $
+      DrawEmbed
+        (rect nothing nothing
+          (collageExtents (textWithoutCursor "M"))) -- 1em
+        (wrapPath fieldId)
     -- TODO (int-index): avoid conversion to Path
     -- unwrapPath . wrapPath = id
     wrapPath :: FieldId -> Path

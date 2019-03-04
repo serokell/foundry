@@ -4,7 +4,6 @@ import Data.Map (Map)
 import qualified Data.Map as Map
 import Data.Void
 import Data.Function (on)
-import Numeric.Natural (Natural)
 import System.Exit (die)
 
 import Data.Text (Text)
@@ -111,19 +110,10 @@ recLayoutPi m =
     body = m Map.! mkFieldId "Pi" "body"
 
 recLayoutApp :: RecLayoutFn
-recLayoutApp m =
-  horizontal
-  [ fn,
-    substrate
-      (lrtbMargin (collageMargin arg))
-      (rect (lrtb @Natural 1 1 1 1) (inj dark2))
-      arg ]
+recLayoutApp m = horizontal [ fn, arg ]
   where
     fn = m Map.! mkFieldId "App" "fn"
     arg = m Map.! mkFieldId "App" "arg"
-
-lrtbMargin :: Margin -> LRTB Natural
-lrtbMargin (Margin l r t b) = lrtb l r t b
 
 recLayoutStar :: RecLayoutFn
 recLayoutStar _ = punct "★"
@@ -157,7 +147,7 @@ foundryInitEditorState =
       case M.P.exprFromText et of
         Left err -> die (show err)
         Right e -> M.I.load Nothing e
-    return $ EditorState expr offsetZero False [] []
+    return $ EditorState expr offsetZero False False [] []
 
 synImportExpr :: M.Expr Void -> Holey Object
 synImportExpr = Solid . \case

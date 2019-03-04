@@ -7,6 +7,7 @@ import Control.Monad.IO.Class
 import qualified Graphics.UI.Gtk as Gtk
 import Data.IORef
 import Control.Lens ((^.))
+import Data.Foldable (toList)
 
 import Slay.Core
 import Slay.Cairo.Render
@@ -54,6 +55,7 @@ createMainWindow plugin esRef = do
           NG.LayoutCtx
             { _lctxPath = mempty @NG.PathBuilder,
               _lctxViewport = viewport,
+              _lctxPrecBordersAlways = es ^. NG.esPrecBordersAlways,
               _lctxRecLayouts = plugin ^. NG.pluginRecLayouts,
               _lctxEnvNameInfo = NG.buildEnvNameInfo tyEnv }
         layout = NG.layoutEditorState lctx es
@@ -61,12 +63,11 @@ createMainWindow plugin esRef = do
       cursorVisible <- liftIO $ phaserCurrent cursorPhaser
       let
         elements = collageElements offsetZero layout
-        toCairoElements = (fmap.fmap) NG.toCairoElementDraw
         pathsCursor = NG.findPath (es ^. NG.esPointer) elements
         pathsSelection = NG.selectionPathEditorState es
       renderElements
         (NG.withDrawCtx NG.Paths{..} cursorVisible)
-        (toCairoElements elements)
+        (NG.toCairoElementsDraw (toList elements))
 
     handleInputEvent inputEvent = do
       es <- readIORef esRef
