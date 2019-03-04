@@ -5,6 +5,8 @@ import qualified Data.Map as Map
 import Data.Void
 import Data.Function (on)
 import System.Exit (die)
+import System.Environment (getArgs)
+import Data.String (fromString)
 
 import Data.Text (Text)
 import qualified Data.Text as Text
@@ -18,8 +20,11 @@ import qualified Morte.Parser as M.P
 import qualified Morte.Import as M.I
 
 main :: IO ()
-main =
-  runGUI foundryPlugin foundryInitEditorState
+main = do
+  et <- getArgs >>= \case
+    [et] -> return et
+    _ -> die "Usage: foundry EXPR"
+  runGUI foundryPlugin (foundryInitEditorState et)
 
 foundryPlugin :: Plugin
 foundryPlugin =
@@ -139,15 +144,13 @@ foundryNodeFactory =
     NodeCreateFn (shiftChar 'S') (mkTyId "Star"),
     NodeCreateFn (shiftChar 'B') (mkTyId "Box") ]
 
-foundryInitEditorState :: IO EditorState
-foundryInitEditorState =
-  do
-    let et = "λ(x : ∀(Nat : *) → ∀(Succ : Nat → Nat) → ∀(Zero : Nat) → Nat) → x (∀(Bool : *) → ∀(True : Bool) → ∀(False : Bool) → Bool) (λ(x : ∀(Bool : *) → ∀(True : Bool) → ∀(False : Bool) → Bool) → x (∀(Bool : *) → ∀(True : Bool) → ∀(False : Bool) → Bool) (λ(Bool : *) → λ(True : Bool) → λ(False : Bool) → False) (λ(Bool : *) → λ(True : Bool) → λ(False : Bool) → True)) (λ(Bool : *) → λ(True : Bool) → λ(False : Bool) → True)"
-    expr <- synImportExpr <$>
-      case M.P.exprFromText et of
-        Left err -> die (show err)
-        Right e -> M.I.load Nothing e
-    return $ EditorState expr offsetZero False False [] []
+foundryInitEditorState :: String -> IO EditorState
+foundryInitEditorState et = do
+  expr <- synImportExpr <$>
+    case M.P.exprFromText (fromString et) of
+      Left err -> die (show err)
+      Right e -> M.I.load Nothing e
+  return $ EditorState expr offsetZero False False [] []
 
 synImportExpr :: M.Expr Void -> Holey Object
 synImportExpr = Solid . \case

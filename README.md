@@ -21,5 +21,5 @@ Implementation status:
 
 ```
 $ nix-shell --pure
-$ cabal new-run exe:foundry
+$ cabal v2-run -- foundry "./expr.morte"
 ```
