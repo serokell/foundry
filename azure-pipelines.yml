@@ -1,7 +1,7 @@
 jobs:
   - job: Linux
     pool:
-      vmImage: 'Ubuntu 16.04'
+      vmImage: 'ubuntu-16.04'
     steps:
     - script: |
         sudo add-apt-repository ppa:hvr/ghc
@@ -12,6 +12,24 @@ jobs:
       displayName: 'Prepare system'
     - script: |
         export PATH=/opt/ghc/bin:$HOME/.cabal/bin:$PATH
+        cabal v2-update
+        cabal v2-build
+        cabal v2-exec which foundry
+      displayName: 'Build'
+  - job: macOS
+    pool:
+      vmImage: 'macOS-10.13'
+    steps:
+    - script: |
+        brew install gtk+3 pkgconfig
+        mkdir -p $HOME/.ghcup/bin && curl https://raw.githubusercontent.com/haskell/ghcup/master/ghcup > $HOME/.ghcup/bin/ghcup && chmod +x $HOME/.ghcup/bin/ghcup
+        export PATH="$HOME/.cabal/bin:$HOME/.ghcup/bin:$PATH"
+        ghcup install 8.4.4
+        ghcup set 8.4.4
+        ghcup install-cabal
+      displayName: 'Prepare system'
+    - script: |
+        export PATH="$HOME/.cabal/bin:$HOME/.ghcup/bin:$PATH"
         cabal v2-update
         cabal v2-build
         cabal v2-exec which foundry
