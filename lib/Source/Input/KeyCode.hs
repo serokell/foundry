@@ -1,3 +1,4 @@
+{-# LANGUAGE PatternSynonyms #-}
 {-# OPTIONS -Wno-missing-pattern-synonym-signatures #-}
 
 module Source.Input.KeyCode where

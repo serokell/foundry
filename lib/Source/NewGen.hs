@@ -1,3 +1,12 @@
+{-# LANGUAGE LambdaCase #-}
+{-# LANGUAGE NamedFieldPuns #-}
+{-# LANGUAGE TypeApplications #-}
+{-# LANGUAGE MultiParamTypeClasses #-}
+{-# LANGUAGE GADTs #-}
+{-# LANGUAGE FlexibleInstances #-}
+{-# LANGUAGE FlexibleContexts #-}
+{-# LANGUAGE DeriveFunctor #-}
+{-# LANGUAGE OverloadedStrings #-}
 {-# LANGUAGE TemplateHaskell #-}
 
 module Source.NewGen
@@ -352,7 +361,7 @@ layoutSel (PrecBorder precBorder) path =
     (marginWidth, precBorderWidth) = (4, 1)
     outlineWidth = 2
     borderColor = mkColor (rgb 94 80 134)
-    mkColor color = DrawCtx $ \Paths{..} _ ->
+    mkColor color = DrawCtx $ \Paths{pathsSelection} _ ->
       if pathsSelection == path then color else nothing
 
 precedenceBorder :: Natural -> Collage Draw -> Collage Draw
@@ -371,7 +380,7 @@ active width p =
   where
     mkColor (Just path) | path == p = Just (rgb 255 127 80)
     mkColor _ = Nothing
-    outlineRect = outline width (DrawCtx $ \Paths{..} _ -> mkColor pathsCursor)
+    outlineRect = outline width (DrawCtx $ \Paths{pathsCursor} _ -> mkColor pathsCursor)
     activeZone e = DrawEmbed (outlineRect e) p
 
 --------------------------------------------------------------------------------
@@ -541,7 +550,7 @@ layoutStr lctx syn =
   layoutSel precBorder path $
   textWithCursor
     (syn ^. synStrContent)
-    (\Paths{..} -> \case
+    (\Paths{pathsSelection} -> \case
         _ | not (syn ^. synStrEditMode) -> Nothing
         _ | pathsSelection /= path -> Nothing
         CursorInvisible -> Nothing

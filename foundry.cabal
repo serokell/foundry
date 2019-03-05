@@ -33,34 +33,6 @@ library
   hs-source-dirs:      lib
 
   default-language:    Haskell2010
-  default-extensions:  LambdaCase
-                       MultiWayIf
-                       TupleSections
-                       RecordWildCards
-                       RankNTypes
-                       ScopedTypeVariables
-                       OverloadedStrings
-                       OverloadedLists
-                       TypeFamilies
-                       GADTs
-                       PatternSynonyms
-                       ViewPatterns
-                       ConstraintKinds
-                       DataKinds
-                       PolyKinds
-                       TypeOperators
-                       StandaloneDeriving
-                       MultiParamTypeClasses
-                       FlexibleInstances
-                       FlexibleContexts
-                       UndecidableInstances
-                       TypeApplications
-                       DerivingStrategies
-                       NamedFieldPuns
-                       DeriveFunctor
-                       DeriveFoldable
-                       DeriveTraversable
-                       GeneralizedNewtypeDeriving
 
   ghc-options:         -Wall -threaded -O2
   ghc-prof-options:    -fprof-auto
@@ -86,32 +58,6 @@ executable foundry
   hs-source-dirs:      src
 
   default-language:    Haskell2010
-  default-extensions:  LambdaCase
-                       ScopedTypeVariables
-                       OverloadedStrings
-                       OverloadedLists
-                       RecordWildCards
-                       RankNTypes
-                       GADTs
-                       TypeFamilies
-                       ConstraintKinds
-                       TypeOperators
-                       DataKinds
-                       PolyKinds
-                       UndecidableInstances
-                       InstanceSigs
-                       EmptyCase
-                       FunctionalDependencies
-                       MultiWayIf
-                       ViewPatterns
-                       StandaloneDeriving
-                       DefaultSignatures
-                       TemplateHaskell
-                       FlexibleInstances
-                       FlexibleContexts
-                       GeneralizedNewtypeDeriving
-                       TypeInType
-                       TypeApplications
 
   ghc-options:         -Wall -threaded -O2
   ghc-prof-options:    -fprof-auto

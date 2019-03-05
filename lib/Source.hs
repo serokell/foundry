@@ -1,3 +1,8 @@
+{-# LANGUAGE LambdaCase #-}
+{-# LANGUAGE NamedFieldPuns #-}
+{-# LANGUAGE TypeApplications #-}
+{-# LANGUAGE ScopedTypeVariables #-}
+
 module Source
     ( runGUI
     ) where
@@ -52,11 +57,11 @@ createMainWindow pluginInfo esRef = do
       let
         lctx =
           NG.LayoutCtx
-            { _lctxPath = mempty @NG.PathBuilder,
-              _lctxViewport = viewport,
-              _lctxPrecBordersAlways = es ^. NG.esPrecBordersAlways,
-              _lctxRecLayouts = pluginInfo ^. NG.pluginInfoRecLayouts,
-              _lctxEnvNameInfo = pluginInfo ^. NG.pluginInfoEnvNameInfo }
+            { NG._lctxPath = mempty @NG.PathBuilder,
+              NG._lctxViewport = viewport,
+              NG._lctxPrecBordersAlways = es ^. NG.esPrecBordersAlways,
+              NG._lctxRecLayouts = pluginInfo ^. NG.pluginInfoRecLayouts,
+              NG._lctxEnvNameInfo = pluginInfo ^. NG.pluginInfoEnvNameInfo }
         layout = NG.layoutEditorState lctx es
       liftIO $ writeIORef layoutRef layout
       cursorVisible <- liftIO $ phaserCurrent cursorPhaser
@@ -64,8 +69,9 @@ createMainWindow pluginInfo esRef = do
         elements = collageElements offsetZero layout
         pathsCursor = NG.findPath elements (es ^. NG.esPointer)
         pathsSelection = NG.selectionPathEditorState es
+        paths = NG.Paths {NG.pathsCursor, NG.pathsSelection}
       renderElements
-        (NG.withDrawCtx NG.Paths{..} cursorVisible)
+        (NG.withDrawCtx paths cursorVisible)
         (NG.toCairoElementsDraw (toList elements))
 
     handleInputEvent inputEvent = do
@@ -75,12 +81,12 @@ createMainWindow pluginInfo esRef = do
         elements = collageElements offsetZero layout
         rctx =
           NG.ReactCtx
-            { _rctxFindPath = NG.findPath elements,
-              _rctxInputEvent = inputEvent,
-              _rctxNodeFactory = pluginInfo ^. NG.pluginInfoNodeFactory,
-              _rctxDefaultValues = pluginInfo ^. NG.pluginInfoDefaultValues,
-              _rctxAllowedFieldTypes = pluginInfo ^. NG.pluginInfoAllowedFieldTypes,
-              _rctxRecMoveMaps = pluginInfo ^. NG.pluginInfoRecMoveMaps }
+            { NG._rctxFindPath = NG.findPath elements,
+              NG._rctxInputEvent = inputEvent,
+              NG._rctxNodeFactory = pluginInfo ^. NG.pluginInfoNodeFactory,
+              NG._rctxDefaultValues = pluginInfo ^. NG.pluginInfoDefaultValues,
+              NG._rctxAllowedFieldTypes = pluginInfo ^. NG.pluginInfoAllowedFieldTypes,
+              NG._rctxRecMoveMaps = pluginInfo ^. NG.pluginInfoRecMoveMaps }
       mEs' <- NG.reactEditorState rctx es
       case mEs' of
         Nothing -> do
