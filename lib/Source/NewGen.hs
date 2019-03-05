@@ -50,31 +50,19 @@ module Source.NewGen
   PathBuilder,
 
   -- * Draw
-  module Slay.Core,
-  module Slay.Combinators,
+  offsetZero,
   CursorBlink(..),
   blink,
   Paths(..),
   DrawCtx(..),
   withDrawCtx,
-  Draw(..),
-  toCairoElementDraw,
+  Draw,
   toCairoElementsDraw,
-  rect,
-  rgb,
-  textline,
-  line,
-  centerOf,
-  horizontal,
-  vertical,
+  Layout(..),
+  RecLayout(..),
+  RecLayoutFn(..),
+  field,
   findPath,
-  dark1, dark2, dark3, light1, white, -- colors
-  textWithCursor,
-  textWithoutCursor,
-  punct,
-  ubuntuFont,
-  layoutSel,
-  active,
 
   -- * React
   keyLetter,
@@ -94,8 +82,6 @@ module Source.NewGen
   NodeCreateFn(..),
   ncfCheckInputEvent,
   ncfTyId,
-
-  RecLayoutFn,
 
   LayoutCtx(..),
   lctxPath,
@@ -157,6 +143,8 @@ import Control.Monad.Trans.Maybe
 import Control.Lens as Lens hiding (elements)
 import Data.Monoid
 import Data.Foldable
+import Data.Function (on)
+import Data.String
 import Inj
 import Inj.Base ()
 
@@ -286,7 +274,9 @@ toCairoElementsDraw elements =
 instance g ~ DrawCtx => Inj (CairoElement g) Draw where
   inj = DrawCairoElement
 
-textline :: Color -> Font -> Text -> (Paths -> CursorBlink -> Maybe Natural) -> Collage Draw
+textline ::
+  Inj (CairoElement DrawCtx) a =>
+  Color -> Font -> Text -> (Paths -> CursorBlink -> Maybe Natural) -> a
 textline color font str cur = text font (inj color) str (DrawCtx cur)
 
 line :: Color -> Natural -> Collage Draw
@@ -305,9 +295,52 @@ centerOf (Extents vacantWidth vacantHeight) collage =
         top = excessHeight1,
         bottom = excessHeight2 }
 
-horizontal, vertical :: NonEmpty (Collage Draw) -> Collage Draw
-horizontal = foldr1 @NonEmpty horizBaseline
-vertical = foldr1 @NonEmpty vertLeft
+infixr 6 <+>
+infixr 1 -/-
+
+class IsString a => Layout a where
+  (<+>) :: a -> a -> a
+  (-/-) :: a -> a -> a
+
+newtype RecLayout = RecLayout { unRecLayout :: TyId -> Collage Draw }
+
+instance IsString RecLayout where
+  fromString s = RecLayout $ punct (fromString s)
+
+instance Layout RecLayout where
+  RecLayout a <+> RecLayout b =
+    RecLayout $ \tyId ->
+      let
+        a' = a tyId
+        b' = b tyId
+      in
+        horizBaseline a' b'
+  RecLayout a -/- RecLayout b =
+    RecLayout $ \tyId ->
+      let
+        a' = a tyId
+        b' = b tyId
+        maxWidth = (max `on` widthOf) a' b'
+      in
+        a' `vertLeft` line light1 maxWidth `vertLeft` b'
+
+newtype RecLayoutFn =
+  RecLayoutFn { appRecLayoutFn :: Map FieldId (Collage Draw) -> RecLayout }
+
+instance IsString RecLayoutFn where
+  fromString s = RecLayoutFn (\_ -> fromString s)
+
+instance Layout RecLayoutFn where
+  RecLayoutFn a <+> RecLayoutFn b =
+    RecLayoutFn (\m -> a m <+> b m)
+  RecLayoutFn a -/- RecLayoutFn b =
+    RecLayoutFn (\m -> a m -/- b m)
+
+field :: FieldName -> RecLayoutFn
+field fieldName =
+  RecLayoutFn $ \m ->
+  RecLayout $ \tyId ->
+    m Map.! mkFieldId' tyId fieldName
 
 findPath ::
   NonEmpty (Positioned Draw) ->
@@ -322,10 +355,9 @@ findPath c o =
       guard $ insideBox (o', e) o
       Just p
 
-dark1, dark2, dark3, light1, white :: Color
+dark1, dark2, light1, white :: Color
 dark1  = RGB 41 41 41
 dark2  = RGB 77 77 77
-dark3  = RGB 64 64 64
 light1 = RGB 179 179 179
 white  = RGB 255 255 255
 
@@ -341,7 +373,9 @@ outline ::
   Natural -> DrawCtx (Maybe Color) -> Extents -> a
 outline width = rect (inj (pure width :: LRTB Natural))
 
-punct :: Text -> Collage Draw
+punct ::
+  Inj (CairoElement DrawCtx) a =>
+  Text -> a
 punct t = textline light1 ubuntuFont t (\_ _ -> Nothing)
 
 ubuntuFont :: Font
@@ -427,9 +461,6 @@ data NodeCreateFn =
     { _ncfCheckInputEvent :: InputEvent -> Bool,
       _ncfTyId :: TyId
     }
-
-type RecLayoutFn =
-  Map FieldId (Collage Draw) -> Collage Draw
 
 data LayoutCtx =
   LayoutCtx
@@ -521,7 +552,7 @@ layoutEditorState lctx es =
       case nonEmpty bars of
         Nothing -> id
         Just bars' -> \c ->
-          collageCompose offsetZero c (vertical bars')
+          collageCompose offsetZero c (foldr1 @NonEmpty vertLeft bars')
     centered c =
       let
         padding = centerOf (lctx ^. lctxViewport) c
@@ -566,7 +597,7 @@ layoutRec lctx tyId syn =
     layoutFields :: RecLayoutFn
     layoutFields =
       case Map.lookup tyId (lctx ^. lctxRecLayouts) of
-        Nothing -> \_ -> punct (Text.pack (show tyId))
+        Nothing -> fromString (show tyId)
         Just fn -> fn
     drawnFields :: Map FieldId (Collage Draw)
     drawnFields =
@@ -576,10 +607,10 @@ layoutRec lctx tyId syn =
             pathSegment = PathSegmentRec fieldId
             lctx' = lctx & lctxPath %~ (<> mkPathBuilder pathSegment)
           in
-            layoutHoleyObject lctx')
+            \obj -> layoutHoleyObject lctx' obj)
         (syn ^. synRecFields)
   in
-    layoutFields drawnFields
+    unRecLayout (appRecLayoutFn layoutFields drawnFields) tyId
   where
     precBorder = PrecBorder (lctx ^. lctxPrecBordersAlways)
     path = buildPath (lctx ^. lctxPath)
@@ -606,8 +637,8 @@ selectionPathRec syn =
     RecSelChild fieldId ->
       let
         pathSegment = PathSegmentRec fieldId
-        field = (syn ^. synRecFields) Map.! fieldId
-        pathTail = selectionPathHoleyObject field
+        recField = (syn ^. synRecFields) Map.! fieldId
+        pathTail = selectionPathHoleyObject recField
       in
         consPath pathSegment pathTail
 
@@ -943,10 +974,10 @@ mkRecMoveMaps env recLayouts =
         fieldNames = Map.keysSet fields
         fieldIds = Set.map (mkFieldId tyName) fieldNames
       in
-        (tyId, mkRecMoveMap layoutFn fieldIds)
+        (tyId, mkRecMoveMap tyId layoutFn fieldIds)
 
-mkRecMoveMap :: RecLayoutFn -> Set FieldId -> RecMoveMap
-mkRecMoveMap recLayoutFn fieldIds =
+mkRecMoveMap :: TyId -> RecLayoutFn -> Set FieldId -> RecMoveMap
+mkRecMoveMap tyId recLayoutFn fieldIds =
   RecMoveMap
     { rmmFieldOrder = sortedFieldIds,
       rmmForward = seqToMoveMap sortedFieldIds,
@@ -957,10 +988,10 @@ mkRecMoveMap recLayoutFn fieldIds =
         [] -> Map.empty
         _:xs' -> Map.fromList (List.zip xs xs')
     sortedFieldIds =
-      sortByVisualOrder recLayoutFn fieldIds
+      sortByVisualOrder tyId recLayoutFn fieldIds
 
-sortByVisualOrder :: RecLayoutFn -> Set FieldId -> [FieldId]
-sortByVisualOrder recLayoutFn fields = sortedFields
+sortByVisualOrder :: TyId -> RecLayoutFn -> Set FieldId -> [FieldId]
+sortByVisualOrder tyId recLayoutFn fields = sortedFields
   where
     sortedFields :: [FieldId]
     sortedFields = (List.map snd . List.sortBy comparingOffset) templatePaths
@@ -973,10 +1004,10 @@ sortByVisualOrder recLayoutFn fields = sortedFields
       [ (offset, unwrapPath path) |
         At offset (DrawEmbed _ path) <-
           NonEmpty.toList $
-            collageElements offsetZero templateCollage ]
-    templateCollage :: Collage Draw
-    templateCollage =
-      recLayoutFn $
+            collageElements offsetZero (unRecLayout templateLayout tyId) ]
+    templateLayout :: RecLayout
+    templateLayout =
+      appRecLayoutFn recLayoutFn $
         Map.fromList
           [ (fieldId, templateItem fieldId) |
             fieldId <- Set.toList fields ]

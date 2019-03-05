@@ -7,7 +7,6 @@ module Main where
 import Data.Map (Map)
 import qualified Data.Map as Map
 import Data.Void
-import Data.Function (on)
 import System.Exit (die)
 import System.Environment (getArgs)
 import Data.String (fromString)
@@ -85,57 +84,19 @@ foundryRecLayouts :: Map TyId RecLayoutFn
 foundryRecLayouts = Map.fromList
   [ (mkTyId "Lam", recLayoutLam),
     (mkTyId "Pi", recLayoutPi),
-    (mkTyId "App", recLayoutApp),
-    (mkTyId "Star", recLayoutStar),
-    (mkTyId "Box", recLayoutBox),
-    (mkTyId "IVar", recLayoutIVar) ]
-
-recLayoutLam :: RecLayoutFn
-recLayoutLam m =
-  let
-    maxWidth =
-      (max `on` extentsW . collageExtents) header body
-    header =
-      horizontal [ punct "λ", arg, punct ":", ty ]
-  in
-    vertical [ header, line light1 maxWidth, body ]
+    (mkTyId "App", field "fn" <+> field "arg"),
+    (mkTyId "Star", "★"),
+    (mkTyId "Box", "□"),
+    (mkTyId "IVar", field "var" <+> "@" <+> field "index") ]
   where
-    arg = m Map.! mkFieldId "Lam" "var"
-    ty = m Map.! mkFieldId "Lam" "ty"
-    body = m Map.! mkFieldId "Lam" "body"
-
-recLayoutPi :: RecLayoutFn
-recLayoutPi m =
-  let
-    maxWidth =
-      (max `on` extentsW . collageExtents) header body
-    header =
-      horizontal [ punct "Π", arg, punct ":", ty ]
-  in
-    vertical [ header, line light1 maxWidth, body ]
-  where
-    arg = m Map.! mkFieldId "Pi" "var"
-    ty = m Map.! mkFieldId "Pi" "ty"
-    body = m Map.! mkFieldId "Pi" "body"
-
-recLayoutApp :: RecLayoutFn
-recLayoutApp m = horizontal [ fn, arg ]
-  where
-    fn = m Map.! mkFieldId "App" "fn"
-    arg = m Map.! mkFieldId "App" "arg"
-
-recLayoutStar :: RecLayoutFn
-recLayoutStar _ = punct "★"
-
-recLayoutBox :: RecLayoutFn
-recLayoutBox _ = punct "□"
-
-recLayoutIVar :: RecLayoutFn
-recLayoutIVar m =
-  horizontal [ var, punct "@", index ]
-  where
-    var = m Map.! mkFieldId "IVar" "var"
-    index = m Map.! mkFieldId "IVar" "index"
+    recLayoutLam =
+      "λ" <+> field "var" <+> ":" <+> field "ty"
+      -/-
+      field "body"
+    recLayoutPi =
+      "Π" <+> field "var" <+> ":" <+> field "ty"
+      -/-
+      field "body"
 
 foundryNodeFactory :: [NodeCreateFn]
 foundryNodeFactory =
