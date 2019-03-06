@@ -115,7 +115,7 @@ foundryInitEditorState et = do
     case M.P.exprFromText (fromString et) of
       Left err -> die (show err)
       Right e -> M.I.load Nothing e
-  return $ EditorState expr offsetZero False False [] []
+  return $ EditorState expr offsetZero False False WritingDirectionLTR [] []
 
 synImportExpr :: M.Expr Void -> Holey Object
 synImportExpr = Solid . \case

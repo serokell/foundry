@@ -61,6 +61,7 @@ module Source.NewGen
   Layout(..),
   RecLayout(..),
   RecLayoutFn(..),
+  WritingDirection(..),
   field,
   findPath,
 
@@ -76,6 +77,7 @@ module Source.NewGen
   esPointer,
   esHoverBarEnabled,
   esPrecBordersAlways,
+  esWritingDirection,
   esUndo,
   esRedo,
 
@@ -89,6 +91,7 @@ module Source.NewGen
   lctxPrecBordersAlways,
   lctxRecLayouts,
   lctxEnvNameInfo,
+  lctxWritingDirection,
 
   ReactCtx(..),
   rctxFindPath,
@@ -295,6 +298,8 @@ centerOf (Extents vacantWidth vacantHeight) collage =
         top = excessHeight1,
         bottom = excessHeight2 }
 
+data WritingDirection = WritingDirectionLTR | WritingDirectionRTL
+
 infixr 6 <+>
 infixr 1 -/-
 
@@ -302,27 +307,33 @@ class IsString a => Layout a where
   (<+>) :: a -> a -> a
   (-/-) :: a -> a -> a
 
-newtype RecLayout = RecLayout { unRecLayout :: TyId -> Collage Draw }
+newtype RecLayout = RecLayout { unRecLayout :: TyId -> WritingDirection -> Collage Draw }
 
 instance IsString RecLayout where
   fromString s = RecLayout $ punct (fromString s)
 
 instance Layout RecLayout where
   RecLayout a <+> RecLayout b =
-    RecLayout $ \tyId ->
+    RecLayout $ \tyId wd ->
       let
-        a' = a tyId
-        b' = b tyId
+        a' = a tyId wd
+        b' = b tyId wd
+        f = case wd of
+          WritingDirectionLTR -> horizBaseline
+          WritingDirectionRTL -> flip horizBaseline
       in
-        horizBaseline a' b'
+        f a' b'
   RecLayout a -/- RecLayout b =
-    RecLayout $ \tyId ->
+    RecLayout $ \tyId wd ->
       let
-        a' = a tyId
-        b' = b tyId
+        a' = a tyId wd
+        b' = b tyId wd
+        f = case wd of
+          WritingDirectionLTR -> vertLeft
+          WritingDirectionRTL -> vertRight
         maxWidth = (max `on` widthOf) a' b'
       in
-        a' `vertLeft` line light1 maxWidth `vertLeft` b'
+        a' `f` line light1 maxWidth `f` b'
 
 newtype RecLayoutFn =
   RecLayoutFn { appRecLayoutFn :: Map FieldId (Collage Draw) -> RecLayout }
@@ -339,7 +350,7 @@ instance Layout RecLayoutFn where
 field :: FieldName -> RecLayoutFn
 field fieldName =
   RecLayoutFn $ \m ->
-  RecLayout $ \tyId ->
+  RecLayout $ \tyId _ ->
     m Map.! mkFieldId' tyId fieldName
 
 findPath ::
@@ -452,6 +463,7 @@ data EditorState =
       _esPointer :: Offset,
       _esHoverBarEnabled :: Bool,
       _esPrecBordersAlways :: Bool,
+      _esWritingDirection :: WritingDirection,
       _esUndo :: [Holey Object],
       _esRedo :: [Holey Object]
     }
@@ -468,7 +480,8 @@ data LayoutCtx =
       _lctxViewport :: Extents,
       _lctxPrecBordersAlways :: Bool,
       _lctxRecLayouts :: Map TyId RecLayoutFn,
-      _lctxEnvNameInfo :: EnvNameInfo
+      _lctxEnvNameInfo :: EnvNameInfo,
+      _lctxWritingDirection :: WritingDirection
     }
 
 data ReactCtx =
@@ -609,8 +622,10 @@ layoutRec lctx tyId syn =
           in
             \obj -> layoutHoleyObject lctx' obj)
         (syn ^. synRecFields)
+    wd :: WritingDirection
+    wd = lctx ^. lctxWritingDirection
   in
-    unRecLayout (appRecLayoutFn layoutFields drawnFields) tyId
+    unRecLayout (appRecLayoutFn layoutFields drawnFields) tyId wd
   where
     precBorder = PrecBorder (lctx ^. lctxPrecBordersAlways)
     path = buildPath (lctx ^. lctxPath)
@@ -716,6 +731,7 @@ reactEditorState = runReactM (asum handlers)
         handleButtonPress,
         handleCtrl_h,
         handleCtrl_b,
+        handleCtrl_w,
         handleRedirectExpr,
         handleCtrl_z,
         handleCtrl_r ]
@@ -734,6 +750,12 @@ reactEditorState = runReactM (asum handlers)
       KeyPress [Control] keyCode <- view rctxInputEvent
       guard $ keyLetter 'b' keyCode
       esPrecBordersAlways %= not
+    handleCtrl_w = do
+      KeyPress [Control] keyCode <- view rctxInputEvent
+      guard $ keyLetter 'w' keyCode
+      esWritingDirection %= \case
+        WritingDirectionLTR -> WritingDirectionRTL
+        WritingDirectionRTL -> WritingDirectionLTR
     handleCtrl_z = do
       KeyPress [Control] keyCode <- view rctxInputEvent
       guard $ keyLetter 'z' keyCode
@@ -1004,7 +1026,7 @@ sortByVisualOrder tyId recLayoutFn fields = sortedFields
       [ (offset, unwrapPath path) |
         At offset (DrawEmbed _ path) <-
           NonEmpty.toList $
-            collageElements offsetZero (unRecLayout templateLayout tyId) ]
+            collageElements offsetZero (unRecLayout templateLayout tyId WritingDirectionLTR) ]
     templateLayout :: RecLayout
     templateLayout =
       appRecLayoutFn recLayoutFn $

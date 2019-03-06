@@ -61,7 +61,8 @@ createMainWindow pluginInfo esRef = do
               NG._lctxViewport = viewport,
               NG._lctxPrecBordersAlways = es ^. NG.esPrecBordersAlways,
               NG._lctxRecLayouts = pluginInfo ^. NG.pluginInfoRecLayouts,
-              NG._lctxEnvNameInfo = pluginInfo ^. NG.pluginInfoEnvNameInfo }
+              NG._lctxEnvNameInfo = pluginInfo ^. NG.pluginInfoEnvNameInfo,
+              NG._lctxWritingDirection = es ^. NG.esWritingDirection }
         layout = NG.layoutEditorState lctx es
       liftIO $ writeIORef layoutRef layout
       cursorVisible <- liftIO $ phaserCurrent cursorPhaser
