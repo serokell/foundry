@@ -593,13 +593,28 @@ layoutStr :: LayoutCtx -> SynStr -> Collage Draw
 layoutStr lctx syn =
   layoutSel precBorder path $
   textWithCursor
-    (syn ^. synStrContent)
+    content
     (\Paths{pathsSelection} -> \case
         _ | not (syn ^. synStrEditMode) -> Nothing
         _ | pathsSelection /= path -> Nothing
         CursorInvisible -> Nothing
         CursorVisible -> Just . fromIntegral $ syn ^. synStrPosition)
   where
+    content
+      | WritingDirectionRTL <- lctx ^. lctxWritingDirection =
+        case syn ^. synStrContent of
+          "List"  -> "רשימה"
+          "Nil"   -> "ריק"
+          "Cons"  -> "הבא"
+          "head"  -> "התחלה"
+          "tail"  -> "סוף"
+          "Bool"  -> "בוליאני"
+          "True"  -> "אמת"
+          "False" -> "שקר"
+          "a"     -> "איי"
+          "xs"    -> "איקסים"
+          s       -> s
+      | otherwise = syn ^. synStrContent
     precBorder = PrecBorder (lctx ^. lctxPrecBordersAlways)
     path = buildPath (lctx ^. lctxPath)
 
