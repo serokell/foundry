@@ -80,22 +80,22 @@ foundryTyEnv =
           "Var",
           "IVar" ]
 
-foundryRecLayouts :: Map TyId RecLayoutFn
+foundryRecLayouts :: Map TyId ALayoutFn
 foundryRecLayouts = Map.fromList
   [ (mkTyId "Lam", recLayoutLam),
     (mkTyId "Pi", recLayoutPi),
-    (mkTyId "App", field "fn" <+> field "arg"),
+    (mkTyId "App", field "fn" <> field "arg"),
     (mkTyId "Star", "★"),
     (mkTyId "Box", "□"),
-    (mkTyId "IVar", field "var" <+> "@" <+> field "index") ]
+    (mkTyId "IVar", field "var" <> "@" <> field "index") ]
   where
     recLayoutLam =
-      "λ" <+> field "var" <+> ":" <+> field "ty"
-      -/-
+      "λ" <> field "var" <> ":" <> field "ty"
+      `vsep`
       field "body"
     recLayoutPi =
-      "Π" <+> field "var" <+> ":" <+> field "ty"
-      -/-
+      "Π" <> field "var" <> ":" <> field "ty"
+      `vsep`
       field "body"
 
 foundryNodeFactory :: [NodeCreateFn]

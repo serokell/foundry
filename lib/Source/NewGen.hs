@@ -7,6 +7,7 @@
 {-# LANGUAGE FlexibleContexts #-}
 {-# LANGUAGE DeriveFunctor #-}
 {-# LANGUAGE OverloadedStrings #-}
+{-# LANGUAGE RankNTypes #-}
 {-# LANGUAGE TemplateHaskell #-}
 
 module Source.NewGen
@@ -59,10 +60,8 @@ module Source.NewGen
   Draw,
   toCairoElementsDraw,
   Layout(..),
-  RecLayout(..),
-  RecLayoutFn(..),
+  ALayoutFn(..),
   WritingDirection(..),
-  field,
   findPath,
 
   -- * React
@@ -134,7 +133,6 @@ import Data.Map (Map)
 import Data.Set (Set)
 import Data.Text (Text)
 import Numeric.Natural (Natural)
-import Data.Ord
 import Data.Either
 import Data.List as List
 import Data.List.NonEmpty as NonEmpty hiding (cons)
@@ -300,58 +298,65 @@ centerOf (Extents vacantWidth vacantHeight) collage =
 
 data WritingDirection = WritingDirectionLTR | WritingDirectionRTL
 
-infixr 6 <+>
-infixr 1 -/-
+infixr 1 `vsep`
 
-class IsString a => Layout a where
-  (<+>) :: a -> a -> a
-  (-/-) :: a -> a -> a
+class (IsString a, Semigroup a) => Layout a where
+  vsep :: a -> a -> a
+  field :: FieldName -> a
 
-newtype RecLayout = RecLayout { unRecLayout :: TyId -> WritingDirection -> Collage Draw }
+newtype RecLayoutFn =
+  RecLayoutFn {
+    appRecLayoutFn ::
+      Map FieldId (Collage Draw) ->
+      TyId ->
+      WritingDirection ->
+      Collage Draw
+  }
 
-instance IsString RecLayout where
-  fromString s = RecLayout $ punct (fromString s)
+instance IsString RecLayoutFn where
+  fromString s = RecLayoutFn (punct (fromString s))
 
-instance Layout RecLayout where
-  RecLayout a <+> RecLayout b =
-    RecLayout $ \tyId wd ->
+instance Semigroup RecLayoutFn where
+  RecLayoutFn a <> RecLayoutFn b =
+    RecLayoutFn $ \m tyId wd ->
       let
-        a' = a tyId wd
-        b' = b tyId wd
+        a' = a m tyId wd
+        b' = b m tyId wd
         f = case wd of
           WritingDirectionLTR -> horizBaseline
           WritingDirectionRTL -> flip horizBaseline
       in
         f a' b'
-  RecLayout a -/- RecLayout b =
-    RecLayout $ \tyId wd ->
+
+instance Layout RecLayoutFn where
+  RecLayoutFn a `vsep` RecLayoutFn b =
+    RecLayoutFn $ \m tyId wd ->
       let
-        a' = a tyId wd
-        b' = b tyId wd
+        a' = a m tyId wd
+        b' = b m tyId wd
         f = case wd of
           WritingDirectionLTR -> vertLeft
           WritingDirectionRTL -> vertRight
         maxWidth = (max `on` widthOf) a' b'
       in
         a' `f` line light1 maxWidth `f` b'
+  field fieldName =
+    RecLayoutFn $ \m tyId _ ->
+      m Map.! mkFieldId' tyId fieldName
 
-newtype RecLayoutFn =
-  RecLayoutFn { appRecLayoutFn :: Map FieldId (Collage Draw) -> RecLayout }
+newtype ALayoutFn = ALayoutFn (forall a. Layout a => a)
 
-instance IsString RecLayoutFn where
-  fromString s = RecLayoutFn (\_ -> fromString s)
+instance IsString ALayoutFn where
+  fromString s = ALayoutFn (fromString s)
 
-instance Layout RecLayoutFn where
-  RecLayoutFn a <+> RecLayoutFn b =
-    RecLayoutFn (\m -> a m <+> b m)
-  RecLayoutFn a -/- RecLayoutFn b =
-    RecLayoutFn (\m -> a m -/- b m)
+instance Semigroup ALayoutFn where
+  ALayoutFn a <> ALayoutFn b =
+    ALayoutFn (a <> b)
 
-field :: FieldName -> RecLayoutFn
-field fieldName =
-  RecLayoutFn $ \m ->
-  RecLayout $ \tyId _ ->
-    m Map.! mkFieldId' tyId fieldName
+instance Layout ALayoutFn where
+  ALayoutFn a `vsep` ALayoutFn b =
+    ALayoutFn (a `vsep` b)
+  field fieldName = ALayoutFn (field fieldName)
 
 findPath ::
   NonEmpty (Positioned Draw) ->
@@ -479,7 +484,7 @@ data LayoutCtx =
     { _lctxPath :: PathBuilder,
       _lctxViewport :: Extents,
       _lctxPrecBordersAlways :: Bool,
-      _lctxRecLayouts :: Map TyId RecLayoutFn,
+      _lctxRecLayouts :: Map TyId ALayoutFn,
       _lctxEnvNameInfo :: EnvNameInfo,
       _lctxWritingDirection :: WritingDirection
     }
@@ -611,7 +616,7 @@ layoutRec lctx tyId syn =
     layoutFields =
       case Map.lookup tyId (lctx ^. lctxRecLayouts) of
         Nothing -> fromString (show tyId)
-        Just fn -> fn
+        Just (ALayoutFn fn) -> fn
     drawnFields :: Map FieldId (Collage Draw)
     drawnFields =
       Map.mapWithKey
@@ -625,7 +630,7 @@ layoutRec lctx tyId syn =
     wd :: WritingDirection
     wd = lctx ^. lctxWritingDirection
   in
-    unRecLayout (appRecLayoutFn layoutFields drawnFields) tyId wd
+    appRecLayoutFn layoutFields drawnFields tyId wd
   where
     precBorder = PrecBorder (lctx ^. lctxPrecBordersAlways)
     path = buildPath (lctx ^. lctxPath)
@@ -983,23 +988,12 @@ mkAllowedFieldTypes env =
       (tyName, TyRec fields) <- Map.toList (envMap env),
       (fieldName, TyUnion tys) <- Map.toList fields ]
 
-mkRecMoveMaps :: Env -> Map TyId RecLayoutFn -> Map TyId RecMoveMap
-mkRecMoveMaps env recLayouts =
-  Map.fromList
-    [ mkItem tyName fields |
-      (tyName, TyRec fields) <- Map.toList (envMap env) ]
-  where
-    mkItem tyName fields =
-      let
-        tyId = mkTyId tyName
-        layoutFn = recLayouts Map.! tyId
-        fieldNames = Map.keysSet fields
-        fieldIds = Set.map (mkFieldId tyName) fieldNames
-      in
-        (tyId, mkRecMoveMap tyId layoutFn fieldIds)
+mkRecMoveMaps :: Map TyId ALayoutFn -> Map TyId RecMoveMap
+mkRecMoveMaps recLayouts =
+  Map.mapWithKey mkRecMoveMap recLayouts
 
-mkRecMoveMap :: TyId -> RecLayoutFn -> Set FieldId -> RecMoveMap
-mkRecMoveMap tyId recLayoutFn fieldIds =
+mkRecMoveMap :: TyId -> ALayoutFn -> RecMoveMap
+mkRecMoveMap tyId recLayoutFn =
   RecMoveMap
     { rmmFieldOrder = sortedFieldIds,
       rmmForward = seqToMoveMap sortedFieldIds,
@@ -1010,43 +1004,29 @@ mkRecMoveMap tyId recLayoutFn fieldIds =
         [] -> Map.empty
         _:xs' -> Map.fromList (List.zip xs xs')
     sortedFieldIds =
-      sortByVisualOrder tyId recLayoutFn fieldIds
+      sortByVisualOrder tyId recLayoutFn
 
-sortByVisualOrder :: TyId -> RecLayoutFn -> Set FieldId -> [FieldId]
-sortByVisualOrder tyId recLayoutFn fields = sortedFields
+newtype VisualFieldList = VisualFieldList (TyId -> [FieldId])
+
+instance IsString VisualFieldList where
+  fromString _ = VisualFieldList (const [])
+
+instance Semigroup VisualFieldList where
+  VisualFieldList a <> VisualFieldList b =
+    VisualFieldList (a <> b)
+
+instance Layout VisualFieldList where
+  VisualFieldList a `vsep` VisualFieldList b =
+    VisualFieldList (a <> b)
+  field fieldName =
+    VisualFieldList $
+      \tyId -> [mkFieldId' tyId fieldName]
+
+sortByVisualOrder :: TyId -> ALayoutFn -> [FieldId]
+sortByVisualOrder tyId recLayoutFn = mkSortedFields tyId
   where
-    sortedFields :: [FieldId]
-    sortedFields = (List.map snd . List.sortBy comparingOffset) templatePaths
-      where
-        comparingOffset =
-          comparing (offsetY . fst) <>
-          comparing (offsetX . fst)
-    templatePaths :: [(Offset, FieldId)]
-    templatePaths =
-      [ (offset, unwrapPath path) |
-        At offset (DrawEmbed _ path) <-
-          NonEmpty.toList $
-            collageElements offsetZero (unRecLayout templateLayout tyId WritingDirectionLTR) ]
-    templateLayout :: RecLayout
-    templateLayout =
-      appRecLayoutFn recLayoutFn $
-        Map.fromList
-          [ (fieldId, templateItem fieldId) |
-            fieldId <- Set.toList fields ]
-    templateItem :: FieldId -> Collage Draw
-    templateItem fieldId =
-      collageSingleton $
-      DrawEmbed
-        (rect nothing nothing
-          (collageExtents (textWithoutCursor "M"))) -- 1em
-        (wrapPath fieldId)
-    -- TODO (int-index): avoid conversion to Path
-    -- unwrapPath . wrapPath = id
-    wrapPath :: FieldId -> Path
-    unwrapPath :: Path -> FieldId
-    wrapPath fieldId = Path [PathSegmentRec fieldId]
-    unwrapPath (Path [PathSegmentRec fieldId]) = fieldId
-    unwrapPath _ = "sortByVisualOrder: unwrapPath"
+    mkSortedFields :: TyId -> [FieldId]
+    ALayoutFn (VisualFieldList mkSortedFields) = recLayoutFn
 
 --------------------------------------------------------------------------------
 ---- Plugin
@@ -1056,7 +1036,7 @@ sortByVisualOrder tyId recLayoutFn fields = sortedFields
 data Plugin =
   Plugin
     { _pluginTyEnv :: Env,
-      _pluginRecLayouts :: Map TyId RecLayoutFn,
+      _pluginRecLayouts :: Map TyId ALayoutFn,
       _pluginNodeFactory :: [NodeCreateFn]
     }
 
@@ -1065,7 +1045,7 @@ data Plugin =
 data PluginInfo =
   PluginInfo
     { _pluginInfoTyEnv :: Env,
-      _pluginInfoRecLayouts :: Map TyId RecLayoutFn,
+      _pluginInfoRecLayouts :: Map TyId ALayoutFn,
       _pluginInfoNodeFactory :: [NodeCreateFn],
       _pluginInfoEnvNameInfo :: EnvNameInfo,
       _pluginInfoRecMoveMaps :: Map TyId RecMoveMap,
@@ -1092,6 +1072,6 @@ mkPluginInfo plugin =
     recLayouts = plugin ^. pluginRecLayouts
     nodeFactory = plugin ^. pluginNodeFactory
     envNameInfo = buildEnvNameInfo tyEnv
-    recMoveMaps = mkRecMoveMaps tyEnv recLayouts
+    recMoveMaps = mkRecMoveMaps recLayouts
     defaultValues = mkDefaultValues tyEnv recMoveMaps
     allowedFieldTypes = mkAllowedFieldTypes tyEnv

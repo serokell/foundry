@@ -10,7 +10,7 @@ dev/watch:
 	watchman-make -p '*.cabal' 'lib/**/*.hs' 'src/**/*.hs' -t dev/build
 
 dev/run:
-	cabal v2-run
+	cabal v2-run -- foundry "./expr.morte"
 
 tags:
 	fast-tags -R lib src
