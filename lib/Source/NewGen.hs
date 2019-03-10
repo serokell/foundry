@@ -59,7 +59,10 @@ module Source.NewGen
   withDrawCtx,
   Draw,
   toCairoElementsDraw,
-  Layout(..),
+  PrecPredicate,
+  precAllow,
+  Layout(vsep, field),
+  noPrec,
   ALayoutFn(..),
   WritingDirection(..),
   findPath,
@@ -152,6 +155,7 @@ import Inj.Base ()
 import qualified Data.Set as Set
 import qualified Data.Map as Map
 import qualified Data.Text as Text
+import qualified Data.Char as Char
 
 import Slay.Core
 import Slay.Cairo.Prim.Color
@@ -302,47 +306,54 @@ infixr 1 `vsep`
 
 class (IsString a, Semigroup a) => Layout a where
   vsep :: a -> a -> a
-  field :: FieldName -> a
+  field :: FieldName -> PrecPredicate -> a
+
+noPrec :: PrecPredicate
+noPrec = PrecPredicate (const (PrecBorder True))
 
 newtype RecLayoutFn =
   RecLayoutFn {
     appRecLayoutFn ::
-      Map FieldId (Collage Draw) ->
+      Map FieldId (PrecPredicate -> (PrecUnenclosed, Collage Draw)) ->
       TyId ->
       WritingDirection ->
-      Collage Draw
+      (PrecUnenclosed, Collage Draw)
   }
 
 instance IsString RecLayoutFn where
-  fromString s = RecLayoutFn (punct (fromString s))
+  fromString s =
+    RecLayoutFn $ \_ _ _ ->
+      (mempty, punct (fromString s))
 
 instance Semigroup RecLayoutFn where
   RecLayoutFn a <> RecLayoutFn b =
     RecLayoutFn $ \m tyId wd ->
       let
-        a' = a m tyId wd
-        b' = b m tyId wd
+        (aUnenclosed, a') = a m tyId wd
+        (bUnenclosed, b') = b m tyId wd
         f = case wd of
           WritingDirectionLTR -> horizBaseline
           WritingDirectionRTL -> flip horizBaseline
       in
+        (,) (aUnenclosed <> bUnenclosed) $
         f a' b'
 
 instance Layout RecLayoutFn where
   RecLayoutFn a `vsep` RecLayoutFn b =
     RecLayoutFn $ \m tyId wd ->
       let
-        a' = a m tyId wd
-        b' = b m tyId wd
+        (aUnenclosed, a') = a m tyId wd
+        (bUnenclosed, b') = b m tyId wd
         f = case wd of
           WritingDirectionLTR -> vertLeft
           WritingDirectionRTL -> vertRight
         maxWidth = (max `on` widthOf) a' b'
       in
+        (,) (aUnenclosed <> bUnenclosed) $
         a' `f` line light1 maxWidth `f` b'
-  field fieldName =
+  field fieldName precPredicate =
     RecLayoutFn $ \m tyId _ ->
-      m Map.! mkFieldId' tyId fieldName
+      (m Map.! mkFieldId' tyId fieldName) precPredicate
 
 newtype ALayoutFn = ALayoutFn (forall a. Layout a => a)
 
@@ -356,7 +367,8 @@ instance Semigroup ALayoutFn where
 instance Layout ALayoutFn where
   ALayoutFn a `vsep` ALayoutFn b =
     ALayoutFn (a `vsep` b)
-  field fieldName = ALayoutFn (field fieldName)
+  field fieldName precPredicate =
+    ALayoutFn (field fieldName precPredicate)
 
 findPath ::
   NonEmpty (Positioned Draw) ->
@@ -397,7 +409,42 @@ punct t = textline light1 ubuntuFont t (\_ _ -> Nothing)
 ubuntuFont :: Font
 ubuntuFont = Font "Ubuntu" 12 FontWeightNormal
 
+-- | Is a precedence border needed?
 newtype PrecBorder = PrecBorder Bool
+
+instance Semigroup PrecBorder where
+  PrecBorder a <> PrecBorder b = PrecBorder (a || b)
+
+instance Monoid PrecBorder where
+  mempty = PrecBorder False
+
+-- | Layouts not enclosed by a precedence border.
+newtype PrecUnenclosed = PrecUnenclosed (Set TyId)
+
+instance Semigroup PrecUnenclosed where
+  PrecUnenclosed a <> PrecUnenclosed b =
+    PrecUnenclosed (Set.union a b)
+
+instance Monoid PrecUnenclosed where
+  mempty = PrecUnenclosed Set.empty
+
+addUnenclosed :: TyId -> PrecUnenclosed -> PrecUnenclosed
+addUnenclosed tyId (PrecUnenclosed s) =
+  PrecUnenclosed (Set.insert tyId s)
+
+guardUnenclosed :: PrecBorder -> PrecUnenclosed -> PrecUnenclosed
+guardUnenclosed (PrecBorder True) = const mempty
+guardUnenclosed (PrecBorder False) = id
+
+newtype PrecPredicate =
+  PrecPredicate { appPrecPredicate :: PrecUnenclosed -> PrecBorder }
+
+precAllow :: Set TyId -> PrecPredicate
+precAllow allowed =
+  PrecPredicate $ \(PrecUnenclosed unenclosed) ->
+    PrecBorder $
+      -- Need a border unless all of unenclosed layouts are allowed.
+      not (unenclosed `Set.isSubsetOf` allowed)
 
 layoutSel :: PrecBorder -> Path -> Collage Draw -> Collage Draw
 layoutSel (PrecBorder precBorder) path =
@@ -553,9 +600,10 @@ pprPointer Offset{offsetX,offsetY} =
 
 layoutEditorState :: LayoutCtx -> EditorState -> Collage Draw
 layoutEditorState lctx es =
-  withBars . centered $
-    layoutHoleyObject lctx (es ^. esExpr)
+  (withBars . centered) collage
   where
+    (_, collage) = layoutHoleyObject lctx (es ^. esExpr) precPredicate
+    precPredicate = PrecPredicate (const (PrecBorder False))
     hoverBar = do
       guard $ es ^. esHoverBarEnabled
       [textWithoutCursor (pprPointer $ es ^. esPointer)]
@@ -578,61 +626,74 @@ layoutEditorState lctx es =
       in
         substrate padding backgroundRect c
 
-layoutHoleyObject :: LayoutCtx -> Holey Object -> Collage Draw
+layoutHoleyObject :: LayoutCtx -> Holey Object -> PrecPredicate -> (PrecUnenclosed, Collage Draw)
 layoutHoleyObject lctx = \case
-  Hole ->
-    layoutSel precBorder path $
-    punct "_"
-  Solid syn ->
-    layoutObject lctx syn
+  Hole -> \_precPredicate -> layoutHole lctx
+  Solid syn -> layoutObject lctx syn
+
+layoutHole :: LayoutCtx -> (PrecUnenclosed, Collage Draw)
+layoutHole lctx =
+  (,) (mempty @PrecUnenclosed) $
+  layoutSel precBorder path $
+  punct "_"
   where
     precBorder = PrecBorder (lctx ^. lctxPrecBordersAlways)
     path = buildPath (lctx ^. lctxPath)
 
-layoutObject :: LayoutCtx -> Object -> Collage Draw
+layoutObject :: LayoutCtx -> Object -> PrecPredicate -> (PrecUnenclosed, Collage Draw)
 layoutObject lctx = \case
   Object tyId (ValueRec syn) -> layoutRec lctx tyId syn
-  Object _ (ValueStr syn) -> layoutStr lctx syn
+  Object _ (ValueStr syn) -> \_precPredicate -> layoutStr lctx syn
 
-layoutStr :: LayoutCtx -> SynStr -> Collage Draw
+layoutStr :: LayoutCtx -> SynStr -> (PrecUnenclosed, Collage Draw)
 layoutStr lctx syn =
+  (,) (mempty @PrecUnenclosed) $
   layoutSel precBorder path $
   textWithCursor
-    (syn ^. synStrContent)
+    content
     (\Paths{pathsSelection} -> \case
         _ | not (syn ^. synStrEditMode) -> Nothing
         _ | pathsSelection /= path -> Nothing
         CursorInvisible -> Nothing
         CursorVisible -> Just . fromIntegral $ syn ^. synStrPosition)
   where
-    precBorder = PrecBorder (lctx ^. lctxPrecBordersAlways)
+    precBorder =
+      PrecBorder (lctx ^. lctxPrecBordersAlways) <>
+      PrecBorder (Text.any Char.isSpace content)
     path = buildPath (lctx ^. lctxPath)
+    content = syn ^. synStrContent
 
-layoutRec :: LayoutCtx -> TyId -> SynRec -> Collage Draw
-layoutRec lctx tyId syn =
+layoutRec :: LayoutCtx -> TyId -> SynRec -> PrecPredicate -> (PrecUnenclosed, Collage Draw)
+layoutRec lctx tyId syn precPredicate =
+  (,) (guardUnenclosed precBorder precUnenclosed') $
   layoutSel precBorder path $
-  let
-    layoutFields :: RecLayoutFn
-    layoutFields =
-      case Map.lookup tyId (lctx ^. lctxRecLayouts) of
-        Nothing -> fromString (show tyId)
-        Just (ALayoutFn fn) -> fn
-    drawnFields :: Map FieldId (Collage Draw)
-    drawnFields =
-      Map.mapWithKey
-        (\fieldId ->
-          let
-            pathSegment = PathSegmentRec fieldId
-            lctx' = lctx & lctxPath %~ (<> mkPathBuilder pathSegment)
-          in
-            \obj -> layoutHoleyObject lctx' obj)
-        (syn ^. synRecFields)
-    wd :: WritingDirection
-    wd = lctx ^. lctxWritingDirection
-  in
-    appRecLayoutFn layoutFields drawnFields tyId wd
+  collage
   where
-    precBorder = PrecBorder (lctx ^. lctxPrecBordersAlways)
+    (precUnenclosed, collage) =
+      let
+        layoutFields :: RecLayoutFn
+        layoutFields =
+          case Map.lookup tyId (lctx ^. lctxRecLayouts) of
+            Nothing -> fromString (show tyId)
+            Just (ALayoutFn fn) -> fn
+        drawnFields :: Map FieldId (PrecPredicate -> (PrecUnenclosed, Collage Draw))
+        drawnFields =
+          Map.mapWithKey
+            (\fieldId ->
+              let
+                pathSegment = PathSegmentRec fieldId
+                lctx' = lctx & lctxPath %~ (<> mkPathBuilder pathSegment)
+              in
+                \obj -> layoutHoleyObject lctx' obj)
+            (syn ^. synRecFields)
+        wd :: WritingDirection
+        wd = lctx ^. lctxWritingDirection
+      in
+        appRecLayoutFn layoutFields drawnFields tyId wd
+    precUnenclosed' = addUnenclosed tyId precUnenclosed
+    precBorder =
+      PrecBorder (lctx ^. lctxPrecBordersAlways) <>
+      appPrecPredicate precPredicate precUnenclosed'
     path = buildPath (lctx ^. lctxPath)
 
 --------------------------------------------------------------------------------
@@ -1018,7 +1079,7 @@ instance Semigroup VisualFieldList where
 instance Layout VisualFieldList where
   VisualFieldList a `vsep` VisualFieldList b =
     VisualFieldList (a <> b)
-  field fieldName =
+  field fieldName _ =
     VisualFieldList $
       \tyId -> [mkFieldId' tyId fieldName]
 

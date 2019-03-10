@@ -6,6 +6,7 @@ module Main where
 
 import Data.Map (Map)
 import qualified Data.Map as Map
+import qualified Data.Set as Set
 import Data.Void
 import System.Exit (die)
 import System.Environment (getArgs)
@@ -81,22 +82,29 @@ foundryTyEnv =
           "IVar" ]
 
 foundryRecLayouts :: Map TyId ALayoutFn
-foundryRecLayouts = Map.fromList
-  [ (mkTyId "Lam", recLayoutLam),
-    (mkTyId "Pi", recLayoutPi),
-    (mkTyId "App", field "fn" <> field "arg"),
-    (mkTyId "Star", "★"),
-    (mkTyId "Box", "□"),
-    (mkTyId "IVar", field "var" <> "@" <> field "index") ]
+foundryRecLayouts = recLayouts
   where
+    recLayouts = Map.fromList
+      [ (mkTyId "Lam", recLayoutLam),
+        (mkTyId "Pi", recLayoutPi),
+        (mkTyId "App", recLayoutApp),
+        (mkTyId "Star", "★"),
+        (mkTyId "Box", "□"),
+        (mkTyId "IVar", recLayoutIVar) ]
+    precAll = precAllow (Map.keysSet recLayouts)
+    precAtoms = [mkTyId "Star", mkTyId "Box"]
+    prec ss = precAllow (Set.map mkTyId ss <> precAtoms)
+    recLayoutApp =
+     field "fn" (prec ["App"]) <>
+     field "arg" (prec [])
     recLayoutLam =
-      "λ" <> field "var" <> ":" <> field "ty"
-      `vsep`
-      field "body"
+      "λ" <> field "var" noPrec <> ":" <> field "ty" precAll
+      `vsep` field "body" precAll
     recLayoutPi =
-      "Π" <> field "var" <> ":" <> field "ty"
-      `vsep`
-      field "body"
+      "Π" <> field "var" noPrec <> ":" <> field "ty" precAll
+      `vsep` field "body" precAll
+    recLayoutIVar =
+      field "var" noPrec <> "@" <> field "index" noPrec
 
 foundryNodeFactory :: [NodeCreateFn]
 foundryNodeFactory =
