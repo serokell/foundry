@@ -102,6 +102,7 @@ module Source.NewGen
   rctxDefaultValues,
   rctxAllowedFieldTypes,
   rctxRecMoveMaps,
+  rctxWritingDirection,
 
   RecMoveMap,
 
@@ -543,7 +544,8 @@ data ReactCtx =
       _rctxNodeFactory :: [NodeCreateFn],
       _rctxDefaultValues :: Map TyId Value,
       _rctxAllowedFieldTypes :: Map FieldId (Set TyId),
-      _rctxRecMoveMaps :: Map TyId RecMoveMap
+      _rctxRecMoveMaps :: Map TyId RecMoveMap,
+      _rctxWritingDirection :: WritingDirection
     }
 
 data RecMoveMap =
@@ -1028,7 +1030,12 @@ reactRec recTyId = asum handlers
       guardInputEvent $ keyCodeLetter KeyCode.ArrowLeft 'h'
       RecSelChild fieldId <- use synRecSel
       recMoveMaps <- view rctxRecMoveMaps
-      let moveMap = rmmBackward (recMoveMaps Map.! recTyId)
+      wd <- view rctxWritingDirection
+      let
+        moveDirection = case wd of
+          WritingDirectionLTR -> rmmBackward
+          WritingDirectionRTL -> rmmForward
+        moveMap = moveDirection (recMoveMaps Map.! recTyId)
       fieldId' <- maybeA (Map.lookup fieldId moveMap)
       synRecSel .= RecSelChild fieldId'
       return (UndoFlag False)
@@ -1037,7 +1044,12 @@ reactRec recTyId = asum handlers
       guardInputEvent $ keyCodeLetter KeyCode.ArrowRight 'l'
       RecSelChild fieldId <- use synRecSel
       recMoveMaps <- view rctxRecMoveMaps
-      let moveMap = rmmForward (recMoveMaps Map.! recTyId)
+      wd <- view rctxWritingDirection
+      let
+        moveDirection = case wd of
+          WritingDirectionLTR -> rmmForward
+          WritingDirectionRTL -> rmmBackward
+        moveMap = moveDirection (recMoveMaps Map.! recTyId)
       fieldId' <- maybeA (Map.lookup fieldId moveMap)
       synRecSel .= RecSelChild fieldId'
       return (UndoFlag False)

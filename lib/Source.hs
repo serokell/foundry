@@ -90,7 +90,8 @@ createMainWindow pluginInfo esRef = do
               NG._rctxNodeFactory = pluginInfo ^. NG.pluginInfoNodeFactory,
               NG._rctxDefaultValues = pluginInfo ^. NG.pluginInfoDefaultValues,
               NG._rctxAllowedFieldTypes = pluginInfo ^. NG.pluginInfoAllowedFieldTypes,
-              NG._rctxRecMoveMaps = pluginInfo ^. NG.pluginInfoRecMoveMaps }
+              NG._rctxRecMoveMaps = pluginInfo ^. NG.pluginInfoRecMoveMaps,
+              NG._rctxWritingDirection = es ^. NG.esWritingDirection }
       mEs' <- NG.reactEditorState rctx es
       case mEs' of
         Nothing -> do
