@@ -1,0 +1,21 @@
+Nat = !str; /* natural number in decimal notation */
+
+Var = !str; /* Morte identifier */
+
+IVar = var: Var, index: Nat;
+
+Lam =
+  var: Var,
+  ty: <expr>,
+  body: <expr>;
+
+Pi =
+  var: Var,
+  ty: <expr>,
+  body: <expr>;
+
+App = fn, arg: <expr>;
+
+Star; Box; <const> = Star | Box;
+
+<expr> = Lam | Pi | App | Var | IVar | <const>;

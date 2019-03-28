@@ -28,58 +28,16 @@ main = do
   et <- getArgs >>= \case
     [et] -> return et
     _ -> die "Usage: foundry EXPR"
-  runGUI foundryPlugin (foundryInitEditorState et)
+  tyEnv <- either die return =<< readTyEnv "morte.sdam"
+  runGUI (foundryPlugin tyEnv) (foundryInitEditorState et)
 
-foundryPlugin :: Plugin
-foundryPlugin =
+foundryPlugin :: Env -> Plugin
+foundryPlugin env =
   Plugin
-    { _pluginTyEnv = foundryTyEnv,
+    { _pluginTyEnv = env,
       _pluginRecLayouts = foundryRecLayouts,
       _pluginNodeFactory = foundryNodeFactory
     }
-
-foundryTyEnv :: Env
-foundryTyEnv =
-  Env
-    { envMap =
-        Map.fromList
-          [ ("Nat", TyStr),
-            ("Var", TyStr),
-            ("IVar", tyIVar),
-            ("Lam", tyLam),
-            ("Pi", tyPi),
-            ("App", tyApp),
-            ("Star", TyRec []),
-            ("Box", TyRec []) ]
-    }
-  where
-    tyIVar =
-      TyRec
-        [ ("var", mkTyUnion ["Var"]),
-          ("index", mkTyUnion ["Nat"]) ]
-    tyLam =
-      TyRec
-        [ ("var", mkTyUnion ["Var"]),
-          ("ty", tyExpr),
-          ("body", tyExpr) ]
-    tyPi =
-      TyRec
-        [ ("var", mkTyUnion ["Var"]),
-          ("ty", tyExpr),
-          ("body", tyExpr) ]
-    tyApp =
-      TyRec
-        [ ("fn", tyExpr),
-          ("arg", tyExpr) ]
-    tyExpr =
-      mkTyUnion
-        [ "Lam",
-          "Pi",
-          "App",
-          "Star",
-          "Box",
-          "Var",
-          "IVar" ]
 
 foundryRecLayouts :: Map TyId ALayoutFn
 foundryRecLayouts = recLayouts

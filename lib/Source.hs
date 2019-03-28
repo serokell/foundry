@@ -4,21 +4,24 @@
 {-# LANGUAGE ScopedTypeVariables #-}
 
 module Source
-    ( runGUI
+    ( runGUI,
+      readTyEnv,
     ) where
 
 import Control.Monad
 import Control.Monad.IO.Class
 import qualified Graphics.UI.Gtk as Gtk
 import Data.IORef
-import Control.Lens ((^.))
+import Control.Lens ((^.), over, _Left)
 import Data.Foldable (toList)
+import Text.Megaparsec (errorBundlePretty)
 
 import Slay.Core
 import Slay.Cairo.Render
 import Source.Phaser
 import Source.Input (InputEvent(..), Modifier(..))
 import qualified Source.NewGen as NG
+import qualified Sdam.Parser
 
 runGUI :: NG.Plugin -> IO NG.EditorState -> IO ()
 runGUI plugin initEditorState = do
@@ -141,3 +144,13 @@ createMainCanvas = do
     , Gtk.widgetHasFocus Gtk.:= True
     ]
   return canvas
+
+
+readTyEnv :: FilePath -> IO (Either String NG.Env)
+readTyEnv path = do
+  tyEnvDesc <- readFile path
+  return $ over _Left errorBundlePretty $
+    Sdam.Parser.parse
+      Sdam.Parser.pEnv
+      path
+      tyEnvDesc
