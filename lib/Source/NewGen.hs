@@ -22,12 +22,6 @@ module Source.NewGen
   TyUnion(..),
   mkTyUnion,
 
-  -- * Identifiers
-  TyId,
-  mkTyId,
-  FieldId,
-  mkFieldId,
-
   -- * Values
   Holey(..),
   Object(..),
@@ -85,14 +79,13 @@ module Source.NewGen
 
   NodeCreateFn(..),
   ncfCheckInputEvent,
-  ncfTyId,
+  ncfTyName,
 
   LayoutCtx(..),
   lctxPath,
   lctxViewport,
   lctxPrecBordersAlways,
   lctxRecLayouts,
-  lctxEnvNameInfo,
   lctxWritingDirection,
 
   ReactCtx(..),
@@ -120,7 +113,6 @@ module Source.NewGen
   pluginInfoTyEnv,
   pluginInfoRecLayouts,
   pluginInfoNodeFactory,
-  pluginInfoEnvNameInfo,
   pluginInfoRecMoveMaps,
   pluginInfoDefaultValues,
   pluginInfoAllowedFieldTypes,
@@ -133,8 +125,9 @@ module Source.NewGen
 
   ) where
 
-import Data.Map (Map)
-import Data.Set (Set)
+import Data.Hashable (Hashable)
+import Data.HashMap.Strict (HashMap)
+import Data.HashSet (HashSet)
 import Data.Text (Text)
 import Numeric.Natural (Natural)
 import Data.Either
@@ -153,8 +146,8 @@ import Data.String
 import Inj
 import Inj.Base ()
 
-import qualified Data.Set as Set
-import qualified Data.Map as Map
+import qualified Data.HashMap.Strict as HashMap
+import qualified Data.HashSet as HashSet
 import qualified Data.Text as Text
 import qualified Data.Char as Char
 
@@ -169,10 +162,9 @@ import Source.Input
 import qualified Source.Input.KeyCode as KeyCode
 
 import Sdam.Core hiding (Value(ValueRec, ValueStr), Object(Object))
-import Sdam.NameInfo
 
 mkTyUnion :: [TyName] -> TyUnion
-mkTyUnion = TyUnion . Set.fromList
+mkTyUnion = TyUnion . HashSet.fromList
 
 --------------------------------------------------------------------------------
 -- Values
@@ -183,7 +175,7 @@ data Holey a =
   Solid a
 
 data Object =
-  Object TyId Value
+  Object TyName Value
 
 data Value =
   ValueRec SynRec |
@@ -200,29 +192,30 @@ data SelfSel =
   -- for empty synRecFields
   SelfSelEmpty |
   -- for non-empty synRecFields
-  SelfSelChild FieldId
+  SelfSelChild FieldName
 
 data RecSel =
   RecSelSelf SelfSel |
-  RecSelChild FieldId
+  RecSelChild FieldName
 
 data SynRec =
   SynRec
-    { _synRecFields :: Map FieldId (Holey Object),
+    { _synRecFields :: HashMap FieldName (Holey Object),
       _synRecSel :: RecSel
     }
 
-atPath :: Path -> Holey Object -> Maybe TyId
+atPath :: Path -> Holey Object -> Maybe TyName
 atPath (Path p0) = goHoleyObject p0
   where
     goHoleyObject _ Hole = Nothing
     goHoleyObject p (Solid a) = goObject p a
-    goObject [] (Object tyId _) = Just tyId
-    goObject (ps:p) (Object _ v) = goValue ps p v
-    goValue (PathSegmentRec fieldId) p (ValueRec r) = goRec fieldId p r
-    goValue _ _ _ = Nothing
-    goRec fieldId p SynRec{_synRecFields=fields} =
-      Map.lookup fieldId fields >>= goHoleyObject p
+    goObject [] (Object tyName _) = Just tyName
+    goObject (ps:p) (Object tyName v) = goValue tyName ps p v
+    goValue tyName (PathSegmentRec tyName' fieldName) p (ValueRec r) =
+      guard (tyName' == tyName) >> goRec fieldName p r
+    goValue _ _ _ _ = Nothing
+    goRec fieldName p SynRec{_synRecFields=fields} =
+      HashMap.lookup fieldName fields >>= goHoleyObject p
 
 --------------------------------------------------------------------------------
 ---- Drawing
@@ -315,23 +308,22 @@ noPrec = PrecPredicate (const (PrecBorder True))
 newtype RecLayoutFn =
   RecLayoutFn {
     appRecLayoutFn ::
-      Map FieldId (PrecPredicate -> (PrecUnenclosed, Collage Draw)) ->
-      TyId ->
+      HashMap FieldName (PrecPredicate -> (PrecUnenclosed, Collage Draw)) ->
       WritingDirection ->
       (PrecUnenclosed, Collage Draw)
   }
 
 instance IsString RecLayoutFn where
   fromString s =
-    RecLayoutFn $ \_ _ _ ->
+    RecLayoutFn $ \_ _ ->
       (mempty, punct (fromString s))
 
 instance Semigroup RecLayoutFn where
   RecLayoutFn a <> RecLayoutFn b =
-    RecLayoutFn $ \m tyId wd ->
+    RecLayoutFn $ \m wd ->
       let
-        (aUnenclosed, a') = a m tyId wd
-        (bUnenclosed, b') = b m tyId wd
+        (aUnenclosed, a') = a m wd
+        (bUnenclosed, b') = b m wd
         f = case wd of
           WritingDirectionLTR -> horizBaseline
           WritingDirectionRTL -> flip horizBaseline
@@ -341,10 +333,10 @@ instance Semigroup RecLayoutFn where
 
 instance Layout RecLayoutFn where
   RecLayoutFn a `vsep` RecLayoutFn b =
-    RecLayoutFn $ \m tyId wd ->
+    RecLayoutFn $ \m wd ->
       let
-        (aUnenclosed, a') = a m tyId wd
-        (bUnenclosed, b') = b m tyId wd
+        (aUnenclosed, a') = a m wd
+        (bUnenclosed, b') = b m wd
         f = case wd of
           WritingDirectionLTR -> vertLeft
           WritingDirectionRTL -> vertRight
@@ -353,8 +345,8 @@ instance Layout RecLayoutFn where
         (,) (aUnenclosed <> bUnenclosed) $
         a' `f` line light1 maxWidth `f` b'
   field fieldName precPredicate =
-    RecLayoutFn $ \m tyId _ ->
-      (m Map.! mkFieldId' tyId fieldName) precPredicate
+    RecLayoutFn $ \m _ ->
+      (m HashMap.! fieldName) precPredicate
 
 newtype ALayoutFn = ALayoutFn (forall a. Layout a => a)
 
@@ -420,18 +412,18 @@ instance Monoid PrecBorder where
   mempty = PrecBorder False
 
 -- | Layouts not enclosed by a precedence border.
-newtype PrecUnenclosed = PrecUnenclosed (Set TyId)
+newtype PrecUnenclosed = PrecUnenclosed (HashSet TyName)
 
 instance Semigroup PrecUnenclosed where
   PrecUnenclosed a <> PrecUnenclosed b =
-    PrecUnenclosed (Set.union a b)
+    PrecUnenclosed (HashSet.union a b)
 
 instance Monoid PrecUnenclosed where
-  mempty = PrecUnenclosed Set.empty
+  mempty = PrecUnenclosed HashSet.empty
 
-addUnenclosed :: TyId -> PrecUnenclosed -> PrecUnenclosed
-addUnenclosed tyId (PrecUnenclosed s) =
-  PrecUnenclosed (Set.insert tyId s)
+addUnenclosed :: TyName -> PrecUnenclosed -> PrecUnenclosed
+addUnenclosed tyName (PrecUnenclosed s) =
+  PrecUnenclosed (HashSet.insert tyName s)
 
 guardUnenclosed :: PrecBorder -> PrecUnenclosed -> PrecUnenclosed
 guardUnenclosed (PrecBorder True) = const mempty
@@ -440,12 +432,16 @@ guardUnenclosed (PrecBorder False) = id
 newtype PrecPredicate =
   PrecPredicate { appPrecPredicate :: PrecUnenclosed -> PrecBorder }
 
-precAllow :: Set TyId -> PrecPredicate
+precAllow :: HashSet TyName -> PrecPredicate
 precAllow allowed =
   PrecPredicate $ \(PrecUnenclosed unenclosed) ->
     PrecBorder $
       -- Need a border unless all of unenclosed layouts are allowed.
-      not (unenclosed `Set.isSubsetOf` allowed)
+      not (unenclosed `hashSet_isSubsetOf` allowed)
+
+hashSet_isSubsetOf :: (Eq a, Hashable a) => HashSet a -> HashSet a -> Bool
+hashSet_isSubsetOf sub sup =
+  all (\k -> HashSet.member k sup) sub
 
 layoutSel :: PrecBorder -> Path -> Collage Draw -> Collage Draw
 layoutSel (PrecBorder precBorder) path =
@@ -524,7 +520,7 @@ data EditorState =
 data NodeCreateFn =
   NodeCreateFn
     { _ncfCheckInputEvent :: InputEvent -> Bool,
-      _ncfTyId :: TyId
+      _ncfTyName :: TyName
     }
 
 data LayoutCtx =
@@ -532,8 +528,7 @@ data LayoutCtx =
     { _lctxPath :: PathBuilder,
       _lctxViewport :: Extents,
       _lctxPrecBordersAlways :: Bool,
-      _lctxRecLayouts :: Map TyId ALayoutFn,
-      _lctxEnvNameInfo :: EnvNameInfo,
+      _lctxRecLayouts :: HashMap TyName ALayoutFn,
       _lctxWritingDirection :: WritingDirection
     }
 
@@ -542,17 +537,17 @@ data ReactCtx =
     { _rctxFindPath :: Offset -> Maybe Path,
       _rctxInputEvent :: InputEvent,
       _rctxNodeFactory :: [NodeCreateFn],
-      _rctxDefaultValues :: Map TyId Value,
-      _rctxAllowedFieldTypes :: Map FieldId (Set TyId),
-      _rctxRecMoveMaps :: Map TyId RecMoveMap,
+      _rctxDefaultValues :: HashMap TyName Value,
+      _rctxAllowedFieldTypes :: HashMap (TyName, FieldName) (HashSet TyName),
+      _rctxRecMoveMaps :: HashMap TyName RecMoveMap,
       _rctxWritingDirection :: WritingDirection
     }
 
 data RecMoveMap =
   RecMoveMap
-    { rmmFieldOrder :: [FieldId],
-      rmmForward :: Map FieldId FieldId,
-      rmmBackward :: Map FieldId FieldId
+    { rmmFieldOrder :: [FieldName],
+      rmmForward :: HashMap FieldName FieldName,
+      rmmBackward :: HashMap FieldName FieldName
     }
 
 --------------------------------------------------------------------------------
@@ -613,7 +608,7 @@ layoutEditorState lctx es =
       let
         path = selectionPathEditorState es
         el = atPath path (es ^. esExpr)
-        pathStr = pprPath (lctx ^. lctxEnvNameInfo) path el
+        pathStr = pprPath path el
       [textWithoutCursor pathStr]
     bars = concat @[] [hoverBar, selectionBar]
     withBars =
@@ -644,7 +639,7 @@ layoutHole lctx =
 
 layoutObject :: LayoutCtx -> Object -> PrecPredicate -> (PrecUnenclosed, Collage Draw)
 layoutObject lctx = \case
-  Object tyId (ValueRec syn) -> layoutRec lctx tyId syn
+  Object tyName (ValueRec syn) -> layoutRec lctx tyName syn
   Object _ (ValueStr syn) -> \_precPredicate -> layoutStr lctx syn
 
 layoutStr :: LayoutCtx -> SynStr -> (PrecUnenclosed, Collage Draw)
@@ -665,8 +660,8 @@ layoutStr lctx syn =
     path = buildPath (lctx ^. lctxPath)
     content = syn ^. synStrContent
 
-layoutRec :: LayoutCtx -> TyId -> SynRec -> PrecPredicate -> (PrecUnenclosed, Collage Draw)
-layoutRec lctx tyId syn precPredicate =
+layoutRec :: LayoutCtx -> TyName -> SynRec -> PrecPredicate -> (PrecUnenclosed, Collage Draw)
+layoutRec lctx tyName syn precPredicate =
   (,) (guardUnenclosed precBorder precUnenclosed') $
   layoutSel precBorder path $
   collage
@@ -675,15 +670,15 @@ layoutRec lctx tyId syn precPredicate =
       let
         layoutFields :: RecLayoutFn
         layoutFields =
-          case Map.lookup tyId (lctx ^. lctxRecLayouts) of
-            Nothing -> fromString (show tyId)
+          case HashMap.lookup tyName (lctx ^. lctxRecLayouts) of
+            Nothing -> fromString (show tyName)
             Just (ALayoutFn fn) -> fn
-        drawnFields :: Map FieldId (PrecPredicate -> (PrecUnenclosed, Collage Draw))
+        drawnFields :: HashMap FieldName (PrecPredicate -> (PrecUnenclosed, Collage Draw))
         drawnFields =
-          Map.mapWithKey
-            (\fieldId ->
+          HashMap.mapWithKey
+            (\fieldName ->
               let
-                pathSegment = PathSegmentRec fieldId
+                pathSegment = PathSegmentRec tyName fieldName
                 lctx' = lctx & lctxPath %~ (<> mkPathBuilder pathSegment)
               in
                 \obj -> layoutHoleyObject lctx' obj)
@@ -691,8 +686,8 @@ layoutRec lctx tyId syn precPredicate =
         wd :: WritingDirection
         wd = lctx ^. lctxWritingDirection
       in
-        appRecLayoutFn layoutFields drawnFields tyId wd
-    precUnenclosed' = addUnenclosed tyId precUnenclosed
+        appRecLayoutFn layoutFields drawnFields wd
+    precUnenclosed' = addUnenclosed tyName precUnenclosed
     precBorder =
       PrecBorder (lctx ^. lctxPrecBordersAlways) <>
       appPrecPredicate precPredicate precUnenclosed'
@@ -708,19 +703,19 @@ selectionPathEditorState es = selectionPathHoleyObject (es ^. esExpr)
 selectionPathHoleyObject :: Holey Object -> Path
 selectionPathHoleyObject = \case
   Hole -> emptyPath
-  Solid (Object _ value) ->
+  Solid (Object tyName value) ->
     case value of
       ValueStr _ -> emptyPath
-      ValueRec a -> selectionPathRec a
+      ValueRec a -> selectionPathRec tyName a
 
-selectionPathRec :: SynRec -> Path
-selectionPathRec syn =
+selectionPathRec :: TyName -> SynRec -> Path
+selectionPathRec tyName syn =
   case syn ^. synRecSel of
     RecSelSelf _ -> emptyPath
-    RecSelChild fieldId ->
+    RecSelChild fieldName ->
       let
-        pathSegment = PathSegmentRec fieldId
-        recField = (syn ^. synRecFields) Map.! fieldId
+        pathSegment = PathSegmentRec tyName fieldName
+        recField = (syn ^. synRecFields) HashMap.! fieldName
         pathTail = selectionPathHoleyObject recField
       in
         consPath pathSegment pathTail
@@ -731,26 +726,27 @@ updatePathEditorState path = over esExpr (updatePathHoleyObject path)
 updatePathHoleyObject :: Path -> Holey Object -> Holey Object
 updatePathHoleyObject path = \case
   Hole -> Hole
-  Solid (Object tyId value) ->
-    Solid (Object tyId (case value of
+  Solid (Object tyName value) ->
+    Solid (Object tyName (case value of
       ValueStr syn -> ValueStr syn
-      ValueRec syn -> ValueRec (updatePathRec path syn)))
+      ValueRec syn -> ValueRec (updatePathRec tyName path syn)))
 
-updatePathRec :: Path -> SynRec -> SynRec
-updatePathRec path syn =
+updatePathRec :: TyName -> Path -> SynRec -> SynRec
+updatePathRec tyName path syn =
   case unconsPath path of
     Nothing -> syn & synRecSel %~ toRecSelSelf
-    Just (PathSegmentSeq _, _) ->
+    Just (PathSegmentSeq _ _, _) ->
       error "TODO (int-index): updatePathRec PathSegmentSeq"
-    Just (PathSegmentRec fieldId, path') ->
-      case syn ^. synRecFields . at fieldId of
+    Just (PathSegmentRec tyName' fieldName, path') ->
+      if tyName' /= tyName then syn else
+      case syn ^. synRecFields . at fieldName of
         Nothing -> syn
         Just a ->
           let
             a' = updatePathHoleyObject path' a
-            fields' = Map.insert fieldId a' (syn ^. synRecFields)
+            fields' = HashMap.insert fieldName a' (syn ^. synRecFields)
           in
-            SynRec fields' (RecSelChild fieldId)
+            SynRec fields' (RecSelChild fieldName)
 
 toRecSelSelf :: RecSel -> RecSel
 toRecSelSelf (RecSelChild fieldId) = RecSelSelf (SelfSelChild fieldId)
@@ -767,8 +763,8 @@ runReactM m rctx a = runMaybeT (execStateT (runReaderT m rctx) a)
 
 newtype UndoFlag = UndoFlag Bool
 
-pprPath :: EnvNameInfo -> Path -> Maybe TyId -> Text
-pprPath nameInfo p0 tip = Text.pack ('/' : goPath p0 "")
+pprPath :: Path -> Maybe TyName -> Text
+pprPath p0 tip = Text.pack ('/' : goPath p0 "")
   where
     goPath p =
       case unconsPath p of
@@ -777,18 +773,13 @@ pprPath nameInfo p0 tip = Text.pack ('/' : goPath p0 "")
     goTip =
       case tip of
         Nothing -> id
-        Just tyId ->
-          case Map.lookup tyId (envNameInfoTypes nameInfo) of
-            Nothing -> shows tyId
-            Just tyName -> (tyNameStr tyName++)
+        Just tyName -> (tyNameStr tyName++)
     goPathSegment ps =
       case ps of
-        PathSegmentRec fieldId ->
-          case Map.lookup fieldId (envNameInfoFields nameInfo) of
-            Nothing -> shows fieldId
-            Just (tyName, fieldName) ->
-              (tyNameStr tyName++) . ('.':) . (fieldNameStr fieldName++)
-        PathSegmentSeq i -> shows (indexToInt i)
+        PathSegmentRec tyName fieldName ->
+          (tyNameStr tyName++) . ('.':) . (fieldNameStr fieldName++)
+        PathSegmentSeq tyName i ->
+          (tyNameStr tyName++) . ('.':) . shows (indexToInt i)
 
 reactEditorState :: ReactCtx -> EditorState -> IO (Maybe EditorState)
 reactEditorState = runReactM (asum handlers)
@@ -842,14 +833,14 @@ reactEditorState = runReactM (asum handlers)
       esExpr .= r
     handleRedirectExpr = do
       expr <- use esExpr
-      let checkTyId = const True -- Allow any construction at the top level.
-      UndoFlag undoFlag <- zoom esExpr (reactHoleyObject checkTyId)
+      let checkTyName = const True -- Allow any construction at the top level.
+      UndoFlag undoFlag <- zoom esExpr (reactHoleyObject checkTyName)
       when undoFlag $ do
         esUndo %= (expr:)
         esRedo .= []
 
-reactHoleyObject :: (TyId -> Bool) -> ReactM (Holey Object) UndoFlag
-reactHoleyObject checkTyId = asum handlers
+reactHoleyObject :: (TyName -> Bool) -> ReactM (Holey Object) UndoFlag
+reactHoleyObject checkTyName = asum handlers
   where
     handlers :: [ReactM (Holey Object) UndoFlag]
     handlers =
@@ -869,11 +860,11 @@ reactHoleyObject checkTyId = asum handlers
         Hole ->
           let
             objects =
-              [ Object tyId ((rctx ^. rctxDefaultValues) Map.! tyId) |
+              [ Object tyName ((rctx ^. rctxDefaultValues) HashMap.! tyName) |
                 ncf <- rctx ^. rctxNodeFactory,
                 (ncf ^. ncfCheckInputEvent) (rctx ^. rctxInputEvent),
-                let tyId = ncf ^. ncfTyId,
-                checkTyId tyId ]
+                let tyName = ncf ^. ncfTyName,
+                checkTyName tyName ]
           in
             case objects of
               [] -> MaybeT (return Nothing)
@@ -882,11 +873,9 @@ reactHoleyObject checkTyId = asum handlers
           (undoFlag, a') <- runStateT (runReaderT reactObject rctx) a
           return (undoFlag, Solid a')
 
-mkDefaultValues :: Env -> Map TyId RecMoveMap -> Map TyId Value
+mkDefaultValues :: Env -> HashMap TyName RecMoveMap -> HashMap TyName Value
 mkDefaultValues env recMoveMaps =
-  Map.fromList
-    [ (mkTyId tyName, mkDefVal tyName ty) |
-      (tyName, ty) <- Map.toList (envMap env) ]
+  HashMap.mapWithKey mkDefVal (envMap env)
   where
     mkDefVal :: TyName -> Ty -> Value
     mkDefVal tyName = \case
@@ -894,28 +883,26 @@ mkDefaultValues env recMoveMaps =
       TySeq _ -> error "TODO (int-index): mkDefVal TySeq"
       TyRec fieldTys ->
         let
-          fields = Map.fromList
-            [ (mkFieldId tyName fieldName, Hole) |
-              (fieldName, _) <- Map.toList fieldTys ]
-          recMoveMap = recMoveMaps Map.! mkTyId tyName
+          fields = HashMap.map (const Hole) fieldTys
+          recMoveMap = recMoveMaps HashMap.! tyName
           sel =
             case rmmFieldOrder recMoveMap of
               [] -> RecSelSelf SelfSelEmpty
-              fieldId:_ -> RecSelChild fieldId
+              fieldName:_ -> RecSelChild fieldName
         in
           ValueRec (SynRec fields sel)
 
 reactObject :: ReactM Object UndoFlag
 reactObject =
   ReaderT $ \rctx ->
-  StateT $ \(Object tyId value) ->
+  StateT $ \(Object tyName value) ->
     case value of
       ValueStr syn -> do
         (undoFlag, syn') <- runStateT (runReaderT reactText rctx) syn
-        return (undoFlag, Object tyId (ValueStr syn'))
+        return (undoFlag, Object tyName (ValueStr syn'))
       ValueRec syn -> do
-        (undoFlag, syn') <- runStateT (runReaderT (reactRec tyId) rctx) syn
-        return (undoFlag, Object tyId (ValueRec syn'))
+        (undoFlag, syn') <- runStateT (runReaderT (reactRec tyName) rctx) syn
+        return (undoFlag, Object tyName (ValueRec syn'))
 
 reactText :: ReactM SynStr UndoFlag
 reactText =
@@ -995,8 +982,8 @@ normalizeSynStr syn = syn & synStrPosition %~ normalizePosition
     normalizePosition :: Int -> Int
     normalizePosition = max 0 . min (views synStrContent Text.length syn)
 
-reactRec :: TyId -> ReactM SynRec UndoFlag
-reactRec recTyId = asum handlers
+reactRec :: TyName -> ReactM SynRec UndoFlag
+reactRec recTyName = asum handlers
   where
     handlers :: [ReactM SynRec UndoFlag]
     handlers =
@@ -1007,82 +994,81 @@ reactRec recTyId = asum handlers
         handleArrowRight ]
     handleRedirect :: ReactM SynRec UndoFlag
     handleRedirect = do
-      RecSelChild fieldId <- use synRecSel
+      RecSelChild fieldName <- use synRecSel
       allowedFieldTypes <- view rctxAllowedFieldTypes
-      let checkTyId tyId = Set.member tyId (allowedFieldTypes Map.! fieldId)
+      let checkTyName tyName = HashSet.member tyName (allowedFieldTypes HashMap.! (recTyName, fieldName))
       zoom
-        (synRecFields . at fieldId . unsafeSingular _Just)
-        (reactHoleyObject checkTyId)
+        (synRecFields . at fieldName . unsafeSingular _Just)
+        (reactHoleyObject checkTyName)
     handleArrowUp :: ReactM SynRec UndoFlag
     handleArrowUp = do
       guardInputEvent $ keyCodeLetter KeyCode.ArrowUp 'k'
-      RecSelChild fieldId <- use synRecSel
-      synRecSel .= RecSelSelf (SelfSelChild fieldId)
+      RecSelChild fieldName <- use synRecSel
+      synRecSel .= RecSelSelf (SelfSelChild fieldName)
       return (UndoFlag False)
     handleArrowDown :: ReactM SynRec UndoFlag
     handleArrowDown = do
       guardInputEvent $ keyCodeLetter KeyCode.ArrowDown 'j'
-      RecSelSelf (SelfSelChild fieldId) <- use synRecSel
-      synRecSel .= RecSelChild fieldId
+      RecSelSelf (SelfSelChild fieldName) <- use synRecSel
+      synRecSel .= RecSelChild fieldName
       return (UndoFlag False)
     handleArrowLeft :: ReactM SynRec UndoFlag
     handleArrowLeft = do
       guardInputEvent $ keyCodeLetter KeyCode.ArrowLeft 'h'
-      RecSelChild fieldId <- use synRecSel
+      RecSelChild fieldName <- use synRecSel
       recMoveMaps <- view rctxRecMoveMaps
       wd <- view rctxWritingDirection
       let
         moveDirection = case wd of
           WritingDirectionLTR -> rmmBackward
           WritingDirectionRTL -> rmmForward
-        moveMap = moveDirection (recMoveMaps Map.! recTyId)
-      fieldId' <- maybeA (Map.lookup fieldId moveMap)
-      synRecSel .= RecSelChild fieldId'
+        moveMap = moveDirection (recMoveMaps HashMap.! recTyName)
+      fieldName' <- maybeA (HashMap.lookup fieldName moveMap)
+      synRecSel .= RecSelChild fieldName'
       return (UndoFlag False)
     handleArrowRight :: ReactM SynRec UndoFlag
     handleArrowRight = do
       guardInputEvent $ keyCodeLetter KeyCode.ArrowRight 'l'
-      RecSelChild fieldId <- use synRecSel
+      RecSelChild fieldName <- use synRecSel
       recMoveMaps <- view rctxRecMoveMaps
       wd <- view rctxWritingDirection
       let
         moveDirection = case wd of
           WritingDirectionLTR -> rmmForward
           WritingDirectionRTL -> rmmBackward
-        moveMap = moveDirection (recMoveMaps Map.! recTyId)
-      fieldId' <- maybeA (Map.lookup fieldId moveMap)
-      synRecSel .= RecSelChild fieldId'
+        moveMap = moveDirection (recMoveMaps HashMap.! recTyName)
+      fieldName' <- maybeA (HashMap.lookup fieldName moveMap)
+      synRecSel .= RecSelChild fieldName'
       return (UndoFlag False)
 
-mkAllowedFieldTypes :: Env -> Map FieldId (Set TyId)
+mkAllowedFieldTypes :: Env -> HashMap (TyName, FieldName) (HashSet TyName)
 mkAllowedFieldTypes env =
-  Map.fromList
-    [ (mkFieldId tyName fieldName, Set.map mkTyId tys) |
-      (tyName, TyRec fields) <- Map.toList (envMap env),
-      (fieldName, TyUnion tys) <- Map.toList fields ]
+  HashMap.fromList
+    [ ((tyName, fieldName), tys) |
+      (tyName, TyRec fields) <- HashMap.toList (envMap env),
+      (fieldName, TyUnion tys) <- HashMap.toList fields ]
 
-mkRecMoveMaps :: Map TyId ALayoutFn -> Map TyId RecMoveMap
-mkRecMoveMaps recLayouts =
-  Map.mapWithKey mkRecMoveMap recLayouts
+mkRecMoveMaps :: HashMap TyName ALayoutFn -> HashMap TyName RecMoveMap
+mkRecMoveMaps = HashMap.map mkRecMoveMap
 
-mkRecMoveMap :: TyId -> ALayoutFn -> RecMoveMap
-mkRecMoveMap tyId recLayoutFn =
+mkRecMoveMap :: ALayoutFn -> RecMoveMap
+mkRecMoveMap recLayoutFn =
   RecMoveMap
-    { rmmFieldOrder = sortedFieldIds,
-      rmmForward = seqToMoveMap sortedFieldIds,
-      rmmBackward = seqToMoveMap (List.reverse sortedFieldIds) }
+    { rmmFieldOrder = sortedFieldNames,
+      rmmForward = seqToMoveMap sortedFieldNames,
+      rmmBackward = seqToMoveMap (List.reverse sortedFieldNames) }
   where
     seqToMoveMap xs =
       case xs of
-        [] -> Map.empty
-        _:xs' -> Map.fromList (List.zip xs xs')
-    sortedFieldIds =
-      sortByVisualOrder tyId recLayoutFn
+        [] -> HashMap.empty
+        _:xs' -> HashMap.fromList (List.zip xs xs')
+    sortedFieldNames =
+      sortByVisualOrder recLayoutFn
 
-newtype VisualFieldList = VisualFieldList (TyId -> [FieldId])
+newtype VisualFieldList = VisualFieldList [FieldName]
 
 instance IsString VisualFieldList where
-  fromString _ = VisualFieldList (const [])
+  fromString _ = VisualFieldList []
 
 instance Semigroup VisualFieldList where
   VisualFieldList a <> VisualFieldList b =
@@ -1091,15 +1077,13 @@ instance Semigroup VisualFieldList where
 instance Layout VisualFieldList where
   VisualFieldList a `vsep` VisualFieldList b =
     VisualFieldList (a <> b)
-  field fieldName _ =
-    VisualFieldList $
-      \tyId -> [mkFieldId' tyId fieldName]
+  field fieldName _ = VisualFieldList [fieldName]
 
-sortByVisualOrder :: TyId -> ALayoutFn -> [FieldId]
-sortByVisualOrder tyId recLayoutFn = mkSortedFields tyId
+sortByVisualOrder :: ALayoutFn -> [FieldName]
+sortByVisualOrder recLayoutFn = sortedFields
   where
-    mkSortedFields :: TyId -> [FieldId]
-    ALayoutFn (VisualFieldList mkSortedFields) = recLayoutFn
+    sortedFields :: [FieldName]
+    ALayoutFn (VisualFieldList sortedFields) = recLayoutFn
 
 --------------------------------------------------------------------------------
 ---- Plugin
@@ -1109,7 +1093,7 @@ sortByVisualOrder tyId recLayoutFn = mkSortedFields tyId
 data Plugin =
   Plugin
     { _pluginTyEnv :: Env,
-      _pluginRecLayouts :: Map TyId ALayoutFn,
+      _pluginRecLayouts :: HashMap TyName ALayoutFn,
       _pluginNodeFactory :: [NodeCreateFn]
     }
 
@@ -1118,12 +1102,11 @@ data Plugin =
 data PluginInfo =
   PluginInfo
     { _pluginInfoTyEnv :: Env,
-      _pluginInfoRecLayouts :: Map TyId ALayoutFn,
+      _pluginInfoRecLayouts :: HashMap TyName ALayoutFn,
       _pluginInfoNodeFactory :: [NodeCreateFn],
-      _pluginInfoEnvNameInfo :: EnvNameInfo,
-      _pluginInfoRecMoveMaps :: Map TyId RecMoveMap,
-      _pluginInfoDefaultValues :: Map TyId Value,
-      _pluginInfoAllowedFieldTypes :: Map FieldId (Set TyId)
+      _pluginInfoRecMoveMaps :: HashMap TyName RecMoveMap,
+      _pluginInfoDefaultValues :: HashMap TyName Value,
+      _pluginInfoAllowedFieldTypes :: HashMap (TyName, FieldName) (HashSet TyName)
     }
 
 makeLenses ''Plugin
@@ -1135,7 +1118,6 @@ mkPluginInfo plugin =
     { _pluginInfoTyEnv = tyEnv,
       _pluginInfoRecLayouts = recLayouts,
       _pluginInfoNodeFactory = nodeFactory,
-      _pluginInfoEnvNameInfo = envNameInfo,
       _pluginInfoRecMoveMaps = recMoveMaps,
       _pluginInfoDefaultValues = defaultValues,
       _pluginInfoAllowedFieldTypes = allowedFieldTypes
@@ -1144,7 +1126,6 @@ mkPluginInfo plugin =
     tyEnv = plugin ^. pluginTyEnv
     recLayouts = plugin ^. pluginRecLayouts
     nodeFactory = plugin ^. pluginNodeFactory
-    envNameInfo = buildEnvNameInfo tyEnv
     recMoveMaps = mkRecMoveMaps recLayouts
     defaultValues = mkDefaultValues tyEnv recMoveMaps
     allowedFieldTypes = mkAllowedFieldTypes tyEnv

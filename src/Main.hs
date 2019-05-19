@@ -4,9 +4,8 @@
 
 module Main where
 
-import Data.Map (Map)
-import qualified Data.Map as Map
-import qualified Data.Set as Set
+import qualified Data.HashMap.Strict as HashMap
+import Data.HashMap.Strict (HashMap)
 import Data.Void
 import System.Exit (die)
 import System.Environment (getArgs)
@@ -39,19 +38,19 @@ foundryPlugin env =
       _pluginNodeFactory = foundryNodeFactory
     }
 
-foundryRecLayouts :: Map TyId ALayoutFn
+foundryRecLayouts :: HashMap TyName ALayoutFn
 foundryRecLayouts = recLayouts
   where
-    recLayouts = Map.fromList
-      [ (mkTyId "Lam", recLayoutLam),
-        (mkTyId "Pi", recLayoutPi),
-        (mkTyId "App", recLayoutApp),
-        (mkTyId "Star", "★"),
-        (mkTyId "Box", "□"),
-        (mkTyId "IVar", recLayoutIVar) ]
-    precAll = precAllow (Map.keysSet recLayouts)
-    precAtoms = [mkTyId "Star", mkTyId "Box"]
-    prec ss = precAllow (Set.map mkTyId ss <> precAtoms)
+    recLayouts = HashMap.fromList
+      [ ("Lam", recLayoutLam),
+        ("Pi", recLayoutPi),
+        ("App", recLayoutApp),
+        ("Star", "★"),
+        ("Box", "□"),
+        ("IVar", recLayoutIVar) ]
+    precAll = precAllow (HashMap.keysSet recLayouts)
+    precAtoms = ["Star", "Box"]
+    prec ss = precAllow (ss <> precAtoms)
     recLayoutApp =
      field "fn" (prec ["App"]) <>
      field "arg" (prec [])
@@ -66,14 +65,14 @@ foundryRecLayouts = recLayouts
 
 foundryNodeFactory :: [NodeCreateFn]
 foundryNodeFactory =
-  [ NodeCreateFn insertModeEvent (mkTyId "Var"),
-    NodeCreateFn insertModeEvent (mkTyId "Nat"),
-    NodeCreateFn (shiftChar 'V') (mkTyId "IVar"),
-    NodeCreateFn (shiftChar 'L') (mkTyId "Lam"),
-    NodeCreateFn (shiftChar 'P') (mkTyId "Pi"),
-    NodeCreateFn (shiftChar 'A') (mkTyId "App"),
-    NodeCreateFn (shiftChar 'S') (mkTyId "Star"),
-    NodeCreateFn (shiftChar 'B') (mkTyId "Box") ]
+  [ NodeCreateFn insertModeEvent "Var",
+    NodeCreateFn insertModeEvent "Nat",
+    NodeCreateFn (shiftChar 'V') "IVar",
+    NodeCreateFn (shiftChar 'L') "Lam",
+    NodeCreateFn (shiftChar 'P') "Pi",
+    NodeCreateFn (shiftChar 'A') "App",
+    NodeCreateFn (shiftChar 'S') "Star",
+    NodeCreateFn (shiftChar 'B') "Box" ]
 
 foundryInitEditorState :: String -> IO EditorState
 foundryInitEditorState et = do
@@ -131,19 +130,12 @@ synImportApp f a =
 
 mkRecObject :: TyName -> [(FieldName, Holey Object)] -> Maybe Int -> Object
 mkRecObject tyName fields index =
-    Object tyId (ValueRec (SynRec (Map.fromList fields') sel))
+    Object tyName (ValueRec (SynRec (HashMap.fromList fields) sel))
   where
-    tyId = mkTyId tyName
-    fields' =
-      [ (mkFieldId tyName fieldName, obj) |
-        (fieldName, obj) <- fields ]
-    fieldIds = map fst fields'
     sel = case index of
       Nothing -> RecSelSelf SelfSelEmpty
-      Just i -> RecSelSelf (SelfSelChild (fieldIds !! i))
+      Just i -> RecSelSelf (SelfSelChild (fst (fields !! i)))
 
 mkStrObject :: TyName -> Text -> Object
 mkStrObject tyName str =
-  Object
-    (mkTyId tyName)
-    (ValueStr (SynStr str (Text.length str) False))
+  Object tyName (ValueStr (SynStr str (Text.length str) False))

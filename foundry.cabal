@@ -13,6 +13,8 @@ library
 
   build-depends:       base >=4.7
                ,       containers
+               ,       unordered-containers
+               ,       hashable
                ,       lens >=4.11
                ,       transformers >=0.4
                ,       gtk3 >=0.13
@@ -46,6 +48,7 @@ executable foundry
 
   build-depends:       base
                ,       containers
+               ,       unordered-containers
                ,       transformers
                ,       mtl
                ,       bifunctors
