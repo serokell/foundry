@@ -48,6 +48,7 @@ module Source.NewGen
   offsetZero,
   CursorBlink(..),
   blink,
+  Selection(..),
   Paths(..),
   DrawCtx(..),
   withDrawCtx,
@@ -100,7 +101,7 @@ module Source.NewGen
   RecMoveMap,
 
   layoutEditorState,
-  selectionPathEditorState,
+  selectionOfEditorState,
   reactEditorState,
 
   -- * Plugin
@@ -204,19 +205,6 @@ data SynRec =
       _synRecSel :: RecSel
     }
 
-atPath :: Path -> Holey Object -> Maybe TyName
-atPath (Path p0) = goHoleyObject p0
-  where
-    goHoleyObject _ Hole = Nothing
-    goHoleyObject p (Solid a) = goObject p a
-    goObject [] (Object tyName _) = Just tyName
-    goObject (ps:p) (Object tyName v) = goValue tyName ps p v
-    goValue tyName (PathSegmentRec tyName' fieldName) p (ValueRec r) =
-      guard (tyName' == tyName) >> goRec fieldName p r
-    goValue _ _ _ _ = Nothing
-    goRec fieldName p SynRec{_synRecFields=fields} =
-      HashMap.lookup fieldName fields >>= goHoleyObject p
-
 --------------------------------------------------------------------------------
 ---- Drawing
 --------------------------------------------------------------------------------
@@ -228,10 +216,16 @@ blink = \case
   CursorVisible -> CursorInvisible
   CursorInvisible -> CursorVisible
 
+data Selection =
+  Selection
+    { selectionPath :: Path,
+      selectionTyName :: Maybe TyName,
+      selectionStrPos :: Maybe Int }
+
 data Paths =
   Paths
     { pathsCursor :: Maybe Path,
-      pathsSelection :: Path }
+      pathsSelection :: Selection }
 
 data DrawCtx a = DrawCtx (Paths -> CursorBlink -> a)
   deriving (Functor)
@@ -456,7 +450,7 @@ layoutSel (PrecBorder precBorder) path =
     outlineWidth = 2
     borderColor = mkColor (rgb 94 80 134)
     mkColor color = DrawCtx $ \Paths{pathsSelection} _ ->
-      if pathsSelection == path then color else nothing
+      if selectionPath pathsSelection == path then color else nothing
 
 precedenceBorder :: Natural -> Collage Draw -> Collage Draw
 precedenceBorder width a =
@@ -605,11 +599,8 @@ layoutEditorState lctx es =
       guard $ es ^. esHoverBarEnabled
       [textWithoutCursor (pprPointer $ es ^. esPointer)]
     selectionBar = do
-      let
-        path = selectionPathEditorState es
-        el = atPath path (es ^. esExpr)
-        pathStr = pprPath path el
-      [textWithoutCursor pathStr]
+      let sel = selectionOfEditorState es
+      [textWithoutCursor (pprSelection sel)]
     bars = concat @[] [hoverBar, selectionBar]
     withBars =
       case nonEmpty bars of
@@ -622,6 +613,25 @@ layoutEditorState lctx es =
         backgroundRect = rect nothing (inj dark1)
       in
         substrate padding backgroundRect c
+
+pprSelection :: Selection -> Text
+pprSelection selection = Text.pack ('/' : goPath selectionPath "")
+  where
+    Selection{selectionPath, selectionTyName, selectionStrPos} = selection
+    goPath p =
+      case unconsPath p of
+        Nothing -> goTip selectionTyName
+        Just (ps, p') -> goPathSegment ps . ('/':) . goPath p'
+    goTip Nothing = id
+    goTip (Just tyName) = (tyNameStr tyName++) . goStrPos selectionStrPos
+    goPathSegment ps =
+      case ps of
+        PathSegmentRec tyName fieldName ->
+          (tyNameStr tyName++) . ('.':) . (fieldNameStr fieldName++)
+        PathSegmentSeq tyName i ->
+          (tyNameStr tyName++) . ('.':) . shows (indexToInt i)
+    goStrPos Nothing = id
+    goStrPos (Just i) = ('[':) . shows i . (']':)
 
 layoutHoleyObject :: LayoutCtx -> Holey Object -> PrecPredicate -> (PrecUnenclosed, Collage Draw)
 layoutHoleyObject lctx = \case
@@ -637,31 +647,41 @@ layoutHole lctx =
     precBorder = PrecBorder (lctx ^. lctxPrecBordersAlways)
     path = buildPath (lctx ^. lctxPath)
 
-layoutObject :: LayoutCtx -> Object -> PrecPredicate -> (PrecUnenclosed, Collage Draw)
+layoutObject ::
+  LayoutCtx ->
+  Object ->
+  PrecPredicate ->
+  (PrecUnenclosed, Collage Draw)
 layoutObject lctx = \case
-  Object tyName (ValueRec syn) -> layoutRec lctx tyName syn
-  Object _ (ValueStr syn) -> \_precPredicate -> layoutStr lctx syn
+  Object tyName (ValueRec syn) -> layoutRec lctx tyName (syn ^. synRecFields)
+  Object _ (ValueStr syn) -> \_precPredicate -> layoutStr lctx (syn ^. synStrContent)
 
-layoutStr :: LayoutCtx -> SynStr -> (PrecUnenclosed, Collage Draw)
-layoutStr lctx syn =
+layoutStr :: LayoutCtx -> Text -> (PrecUnenclosed, Collage Draw)
+layoutStr lctx str =
   (,) (mempty @PrecUnenclosed) $
   layoutSel precBorder path $
-  textWithCursor
-    content
-    (\Paths{pathsSelection} -> \case
-        _ | not (syn ^. synStrEditMode) -> Nothing
-        _ | pathsSelection /= path -> Nothing
-        CursorInvisible -> Nothing
-        CursorVisible -> Just . fromIntegral $ syn ^. synStrPosition)
+  textWithCursor str
+    (\Paths{pathsSelection} ->
+     \case
+       CursorVisible
+         | selectionPath pathsSelection == path,
+           Just pos <- selectionStrPos pathsSelection
+         ->
+           Just (fromIntegral pos)
+       _ -> Nothing)
   where
     precBorder =
       PrecBorder (lctx ^. lctxPrecBordersAlways) <>
-      PrecBorder (Text.any Char.isSpace content)
+      PrecBorder (Text.any Char.isSpace str)
     path = buildPath (lctx ^. lctxPath)
-    content = syn ^. synStrContent
 
-layoutRec :: LayoutCtx -> TyName -> SynRec -> PrecPredicate -> (PrecUnenclosed, Collage Draw)
-layoutRec lctx tyName syn precPredicate =
+layoutRec ::
+  LayoutCtx ->
+  TyName ->
+  HashMap FieldName (Holey Object) ->
+  PrecPredicate ->
+  (PrecUnenclosed, Collage Draw)
+layoutRec lctx tyName fields precPredicate =
   (,) (guardUnenclosed precBorder precUnenclosed') $
   layoutSel precBorder path $
   collage
@@ -682,7 +702,7 @@ layoutRec lctx tyName syn precPredicate =
                 lctx' = lctx & lctxPath %~ (<> mkPathBuilder pathSegment)
               in
                 \obj -> layoutHoleyObject lctx' obj)
-            (syn ^. synRecFields)
+            fields
         wd :: WritingDirection
         wd = lctx ^. lctxWritingDirection
       in
@@ -697,28 +717,37 @@ layoutRec lctx tyName syn precPredicate =
 ---- Editor - Selection
 --------------------------------------------------------------------------------
 
-selectionPathEditorState :: EditorState -> Path
-selectionPathEditorState es = selectionPathHoleyObject (es ^. esExpr)
+selectionOfEditorState :: EditorState -> Selection
+selectionOfEditorState es = selectionOfHoleyObject (es ^. esExpr)
 
-selectionPathHoleyObject :: Holey Object -> Path
-selectionPathHoleyObject = \case
-  Hole -> emptyPath
+selectionOfHoleyObject :: Holey Object -> Selection
+selectionOfHoleyObject = \case
+  Hole -> Selection emptyPath Nothing Nothing
   Solid (Object tyName value) ->
     case value of
-      ValueStr _ -> emptyPath
-      ValueRec a -> selectionPathRec tyName a
+      ValueStr a -> selectionOfStr tyName a
+      ValueRec a -> selectionOfRec tyName a
 
-selectionPathRec :: TyName -> SynRec -> Path
-selectionPathRec tyName syn =
+selectionOfRec :: TyName -> SynRec -> Selection
+selectionOfRec tyName syn =
   case syn ^. synRecSel of
-    RecSelSelf _ -> emptyPath
+    RecSelSelf _ -> Selection emptyPath (Just tyName) Nothing
     RecSelChild fieldName ->
       let
         pathSegment = PathSegmentRec tyName fieldName
         recField = (syn ^. synRecFields) HashMap.! fieldName
-        pathTail = selectionPathHoleyObject recField
+        Selection pathTail tyName' strPos =
+          selectionOfHoleyObject recField
       in
-        consPath pathSegment pathTail
+        Selection (consPath pathSegment pathTail) tyName' strPos
+
+selectionOfStr :: TyName -> SynStr -> Selection
+selectionOfStr tyName syn =
+    Selection emptyPath (Just tyName) strPos
+  where
+    strPos
+      | syn ^. synStrEditMode = Just (syn ^. synStrPosition)
+      | otherwise = Nothing
 
 updatePathEditorState :: Path -> EditorState -> EditorState
 updatePathEditorState path = over esExpr (updatePathHoleyObject path)
@@ -762,24 +791,6 @@ runReactM :: ReactM a () -> ReactCtx -> a -> IO (Maybe a)
 runReactM m rctx a = runMaybeT (execStateT (runReaderT m rctx) a)
 
 newtype UndoFlag = UndoFlag Bool
-
-pprPath :: Path -> Maybe TyName -> Text
-pprPath p0 tip = Text.pack ('/' : goPath p0 "")
-  where
-    goPath p =
-      case unconsPath p of
-        Nothing -> goTip
-        Just (ps, p') -> goPathSegment ps . ('/':) . goPath p'
-    goTip =
-      case tip of
-        Nothing -> id
-        Just tyName -> (tyNameStr tyName++)
-    goPathSegment ps =
-      case ps of
-        PathSegmentRec tyName fieldName ->
-          (tyNameStr tyName++) . ('.':) . (fieldNameStr fieldName++)
-        PathSegmentSeq tyName i ->
-          (tyNameStr tyName++) . ('.':) . shows (indexToInt i)
 
 reactEditorState :: ReactCtx -> EditorState -> IO (Maybe EditorState)
 reactEditorState = runReactM (asum handlers)

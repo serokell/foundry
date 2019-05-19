@@ -71,7 +71,7 @@ createMainWindow pluginInfo esRef = do
       let
         elements = collageElements offsetZero layout
         pathsCursor = NG.findPath elements (es ^. NG.esPointer)
-        pathsSelection = NG.selectionPathEditorState es
+        pathsSelection = NG.selectionOfEditorState es
         paths = NG.Paths {NG.pathsCursor, NG.pathsSelection}
       renderElements
         (NG.withDrawCtx paths cursorVisible)
