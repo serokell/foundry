@@ -84,19 +84,19 @@ createMainWindow pluginInfo esRef = do
         elements = collageElements offsetZero layout
         rctx =
           NG.ReactCtx
-            { NG._rctxFindPath = NG.findPath elements,
-              NG._rctxInputEvent = inputEvent,
+            { NG._rctxTyEnv = pluginInfo ^. NG.pluginInfoTyEnv,
+              NG._rctxFindPath = NG.findPath elements,
               NG._rctxNodeFactory = pluginInfo ^. NG.pluginInfoNodeFactory,
-              NG._rctxDefaultValues = pluginInfo ^. NG.pluginInfoDefaultValues,
+              NG._rctxDefaultNodes = pluginInfo ^. NG.pluginInfoDefaultNodes,
               NG._rctxAllowedFieldTypes = pluginInfo ^. NG.pluginInfoAllowedFieldTypes,
               NG._rctxRecMoveMaps = pluginInfo ^. NG.pluginInfoRecMoveMaps,
               NG._rctxWritingDirection = es ^. NG.esWritingDirection }
-      mEs' <- NG.reactEditorState rctx es
+        mEs' = NG.reactEditorState inputEvent rctx es
       case mEs' of
-        Nothing -> do
+        NG.UnknownEvent -> do
           print inputEvent
           return False
-        Just es' -> do
+        NG.ReactOk es' -> do
           atomicWriteIORef esRef es'
           Gtk.widgetQueueDraw canvas
           return True

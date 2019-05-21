@@ -82,8 +82,8 @@ foundryInitEditorState et = do
       Right e -> M.I.load Nothing e
   return $ EditorState expr offsetZero False False WritingDirectionLTR [] []
 
-synImportExpr :: M.Expr Void -> Holey Object
-synImportExpr = Solid . \case
+synImportExpr :: M.Expr Void -> Node
+synImportExpr = \case
   M.Const c -> synImportConst c
   M.Var v -> synImportVar v
   M.Lam x _A b -> synImportLam x _A b
@@ -91,51 +91,51 @@ synImportExpr = Solid . \case
   M.App f a -> synImportApp f a
   M.Embed e -> absurd e
 
-synImportConst :: M.Const -> Object
+synImportConst :: M.Const -> Node
 synImportConst = \case
   M.Star -> mkRecObject "Star" [] Nothing
   M.Box -> mkRecObject "Box" [] Nothing
 
-synImportVar :: M.Var -> Object
+synImportVar :: M.Var -> Node
 synImportVar = \case
   M.V t 0 -> mkStrObject "Var" (Text.Lazy.toStrict t)
   M.V t n ->
     mkRecObject "IVar"
-      [ ("var", Solid $ mkStrObject "Var" (Text.Lazy.toStrict t)),
-        ("index", Solid $ mkStrObject "Nat" (Text.pack (show n))) ]
+      [ ("var", mkStrObject "Var" (Text.Lazy.toStrict t)),
+        ("index", mkStrObject "Nat" (Text.pack (show n))) ]
       (Just 0)
 
-synImportLam :: Text.Lazy.Text -> M.Expr Void -> M.Expr Void -> Object
+synImportLam :: Text.Lazy.Text -> M.Expr Void -> M.Expr Void -> Node
 synImportLam x _A b =
   mkRecObject "Lam"
-    [ ("var", Solid $ mkStrObject "Var" (Text.Lazy.toStrict x)),
+    [ ("var", mkStrObject "Var" (Text.Lazy.toStrict x)),
       ("ty", synImportExpr _A),
       ("body", synImportExpr b) ]
     (Just 2)
 
-synImportPi :: Text.Lazy.Text -> M.Expr Void -> M.Expr Void -> Object
+synImportPi :: Text.Lazy.Text -> M.Expr Void -> M.Expr Void -> Node
 synImportPi x _A _B =
   mkRecObject "Pi"
-    [ ("var", Solid $ mkStrObject "Var" (Text.Lazy.toStrict x)),
+    [ ("var", mkStrObject "Var" (Text.Lazy.toStrict x)),
       ("ty", synImportExpr _A),
       ("body", synImportExpr _B) ]
     (Just 2)
 
-synImportApp :: M.Expr Void -> M.Expr Void -> Object
+synImportApp :: M.Expr Void -> M.Expr Void -> Node
 synImportApp f a =
   mkRecObject "App"
     [ ("fn", synImportExpr f),
       ("arg", synImportExpr a) ]
     (Just 0)
 
-mkRecObject :: TyName -> [(FieldName, Holey Object)] -> Maybe Int -> Object
+mkRecObject :: TyName -> [(FieldName, Node)] -> Maybe Int -> Node
 mkRecObject tyName fields index =
-    Object tyName (ValueRec (SynRec (HashMap.fromList fields) sel))
+    Node (NodeRecSel recSel) (Object tyName (ValueRec (HashMap.fromList fields)))
   where
-    sel = case index of
+    recSel = case index of
       Nothing -> RecSelSelf SelfSelEmpty
       Just i -> RecSelSelf (SelfSelChild (fst (fields !! i)))
 
-mkStrObject :: TyName -> Text -> Object
+mkStrObject :: TyName -> Text -> Node
 mkStrObject tyName str =
-  Object tyName (ValueStr (SynStr str (Text.length str) False))
+  Node (NodeStrSel (Text.length str) False) (Object tyName (ValueStr str))

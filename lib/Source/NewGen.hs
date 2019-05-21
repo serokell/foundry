@@ -23,20 +23,13 @@ module Source.NewGen
   mkTyUnion,
 
   -- * Values
-  Holey(..),
+  Node(..),
   Object(..),
   Value(..),
 
-  SynStr(..),
-  synStrContent,
-  synStrPosition,
-  synStrEditMode,
-
+  NodeSel(..),
   SelfSel(..),
   RecSel(..),
-  SynRec(..),
-  synRecFields,
-  synRecSel,
 
   -- * Path
   PathSegment(..),
@@ -63,6 +56,7 @@ module Source.NewGen
   findPath,
 
   -- * React
+  ReactResult(..),
   keyLetter,
   keyCodeLetter,
   shiftChar,
@@ -90,10 +84,10 @@ module Source.NewGen
   lctxWritingDirection,
 
   ReactCtx(..),
+  rctxTyEnv,
   rctxFindPath,
-  rctxInputEvent,
   rctxNodeFactory,
-  rctxDefaultValues,
+  rctxDefaultNodes,
   rctxAllowedFieldTypes,
   rctxRecMoveMaps,
   rctxWritingDirection,
@@ -115,7 +109,7 @@ module Source.NewGen
   pluginInfoRecLayouts,
   pluginInfoNodeFactory,
   pluginInfoRecMoveMaps,
-  pluginInfoDefaultValues,
+  pluginInfoDefaultNodes,
   pluginInfoAllowedFieldTypes,
   mkPluginInfo,
 
@@ -138,12 +132,11 @@ import Control.Applicative
 import Control.Monad
 import Control.Monad.Reader
 import Control.Monad.State
-import Control.Monad.Trans.Maybe
+import Control.Monad.Writer
 import Control.Lens as Lens hiding (elements)
-import Data.Monoid
-import Data.Foldable
 import Data.Function (on)
 import Data.String
+import Data.Maybe
 import Inj
 import Inj.Base ()
 
@@ -162,7 +155,7 @@ import Slay.Cairo.Element
 import Source.Input
 import qualified Source.Input.KeyCode as KeyCode
 
-import Sdam.Core hiding (Value(ValueRec, ValueStr), Object(Object))
+import Sdam.Core
 
 mkTyUnion :: [TyName] -> TyUnion
 mkTyUnion = TyUnion . HashSet.fromList
@@ -171,23 +164,9 @@ mkTyUnion = TyUnion . HashSet.fromList
 -- Values
 --------------------------------------------------------------------------------
 
-data Holey a =
-  Hole |
-  Solid a
+data Node = Hole | Node NodeSel (Object Node)
 
-data Object =
-  Object TyName Value
-
-data Value =
-  ValueRec SynRec |
-  ValueStr SynStr
-
-data SynStr =
-  SynStr
-    { _synStrContent :: Text,
-      _synStrPosition :: Int,
-      _synStrEditMode :: Bool
-    }
+data NodeSel = NodeRecSel RecSel | NodeStrSel Int Bool
 
 data SelfSel =
   -- for empty synRecFields
@@ -198,12 +177,6 @@ data SelfSel =
 data RecSel =
   RecSelSelf SelfSel |
   RecSelChild FieldName
-
-data SynRec =
-  SynRec
-    { _synRecFields :: HashMap FieldName (Holey Object),
-      _synRecSel :: RecSel
-    }
 
 --------------------------------------------------------------------------------
 ---- Drawing
@@ -490,25 +463,18 @@ maybeA :: Alternative f => Maybe a -> f a
 maybeA = maybe empty pure
 
 --------------------------------------------------------------------------------
----- Lenses
---------------------------------------------------------------------------------
-
-makeLenses ''SynStr
-makeLenses ''SynRec
-
---------------------------------------------------------------------------------
 ---- Editor
 --------------------------------------------------------------------------------
 
 data EditorState =
   EditorState
-    { _esExpr :: Holey Object,
+    { _esExpr :: Node,
       _esPointer :: Offset,
       _esHoverBarEnabled :: Bool,
       _esPrecBordersAlways :: Bool,
       _esWritingDirection :: WritingDirection,
-      _esUndo :: [Holey Object],
-      _esRedo :: [Holey Object]
+      _esUndo :: [Node],
+      _esRedo :: [Node]
     }
 
 data NodeCreateFn =
@@ -528,10 +494,10 @@ data LayoutCtx =
 
 data ReactCtx =
   ReactCtx
-    { _rctxFindPath :: Offset -> Maybe Path,
-      _rctxInputEvent :: InputEvent,
+    { _rctxTyEnv :: Env,
+      _rctxFindPath :: Offset -> Maybe Path,
       _rctxNodeFactory :: [NodeCreateFn],
-      _rctxDefaultValues :: HashMap TyName Value,
+      _rctxDefaultNodes :: HashMap TyName Node,
       _rctxAllowedFieldTypes :: HashMap (TyName, FieldName) (HashSet TyName),
       _rctxRecMoveMaps :: HashMap TyName RecMoveMap,
       _rctxWritingDirection :: WritingDirection
@@ -575,12 +541,6 @@ insertModeEvent = \case
   KeyPress [] keyCode -> keyLetter 'i' keyCode
   _ -> False
 
-guardInputEvent ::
-  (MonadReader ReactCtx m, MonadPlus m) =>
-  (InputEvent -> Bool) ->
-  m ()
-guardInputEvent = guard <=< views rctxInputEvent
-
 --------------------------------------------------------------------------------
 ---- Editor - Layout
 --------------------------------------------------------------------------------
@@ -593,7 +553,7 @@ layoutEditorState :: LayoutCtx -> EditorState -> Collage Draw
 layoutEditorState lctx es =
   (withBars . centered) collage
   where
-    (_, collage) = layoutHoleyObject lctx (es ^. esExpr) precPredicate
+    (_, collage) = layoutNode lctx (es ^. esExpr) precPredicate
     precPredicate = PrecPredicate (const (PrecBorder False))
     hoverBar = do
       guard $ es ^. esHoverBarEnabled
@@ -633,10 +593,10 @@ pprSelection selection = Text.pack ('/' : goPath selectionPath "")
     goStrPos Nothing = id
     goStrPos (Just i) = ('[':) . shows i . (']':)
 
-layoutHoleyObject :: LayoutCtx -> Holey Object -> PrecPredicate -> (PrecUnenclosed, Collage Draw)
-layoutHoleyObject lctx = \case
+layoutNode :: LayoutCtx -> Node -> PrecPredicate -> (PrecUnenclosed, Collage Draw)
+layoutNode lctx = \case
   Hole -> \_precPredicate -> layoutHole lctx
-  Solid syn -> layoutObject lctx syn
+  Node _ object -> layoutObject lctx object
 
 layoutHole :: LayoutCtx -> (PrecUnenclosed, Collage Draw)
 layoutHole lctx =
@@ -649,12 +609,13 @@ layoutHole lctx =
 
 layoutObject ::
   LayoutCtx ->
-  Object ->
+  Object Node ->
   PrecPredicate ->
   (PrecUnenclosed, Collage Draw)
 layoutObject lctx = \case
-  Object tyName (ValueRec syn) -> layoutRec lctx tyName (syn ^. synRecFields)
-  Object _ (ValueStr syn) -> \_precPredicate -> layoutStr lctx (syn ^. synStrContent)
+  Object tyName (ValueRec fields) -> layoutRec lctx tyName fields
+  Object _ (ValueSeq _) -> error "TODO (int-index): layoutObject ValueSeq"
+  Object _ (ValueStr str) -> \_precPredicate -> layoutStr lctx str
 
 layoutStr :: LayoutCtx -> Text -> (PrecUnenclosed, Collage Draw)
 layoutStr lctx str =
@@ -678,7 +639,7 @@ layoutStr lctx str =
 layoutRec ::
   LayoutCtx ->
   TyName ->
-  HashMap FieldName (Holey Object) ->
+  HashMap FieldName Node ->
   PrecPredicate ->
   (PrecUnenclosed, Collage Draw)
 layoutRec lctx tyName fields precPredicate =
@@ -701,7 +662,7 @@ layoutRec lctx tyName fields precPredicate =
                 pathSegment = PathSegmentRec tyName fieldName
                 lctx' = lctx & lctxPath %~ (<> mkPathBuilder pathSegment)
               in
-                \obj -> layoutHoleyObject lctx' obj)
+                \obj -> layoutNode lctx' obj)
             fields
         wd :: WritingDirection
         wd = lctx ^. lctxWritingDirection
@@ -718,339 +679,442 @@ layoutRec lctx tyName fields precPredicate =
 --------------------------------------------------------------------------------
 
 selectionOfEditorState :: EditorState -> Selection
-selectionOfEditorState es = selectionOfHoleyObject (es ^. esExpr)
+selectionOfEditorState es = selectionOfNode (es ^. esExpr)
 
-selectionOfHoleyObject :: Holey Object -> Selection
-selectionOfHoleyObject = \case
+selectionOfNode :: Node -> Selection
+selectionOfNode = \case
   Hole -> Selection emptyPath Nothing Nothing
-  Solid (Object tyName value) ->
-    case value of
-      ValueStr a -> selectionOfStr tyName a
-      ValueRec a -> selectionOfRec tyName a
+  Node nodeSel (Object tyName (ValueStr _)) ->
+    let NodeStrSel pos em = nodeSel
+    in Selection emptyPath (Just tyName) (if em then Just pos else Nothing)
+  Node _ (Object _ (ValueSeq _)) ->
+    error "TODO (int-index): selectionOfNode ValueSeq"
+  Node nodeSel (Object tyName (ValueRec fields)) ->
+    let NodeRecSel recSel = nodeSel in
+    case recSel of
+      RecSelSelf _ -> Selection emptyPath (Just tyName) Nothing
+      RecSelChild fieldName ->
+        let
+          pathSegment = PathSegmentRec tyName fieldName
+          recField = fields HashMap.! fieldName
+          Selection pathTail tyName' strPos =
+            selectionOfNode recField
+        in
+          Selection (consPath pathSegment pathTail) tyName' strPos
 
-selectionOfRec :: TyName -> SynRec -> Selection
-selectionOfRec tyName syn =
-  case syn ^. synRecSel of
-    RecSelSelf _ -> Selection emptyPath (Just tyName) Nothing
-    RecSelChild fieldName ->
-      let
-        pathSegment = PathSegmentRec tyName fieldName
-        recField = (syn ^. synRecFields) HashMap.! fieldName
-        Selection pathTail tyName' strPos =
-          selectionOfHoleyObject recField
-      in
-        Selection (consPath pathSegment pathTail) tyName' strPos
-
-selectionOfStr :: TyName -> SynStr -> Selection
-selectionOfStr tyName syn =
-    Selection emptyPath (Just tyName) strPos
-  where
-    strPos
-      | syn ^. synStrEditMode = Just (syn ^. synStrPosition)
-      | otherwise = Nothing
-
-updatePathEditorState :: Path -> EditorState -> EditorState
-updatePathEditorState path = over esExpr (updatePathHoleyObject path)
-
-updatePathHoleyObject :: Path -> Holey Object -> Holey Object
-updatePathHoleyObject path = \case
-  Hole -> Hole
-  Solid (Object tyName value) ->
-    Solid (Object tyName (case value of
-      ValueStr syn -> ValueStr syn
-      ValueRec syn -> ValueRec (updatePathRec tyName path syn)))
-
-updatePathRec :: TyName -> Path -> SynRec -> SynRec
-updatePathRec tyName path syn =
-  case unconsPath path of
-    Nothing -> syn & synRecSel %~ toRecSelSelf
-    Just (PathSegmentSeq _ _, _) ->
-      error "TODO (int-index): updatePathRec PathSegmentSeq"
-    Just (PathSegmentRec tyName' fieldName, path') ->
-      if tyName' /= tyName then syn else
-      case syn ^. synRecFields . at fieldName of
-        Nothing -> syn
-        Just a ->
-          let
-            a' = updatePathHoleyObject path' a
-            fields' = HashMap.insert fieldName a' (syn ^. synRecFields)
-          in
-            SynRec fields' (RecSelChild fieldName)
+updatePathNode :: Path -> Node -> Node
+updatePathNode path node = case node of
+  Hole -> node
+  Node _ (Object _ (ValueStr _)) -> node
+  Node _ (Object _ (ValueSeq _)) ->
+    error "TODO (int-index): updatePathNode ValueSeq"
+  Node nodeSel (Object tyName (ValueRec fields)) ->
+    let NodeRecSel recSel = nodeSel in
+    case unconsPath path of
+      Nothing ->
+        let recSel' = toRecSelSelf recSel
+        in Node (NodeRecSel recSel') (Object tyName (ValueRec fields))
+      Just (PathSegmentSeq _ _, _) ->
+        error "TODO (int-index): updatePathRec PathSegmentSeq"
+      Just (PathSegmentRec tyName' fieldName, path') ->
+        if tyName' /= tyName then node else
+        case fields ^. at fieldName of
+          Nothing -> node
+          Just a ->
+            let
+              a' = updatePathNode path' a
+              fields' = HashMap.insert fieldName a' fields
+              recSel' = RecSelChild fieldName
+            in
+              Node (NodeRecSel recSel') (Object tyName (ValueRec fields'))
 
 toRecSelSelf :: RecSel -> RecSel
 toRecSelSelf (RecSelChild fieldId) = RecSelSelf (SelfSelChild fieldId)
-toRecSelSelf (RecSelSelf a) = RecSelSelf a
+toRecSelSelf recSel = recSel
+
+toRecSelChild :: RecSel -> RecSel
+toRecSelChild (RecSelSelf (SelfSelChild fieldId)) = RecSelChild fieldId
+toRecSelChild recSel = recSel
 
 --------------------------------------------------------------------------------
 ---- Editor - React
 --------------------------------------------------------------------------------
 
-type ReactM a = ReaderT ReactCtx (StateT a (MaybeT IO))
-
-runReactM :: ReactM a () -> ReactCtx -> a -> IO (Maybe a)
-runReactM m rctx a = runMaybeT (execStateT (runReaderT m rctx) a)
+setUndoFlag :: MonadWriter UndoFlag m => m ()
+setUndoFlag = tell (UndoFlag True)
 
 newtype UndoFlag = UndoFlag Bool
 
-reactEditorState :: ReactCtx -> EditorState -> IO (Maybe EditorState)
-reactEditorState = runReactM (asum handlers)
-  where
-    handlers :: [ReactM EditorState ()]
-    handlers =
-      [ handlePointerMotion,
-        handleButtonPress,
-        handleCtrl_h,
-        handleCtrl_b,
-        handleCtrl_w,
-        handleRedirectExpr,
-        handleCtrl_z,
-        handleCtrl_r ]
-    handlePointerMotion = do
-      PointerMotion x y <- view rctxInputEvent
-      esPointer .= Offset (fromIntegral x) (fromIntegral y)
-    handleButtonPress = do
-      ButtonPress <- view rctxInputEvent
-      Just p <- view rctxFindPath <*> use esPointer
-      modify (updatePathEditorState p)
-    handleCtrl_h = do
-      KeyPress [Control] keyCode <- view rctxInputEvent
-      guard $ keyLetter 'h' keyCode
-      esHoverBarEnabled %= not
-    handleCtrl_b = do
-      KeyPress [Control] keyCode <- view rctxInputEvent
-      guard $ keyLetter 'b' keyCode
-      esPrecBordersAlways %= not
-    handleCtrl_w = do
-      KeyPress [Control] keyCode <- view rctxInputEvent
-      guard $ keyLetter 'w' keyCode
-      esWritingDirection %= \case
-        WritingDirectionLTR -> WritingDirectionRTL
-        WritingDirectionRTL -> WritingDirectionLTR
-    handleCtrl_z = do
-      KeyPress [Control] keyCode <- view rctxInputEvent
-      guard $ keyLetter 'z' keyCode
-      (u:us) <- use esUndo
-      expr <- use esExpr
-      esRedo %= (expr:)
-      esUndo .= us
-      esExpr .= u
-    handleCtrl_r = do
-      KeyPress [Control] keyCode <- view rctxInputEvent
-      guard $ keyLetter 'r' keyCode
-      (r:rs) <- use esRedo
-      expr <- use esExpr
-      esUndo %= (expr:)
-      esRedo .= rs
-      esExpr .= r
-    handleRedirectExpr = do
-      expr <- use esExpr
-      let checkTyName = const True -- Allow any construction at the top level.
-      UndoFlag undoFlag <- zoom esExpr (reactHoleyObject checkTyName)
-      when undoFlag $ do
-        esUndo %= (expr:)
-        esRedo .= []
+instance Semigroup UndoFlag where
+  UndoFlag u1 <> UndoFlag u2 = UndoFlag (u1 || u2)
 
-reactHoleyObject :: (TyName -> Bool) -> ReactM (Holey Object) UndoFlag
-reactHoleyObject checkTyName = asum handlers
-  where
-    handlers :: [ReactM (Holey Object) UndoFlag]
-    handlers =
-      [ handleRedirect,
-        handleDelete ]
-    handleDelete = do
-      guardInputEvent $ keyCodeLetter KeyCode.Delete 'x'
-      a <- get
-      case a of
-        Hole -> return (UndoFlag False)
-        Solid _ -> do
-          put Hole
-          return (UndoFlag True)
-    handleRedirect =
-      ReaderT $ \rctx ->
-      StateT $ \case
-        Hole ->
-          let
-            objects =
-              [ Object tyName ((rctx ^. rctxDefaultValues) HashMap.! tyName) |
-                ncf <- rctx ^. rctxNodeFactory,
-                (ncf ^. ncfCheckInputEvent) (rctx ^. rctxInputEvent),
-                let tyName = ncf ^. ncfTyName,
-                checkTyName tyName ]
-          in
-            case objects of
-              [] -> MaybeT (return Nothing)
-              (a:_) -> return (UndoFlag True, Solid a)
-        Solid a -> do
-          (undoFlag, a') <- runStateT (runReaderT reactObject rctx) a
-          return (undoFlag, Solid a')
+instance Monoid UndoFlag where
+  mempty = UndoFlag False
 
-mkDefaultValues :: Env -> HashMap TyName RecMoveMap -> HashMap TyName Value
-mkDefaultValues env recMoveMaps =
-  HashMap.mapWithKey mkDefVal (envMap env)
+data ReactResult a = UnknownEvent | ReactOk a
+
+reactEditorState :: InputEvent -> ReactCtx -> EditorState -> ReactResult EditorState
+
+reactEditorState (PointerMotion x y) _ es = ReactOk $
+  es & esPointer .~ Offset (fromIntegral x) (fromIntegral y)
+
+reactEditorState ButtonPress rctx es
+  | Just p <- (rctx ^. rctxFindPath) (es ^. esPointer)
+  = ReactOk $ es & esExpr %~ updatePathNode p
+
+reactEditorState (KeyPress [Control] keyCode) _ es
+  | keyLetter 'h' keyCode
+  = ReactOk $ es & esHoverBarEnabled %~ not
+  | keyLetter 'b' keyCode
+  = ReactOk $ es & esPrecBordersAlways %~ not
+  | keyLetter 'w' keyCode
+  = ReactOk $
+    es & esWritingDirection %~ \case
+      WritingDirectionLTR -> WritingDirectionRTL
+      WritingDirectionRTL -> WritingDirectionLTR
+  | keyLetter 'z' keyCode,
+    (u:us) <- es ^. esUndo,
+    let expr = es ^. esExpr
+  = ReactOk $
+    es & esExpr .~ u
+       & esUndo .~ us
+       & esRedo %~ (expr:)
+  | keyLetter 'r' keyCode,
+    (r:rs) <- es ^. esRedo,
+    let expr = es ^. esExpr
+  = ReactOk $
+    es & esExpr .~ r
+       & esRedo .~ rs
+       & esUndo %~ (expr:)
+
+reactEditorState inputEvent rctx es
+  | Just act <- getAction env nodeFactory wd sel inputEvent,
+    Just (UndoFlag undoFlag, expr') <- applyAction act rctx expr
+  = ReactOk $
+    if undoFlag then
+      es & esExpr .~ expr'
+         & esUndo %~ (expr:)
+         & esRedo .~ []
+    else
+      es & esExpr .~ expr'
   where
-    mkDefVal :: TyName -> Ty -> Value
-    mkDefVal tyName = \case
-      TyStr -> ValueStr (SynStr "" 0 True)
-      TySeq _ -> error "TODO (int-index): mkDefVal TySeq"
+    env = rctx ^. rctxTyEnv
+    nodeFactory = rctx ^. rctxNodeFactory
+    wd = rctx ^. rctxWritingDirection
+    sel = selectionOfNode expr
+    expr = es ^. esExpr
+
+reactEditorState _ _ _ = UnknownEvent
+
+newNodeTyName :: [NodeCreateFn] -> InputEvent -> Maybe TyName
+newNodeTyName nodeFactory inputEvent =
+  listToMaybe $ do
+    ncf <- nodeFactory
+    guard $ (ncf ^. ncfCheckInputEvent) inputEvent
+    [ncf ^. ncfTyName]
+
+data Action =
+  ActionDeleteNode Path |
+  ActionCreateNode Path TyName |
+  ActionEnterEditMode Path |
+  ActionExitEditMode Path |
+  ActionDeleteCharBackward Path |
+  ActionDeleteCharForward Path |
+  ActionMoveStrCursorBackward Path |
+  ActionMoveStrCursorForward Path |
+  ActionInsertLetter Path Char |
+  ActionSelectParent Path |
+  ActionSelectChild Path |
+  ActionSelectSiblingBackward Path |
+  ActionSelectSiblingForward Path
+
+getAction ::
+  Env ->
+  [NodeCreateFn] ->
+  WritingDirection ->
+  Selection ->
+  InputEvent ->
+  Maybe Action
+getAction
+    Env{envMap}
+    nodeFactory
+    wd
+    Selection{selectionPath, selectionTyName, selectionStrPos}
+    inputEvent
+
+  -- Enter edit mode.
+  | Just tyName <- selectionTyName,
+    Just TyStr <- HashMap.lookup tyName envMap,
+    Nothing <- selectionStrPos,
+    KeyPress [] keyCode <- inputEvent,
+    keyLetter 'i' keyCode
+  = Just $ ActionEnterEditMode selectionPath
+
+  -- Exit edit mode.
+  | Just tyName <- selectionTyName,
+    Just TyStr <- HashMap.lookup tyName envMap,
+    KeyPress [] KeyCode.Escape <- inputEvent
+  = Just $ ActionExitEditMode selectionPath
+
+  -- Delete character backward.
+  | Just tyName <- selectionTyName,
+    Just TyStr <- HashMap.lookup tyName envMap,
+    Just _ <- selectionStrPos,
+    KeyPress [] KeyCode.Backspace <- inputEvent
+  = Just $ ActionDeleteCharBackward selectionPath
+
+  -- Delete character forward.
+  | Just tyName <- selectionTyName,
+    Just TyStr <- HashMap.lookup tyName envMap,
+    Just _ <- selectionStrPos,
+    KeyPress [] KeyCode.Delete <- inputEvent
+  = Just $ ActionDeleteCharForward selectionPath
+
+  -- Move string cursor backward.
+  | Just tyName <- selectionTyName,
+    Just TyStr <- HashMap.lookup tyName envMap,
+    Just _ <- selectionStrPos,
+    KeyPress [] KeyCode.ArrowLeft <- inputEvent
+  = Just $ ActionMoveStrCursorBackward selectionPath
+
+  -- Move string cursor forward.
+  | Just tyName <- selectionTyName,
+    Just TyStr <- HashMap.lookup tyName envMap,
+    Just _ <- selectionStrPos,
+    KeyPress [] KeyCode.ArrowRight <- inputEvent
+  = Just $ ActionMoveStrCursorForward selectionPath
+
+  -- Insert letter.
+  | Just tyName <- selectionTyName,
+    Just TyStr <- HashMap.lookup tyName envMap,
+    Just _ <- selectionStrPos,
+    KeyPress mods keyCode <- inputEvent,
+    Control `notElem` mods,
+    Just c <- keyChar keyCode
+  = Just $ ActionInsertLetter selectionPath c
+
+  -- Delete node.
+  | keyCodeLetter KeyCode.Delete 'x' inputEvent
+  = Just $ ActionDeleteNode selectionPath
+
+  -- Create node.
+  | Nothing <- selectionTyName,  -- it's a hole
+    Just tyName <- newNodeTyName nodeFactory inputEvent
+  = Just $ ActionCreateNode selectionPath tyName
+
+  -- Select parent node.
+  | keyCodeLetter KeyCode.ArrowUp 'k' inputEvent
+  = Just $ ActionSelectParent selectionPath
+
+  -- Select child node.
+  | keyCodeLetter KeyCode.ArrowDown 'j' inputEvent
+  = Just $ ActionSelectChild selectionPath
+
+  -- Select sibling node left.
+  | keyCodeLetter KeyCode.ArrowLeft 'h' inputEvent
+  = Just $ case wd of
+      WritingDirectionLTR -> ActionSelectSiblingBackward selectionPath
+      WritingDirectionRTL -> ActionSelectSiblingForward selectionPath
+
+  -- Select sibling node right.
+  | keyCodeLetter KeyCode.ArrowRight 'l' inputEvent
+  = Just $ case wd of
+      WritingDirectionLTR -> ActionSelectSiblingForward selectionPath
+      WritingDirectionRTL -> ActionSelectSiblingBackward selectionPath
+
+  | otherwise
+  = Nothing
+
+type ReactM = WriterT UndoFlag (ReaderT ReactCtx (StateT Node Maybe)) ()
+
+applyAction :: Action -> ReactCtx -> Node -> Maybe (UndoFlag, Node)
+applyAction act rctx node =
+  flip runStateT node $
+  flip runReaderT rctx $
+  execWriterT $
+  applyActionM act
+
+applyActionM :: Action -> ReactM
+
+applyActionM (ActionDeleteNode path) =
+  zoom (atPath path) $ do
+    Node{} <- get
+    put Hole
+    setUndoFlag
+
+applyActionM (ActionCreateNode path tyName) =
+  zoom (atPath path) $ do
+    Hole <- get
+    allowedFieldTypes <- view rctxAllowedFieldTypes
+    guard (validChild allowedFieldTypes)
+    defaultNodes <- view rctxDefaultNodes
+    let node = defaultNodes HashMap.! tyName
+    put node
+    setUndoFlag
+  where
+    validChild allowedFieldTypes =
+      case pathTip path of
+        Nothing -> True
+        Just (PathSegmentSeq _ _) ->
+          error "TODO (int-index): validChild PathSegmentSeq"
+        Just (PathSegmentRec recTyName fieldName) ->
+          HashSet.member tyName (allowedFieldTypes HashMap.! (recTyName, fieldName))
+
+applyActionM (ActionEnterEditMode path) =
+  zoom (atPath path) $ do
+    Node nodeSel (Object tyName (ValueStr str)) <- get
+    let NodeStrSel pos _ = nodeSel
+    put $ Node (NodeStrSel pos True) (Object tyName (ValueStr str))
+
+applyActionM (ActionExitEditMode path) =
+  zoom (atPath path) $ do
+    Node nodeSel (Object tyName (ValueStr str)) <- get
+    let NodeStrSel pos _ = nodeSel
+    put $ Node (NodeStrSel pos False) (Object tyName (ValueStr str))
+
+applyActionM (ActionDeleteCharBackward path) =
+  zoom (atPath path) $ do
+    Node nodeSel (Object tyName (ValueStr str)) <- get
+    let NodeStrSel pos em = nodeSel
+    guard (pos > 0)
+    let pos' = pos - 1
+    let (before, after) = Text.splitAt pos' str
+        str' = before <> Text.drop 1 after
+    put $ Node (NodeStrSel pos' em) (Object tyName (ValueStr str'))
+    setUndoFlag
+
+applyActionM (ActionDeleteCharForward path) =
+  zoom (atPath path) $ do
+    Node nodeSel (Object tyName (ValueStr str)) <- get
+    let NodeStrSel pos _ = nodeSel
+    guard (pos < Text.length str)
+    let (before, after) = Text.splitAt pos str
+        str' = before <> Text.drop 1 after
+    put $ Node nodeSel (Object tyName (ValueStr str'))
+    setUndoFlag
+
+applyActionM (ActionMoveStrCursorBackward path) =
+  zoom (atPath path) $ do
+    Node nodeSel (Object tyName (ValueStr str)) <- get
+    let NodeStrSel pos em = nodeSel
+    guard (pos > 0)
+    let pos' = pos - 1
+    put $ Node (NodeStrSel pos' em) (Object tyName (ValueStr str))
+
+applyActionM (ActionMoveStrCursorForward path) =
+  zoom (atPath path) $ do
+    Node nodeSel (Object tyName (ValueStr str)) <- get
+    let NodeStrSel pos em = nodeSel
+    guard (pos < Text.length str)
+    let pos' = pos + 1
+    put $ Node (NodeStrSel pos' em) (Object tyName (ValueStr str))
+
+applyActionM (ActionInsertLetter path c) =
+  zoom (atPath path) $ do
+    Node nodeSel (Object tyName (ValueStr str)) <- get
+    let NodeStrSel pos editMode = nodeSel
+    guard editMode
+    let (before, after) = Text.splitAt pos str
+        str' = before <> Text.singleton c <> after
+        pos' = pos + 1
+    put $ Node (NodeStrSel pos' editMode) (Object tyName (ValueStr str'))
+    setUndoFlag
+
+applyActionM (ActionSelectParent path) = do
+  path' <- maybeA (pathParent path)
+  zoom (atPath path') $ do
+    Node nodeSel (Object tyName (ValueRec fields)) <- get
+    let NodeRecSel recSel = nodeSel
+    let recSel' = toRecSelSelf recSel
+    put $ Node (NodeRecSel recSel') (Object tyName (ValueRec fields))
+
+applyActionM (ActionSelectChild path) =
+  zoom (atPath path) $ do
+    Node nodeSel (Object tyName (ValueRec fields)) <- get
+    let NodeRecSel recSel = nodeSel
+    let recSel' = toRecSelChild recSel
+    put $ Node (NodeRecSel recSel') (Object tyName (ValueRec fields))
+
+applyActionM (ActionSelectSiblingBackward path) = do
+  path' <- maybeA (pathParent path)
+  zoomPathPrefix path' $ do
+    Node nodeSel (Object tyName (ValueRec fields)) <- get
+    let NodeRecSel recSel = nodeSel
+    RecSelChild fieldName <- pure recSel
+    recMoveMaps <- view rctxRecMoveMaps
+    let moveMap = rmmBackward (recMoveMaps HashMap.! tyName)
+    fieldName' <- maybeA (HashMap.lookup fieldName moveMap)
+    let recSel' =(RecSelChild fieldName')
+    put $ Node (NodeRecSel recSel') (Object tyName (ValueRec fields))
+
+applyActionM (ActionSelectSiblingForward path) = do
+  path' <- maybeA (pathParent path)
+  zoomPathPrefix path' $ do
+    Node nodeSel (Object tyName (ValueRec fields)) <- get
+    let NodeRecSel recSel = nodeSel
+    RecSelChild fieldName <- pure recSel
+    recMoveMaps <- view rctxRecMoveMaps
+    let moveMap = rmmForward (recMoveMaps HashMap.! tyName)
+    fieldName' <- maybeA (HashMap.lookup fieldName moveMap)
+    let recSel' = RecSelChild fieldName'
+    put $ Node (NodeRecSel recSel') (Object tyName (ValueRec fields))
+
+pathTip :: Path -> Maybe PathSegment
+pathTip (Path ps) = listToMaybe (List.reverse ps)
+
+pathParent :: Path -> Maybe Path
+pathParent (Path ps) =
+  case List.reverse ps of
+    [] -> Nothing
+    _:ps' -> Just (Path (List.reverse ps'))
+
+atPath :: Path -> Traversal' Node Node
+atPath p =
+  case unconsPath p of
+    Nothing -> id
+    Just (ps, p') -> atPathSegment ps . atPath p'
+
+atPathSegment :: PathSegment -> Traversal' Node Node
+atPathSegment (PathSegmentSeq _ _) =
+  error "TODO (int-index): updatePathRec PathSegmentSeq"
+atPathSegment (PathSegmentRec tyName fieldName) =
+  \f node ->
+    case node of
+      Node nodeSel (Object tyName' value)
+        | tyName == tyName',
+          ValueRec fields <- value,
+          let NodeRecSel recSel = nodeSel,
+          Just a <- HashMap.lookup fieldName fields
+        -> f a <&> \a' ->
+             let fields' = (HashMap.insert fieldName a' fields)
+             in Node (NodeRecSel recSel) (Object tyName' (ValueRec fields'))
+      _ -> pure node
+
+zoomPathPrefix :: Path -> ReactM -> ReactM
+zoomPathPrefix p m =
+  case unconsPath p of
+    Nothing -> m
+    Just (ps, p') ->
+      zoom (atPathSegment ps) (zoomPathPrefix p' m) <|> m
+
+mkDefaultNodes :: Env -> HashMap TyName RecMoveMap -> HashMap TyName Node
+mkDefaultNodes env recMoveMaps =
+  HashMap.mapWithKey mkDefNode (envMap env)
+  where
+    mkDefNode :: TyName -> Ty -> Node
+    mkDefNode tyName = \case
+      TyStr -> Node (NodeStrSel 0 True) (Object tyName (ValueStr ""))
+      TySeq _ -> error "TODO (int-index): mkDefNode TySeq"
       TyRec fieldTys ->
         let
           fields = HashMap.map (const Hole) fieldTys
           recMoveMap = recMoveMaps HashMap.! tyName
-          sel =
+          recSel =
             case rmmFieldOrder recMoveMap of
               [] -> RecSelSelf SelfSelEmpty
               fieldName:_ -> RecSelChild fieldName
         in
-          ValueRec (SynRec fields sel)
-
-reactObject :: ReactM Object UndoFlag
-reactObject =
-  ReaderT $ \rctx ->
-  StateT $ \(Object tyName value) ->
-    case value of
-      ValueStr syn -> do
-        (undoFlag, syn') <- runStateT (runReaderT reactText rctx) syn
-        return (undoFlag, Object tyName (ValueStr syn'))
-      ValueRec syn -> do
-        (undoFlag, syn') <- runStateT (runReaderT (reactRec tyName) rctx) syn
-        return (undoFlag, Object tyName (ValueRec syn'))
-
-reactText :: ReactM SynStr UndoFlag
-reactText =
-  do
-    undoFlag <- asum handlers
-    modify normalizeSynStr
-    return undoFlag
-  where
-    handlers :: [ReactM SynStr UndoFlag]
-    handlers =
-      [ handle_i,
-        handleEscape,
-        handleEnter,
-        handleBackspace,
-        handleDelete,
-        handleArrowLeft,
-        handleArrowRight,
-        handleLetter ]
-    handle_i = do
-      False <- use synStrEditMode
-      KeyPress [] keyCode <- view rctxInputEvent
-      guard (keyLetter 'i' keyCode)
-      synStrEditMode .= True
-      return (UndoFlag False)
-    handleEscape = do
-      KeyPress [] KeyCode.Escape <- view rctxInputEvent
-      synStrEditMode .= False
-      return (UndoFlag False)
-    handleEnter = do
-      KeyPress [] KeyCode.Enter <- view rctxInputEvent
-      synStrEditMode .= False
-      return (UndoFlag False)
-    handleBackspace = do
-      True <- use synStrEditMode
-      KeyPress [] KeyCode.Backspace <- view rctxInputEvent
-      True <- uses synStrPosition (>0)
-      synStrPosition -= 1
-      (before, after) <- gets splitSynStr
-      synStrContent .= before <> Text.drop 1 after
-      return (UndoFlag True)
-    handleDelete = do
-      True <- use synStrEditMode
-      KeyPress [] KeyCode.Delete <- view rctxInputEvent
-      (before, after) <- gets splitSynStr
-      synStrContent .= before <> Text.drop 1 after
-      return (UndoFlag True)
-    handleArrowLeft = do
-      True <- use synStrEditMode
-      KeyPress [] KeyCode.ArrowLeft <- view rctxInputEvent
-      synStrPosition -= 1
-      return (UndoFlag False)
-    handleArrowRight = do
-      True <- use synStrEditMode
-      KeyPress [] KeyCode.ArrowRight <- view rctxInputEvent
-      synStrPosition += 1
-      return (UndoFlag False)
-    handleLetter = do
-      True <- use synStrEditMode
-      KeyPress mods keyCode <- view rctxInputEvent
-      guard (Control `notElem` mods)
-      Just c <- pure (keyChar keyCode)
-      modify (insertSynStr (Text.singleton c))
-      synStrPosition %= succ
-      return (UndoFlag True)
-
-splitSynStr :: SynStr -> (Text, Text)
-splitSynStr syn = Text.splitAt (syn ^. synStrPosition) (syn ^. synStrContent)
-
-insertSynStr :: Text -> SynStr -> SynStr
-insertSynStr t syn =
-  let (before, after) = splitSynStr syn
-  in syn & synStrContent .~ before <> t <> after
-
-normalizeSynStr :: SynStr -> SynStr
-normalizeSynStr syn = syn & synStrPosition %~ normalizePosition
-  where
-    normalizePosition :: Int -> Int
-    normalizePosition = max 0 . min (views synStrContent Text.length syn)
-
-reactRec :: TyName -> ReactM SynRec UndoFlag
-reactRec recTyName = asum handlers
-  where
-    handlers :: [ReactM SynRec UndoFlag]
-    handlers =
-      [ handleRedirect,
-        handleArrowUp,
-        handleArrowDown,
-        handleArrowLeft,
-        handleArrowRight ]
-    handleRedirect :: ReactM SynRec UndoFlag
-    handleRedirect = do
-      RecSelChild fieldName <- use synRecSel
-      allowedFieldTypes <- view rctxAllowedFieldTypes
-      let checkTyName tyName = HashSet.member tyName (allowedFieldTypes HashMap.! (recTyName, fieldName))
-      zoom
-        (synRecFields . at fieldName . unsafeSingular _Just)
-        (reactHoleyObject checkTyName)
-    handleArrowUp :: ReactM SynRec UndoFlag
-    handleArrowUp = do
-      guardInputEvent $ keyCodeLetter KeyCode.ArrowUp 'k'
-      RecSelChild fieldName <- use synRecSel
-      synRecSel .= RecSelSelf (SelfSelChild fieldName)
-      return (UndoFlag False)
-    handleArrowDown :: ReactM SynRec UndoFlag
-    handleArrowDown = do
-      guardInputEvent $ keyCodeLetter KeyCode.ArrowDown 'j'
-      RecSelSelf (SelfSelChild fieldName) <- use synRecSel
-      synRecSel .= RecSelChild fieldName
-      return (UndoFlag False)
-    handleArrowLeft :: ReactM SynRec UndoFlag
-    handleArrowLeft = do
-      guardInputEvent $ keyCodeLetter KeyCode.ArrowLeft 'h'
-      RecSelChild fieldName <- use synRecSel
-      recMoveMaps <- view rctxRecMoveMaps
-      wd <- view rctxWritingDirection
-      let
-        moveDirection = case wd of
-          WritingDirectionLTR -> rmmBackward
-          WritingDirectionRTL -> rmmForward
-        moveMap = moveDirection (recMoveMaps HashMap.! recTyName)
-      fieldName' <- maybeA (HashMap.lookup fieldName moveMap)
-      synRecSel .= RecSelChild fieldName'
-      return (UndoFlag False)
-    handleArrowRight :: ReactM SynRec UndoFlag
-    handleArrowRight = do
-      guardInputEvent $ keyCodeLetter KeyCode.ArrowRight 'l'
-      RecSelChild fieldName <- use synRecSel
-      recMoveMaps <- view rctxRecMoveMaps
-      wd <- view rctxWritingDirection
-      let
-        moveDirection = case wd of
-          WritingDirectionLTR -> rmmForward
-          WritingDirectionRTL -> rmmBackward
-        moveMap = moveDirection (recMoveMaps HashMap.! recTyName)
-      fieldName' <- maybeA (HashMap.lookup fieldName moveMap)
-      synRecSel .= RecSelChild fieldName'
-      return (UndoFlag False)
+          Node (NodeRecSel recSel) (Object tyName (ValueRec fields))
 
 mkAllowedFieldTypes :: Env -> HashMap (TyName, FieldName) (HashSet TyName)
 mkAllowedFieldTypes env =
@@ -1116,7 +1180,7 @@ data PluginInfo =
       _pluginInfoRecLayouts :: HashMap TyName ALayoutFn,
       _pluginInfoNodeFactory :: [NodeCreateFn],
       _pluginInfoRecMoveMaps :: HashMap TyName RecMoveMap,
-      _pluginInfoDefaultValues :: HashMap TyName Value,
+      _pluginInfoDefaultNodes :: HashMap TyName Node,
       _pluginInfoAllowedFieldTypes :: HashMap (TyName, FieldName) (HashSet TyName)
     }
 
@@ -1130,7 +1194,7 @@ mkPluginInfo plugin =
       _pluginInfoRecLayouts = recLayouts,
       _pluginInfoNodeFactory = nodeFactory,
       _pluginInfoRecMoveMaps = recMoveMaps,
-      _pluginInfoDefaultValues = defaultValues,
+      _pluginInfoDefaultNodes = defaultNodes,
       _pluginInfoAllowedFieldTypes = allowedFieldTypes
     }
   where
@@ -1138,5 +1202,5 @@ mkPluginInfo plugin =
     recLayouts = plugin ^. pluginRecLayouts
     nodeFactory = plugin ^. pluginNodeFactory
     recMoveMaps = mkRecMoveMaps recLayouts
-    defaultValues = mkDefaultValues tyEnv recMoveMaps
+    defaultNodes = mkDefaultNodes tyEnv recMoveMaps
     allowedFieldTypes = mkAllowedFieldTypes tyEnv
