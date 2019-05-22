@@ -28,7 +28,6 @@ module Source.NewGen
   Value(..),
 
   NodeSel(..),
-  SelfSel(..),
   RecSel(..),
 
   -- * Path
@@ -166,17 +165,15 @@ mkTyUnion = TyUnion . HashSet.fromList
 
 data Node = Hole | Node NodeSel (Object Node)
 
-data NodeSel = NodeRecSel RecSel | NodeStrSel Int Bool
-
-data SelfSel =
-  -- for empty synRecFields
-  SelfSelEmpty |
-  -- for non-empty synRecFields
-  SelfSelChild FieldName
+data NodeSel =
+  NodeRecSel RecSel |
+  NodeStrSel Int Bool   -- True = edit mode
 
 data RecSel =
-  RecSelSelf SelfSel |
-  RecSelChild FieldName
+  -- for records without children
+  RecSel0 |
+  -- for records with children
+  RecSel FieldName Bool   -- True = child selected
 
 --------------------------------------------------------------------------------
 ---- Drawing
@@ -692,8 +689,11 @@ selectionOfNode = \case
   Node nodeSel (Object tyName (ValueRec fields)) ->
     let NodeRecSel recSel = nodeSel in
     case recSel of
-      RecSelSelf _ -> Selection emptyPath (Just tyName) Nothing
-      RecSelChild fieldName ->
+      RecSel0 ->
+        Selection emptyPath (Just tyName) Nothing
+      RecSel _ False ->
+        Selection emptyPath (Just tyName) Nothing
+      RecSel fieldName True ->
         let
           pathSegment = PathSegmentRec tyName fieldName
           recField = fields HashMap.! fieldName
@@ -724,17 +724,17 @@ updatePathNode path node = case node of
             let
               a' = updatePathNode path' a
               fields' = HashMap.insert fieldName a' fields
-              recSel' = RecSelChild fieldName
+              recSel' = RecSel fieldName True
             in
               Node (NodeRecSel recSel') (Object tyName (ValueRec fields'))
 
 toRecSelSelf :: RecSel -> RecSel
-toRecSelSelf (RecSelChild fieldId) = RecSelSelf (SelfSelChild fieldId)
-toRecSelSelf recSel = recSel
+toRecSelSelf RecSel0 = RecSel0
+toRecSelSelf (RecSel fieldName _) = RecSel fieldName False
 
-toRecSelChild :: RecSel -> RecSel
-toRecSelChild (RecSelSelf (SelfSelChild fieldId)) = RecSelChild fieldId
-toRecSelChild recSel = recSel
+toRecSelChild :: RecSel -> Maybe RecSel
+toRecSelChild RecSel0 = Nothing
+toRecSelChild (RecSel fieldName _) = Just (RecSel fieldName True)
 
 --------------------------------------------------------------------------------
 ---- Editor - React
@@ -1032,7 +1032,7 @@ applyActionM (ActionSelectChild path) =
   zoom (atPath path) $ do
     Node nodeSel (Object tyName (ValueRec fields)) <- get
     let NodeRecSel recSel = nodeSel
-    let recSel' = toRecSelChild recSel
+    recSel' <- maybeA (toRecSelChild recSel)
     put $ Node (NodeRecSel recSel') (Object tyName (ValueRec fields))
 
 applyActionM (ActionSelectSiblingBackward path) = do
@@ -1040,11 +1040,11 @@ applyActionM (ActionSelectSiblingBackward path) = do
   zoomPathPrefix path' $ do
     Node nodeSel (Object tyName (ValueRec fields)) <- get
     let NodeRecSel recSel = nodeSel
-    RecSelChild fieldName <- pure recSel
+    RecSel fieldName True <- pure recSel
     recMoveMaps <- view rctxRecMoveMaps
     let moveMap = rmmBackward (recMoveMaps HashMap.! tyName)
     fieldName' <- maybeA (HashMap.lookup fieldName moveMap)
-    let recSel' =(RecSelChild fieldName')
+    let recSel' = RecSel fieldName' True
     put $ Node (NodeRecSel recSel') (Object tyName (ValueRec fields))
 
 applyActionM (ActionSelectSiblingForward path) = do
@@ -1052,11 +1052,11 @@ applyActionM (ActionSelectSiblingForward path) = do
   zoomPathPrefix path' $ do
     Node nodeSel (Object tyName (ValueRec fields)) <- get
     let NodeRecSel recSel = nodeSel
-    RecSelChild fieldName <- pure recSel
+    RecSel fieldName True <- pure recSel
     recMoveMaps <- view rctxRecMoveMaps
     let moveMap = rmmForward (recMoveMaps HashMap.! tyName)
     fieldName' <- maybeA (HashMap.lookup fieldName moveMap)
-    let recSel' = RecSelChild fieldName'
+    let recSel' = RecSel fieldName' True
     put $ Node (NodeRecSel recSel') (Object tyName (ValueRec fields))
 
 pathTip :: Path -> Maybe PathSegment
@@ -1111,8 +1111,8 @@ mkDefaultNodes env recMoveMaps =
           recMoveMap = recMoveMaps HashMap.! tyName
           recSel =
             case rmmFieldOrder recMoveMap of
-              [] -> RecSelSelf SelfSelEmpty
-              fieldName:_ -> RecSelChild fieldName
+              [] -> RecSel0
+              fieldName:_ -> RecSel fieldName True
         in
           Node (NodeRecSel recSel) (Object tyName (ValueRec fields))
 

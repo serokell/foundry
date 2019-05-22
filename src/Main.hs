@@ -133,8 +133,8 @@ mkRecObject tyName fields index =
     Node (NodeRecSel recSel) (Object tyName (ValueRec (HashMap.fromList fields)))
   where
     recSel = case index of
-      Nothing -> RecSelSelf SelfSelEmpty
-      Just i -> RecSelSelf (SelfSelChild (fst (fields !! i)))
+      Nothing -> RecSel0
+      Just i -> RecSel (fst (fields !! i)) False
 
 mkStrObject :: TyName -> Text -> Node
 mkStrObject tyName str =
