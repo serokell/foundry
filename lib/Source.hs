@@ -13,11 +13,9 @@ import Control.Monad.IO.Class
 import qualified Graphics.UI.Gtk as Gtk
 import Data.IORef
 import Control.Lens ((^.), over, _Left)
-import Data.Foldable (toList)
 import Text.Megaparsec (errorBundlePretty)
 
 import Slay.Core
-import Slay.Cairo.Render
 import Source.Phaser
 import Source.Input (InputEvent(..), Modifier(..))
 import qualified Source.NewGen as NG
@@ -69,23 +67,21 @@ createMainWindow pluginInfo esRef = do
       liftIO $ writeIORef layoutRef layout
       cursorVisible <- liftIO $ phaserCurrent cursorPhaser
       let
-        elements = collageElements offsetZero layout
-        pathsCursor = NG.findPath elements (es ^. NG.esPointer)
+        drawing = foldMapCollage NG.toDrawing offsetZero layout
+        pathsCursor = NG.drawingFindPath drawing (es ^. NG.esPointer)
         pathsSelection = NG.selectionOfEditorState es
         paths = NG.Paths {NG.pathsCursor, NG.pathsSelection}
-      renderElements
-        (NG.withDrawCtx paths cursorVisible)
-        (NG.toCairoElementsDraw (toList elements))
+      NG.drawingRender drawing (NG.withDrawCtx paths cursorVisible)
 
     handleInputEvent inputEvent = do
       es <- readIORef esRef
       layout <- readIORef layoutRef
       let
-        elements = collageElements offsetZero layout
+        drawing = foldMapCollage NG.toDrawing offsetZero layout
         rctx =
           NG.ReactCtx
             { NG._rctxTyEnv = pluginInfo ^. NG.pluginInfoTyEnv,
-              NG._rctxFindPath = NG.findPath elements,
+              NG._rctxFindPath = NG.drawingFindPath drawing,
               NG._rctxNodeFactory = pluginInfo ^. NG.pluginInfoNodeFactory,
               NG._rctxDefaultNodes = pluginInfo ^. NG.pluginInfoDefaultNodes,
               NG._rctxAllowedFieldTypes = pluginInfo ^. NG.pluginInfoAllowedFieldTypes,

@@ -45,14 +45,16 @@ module Source.NewGen
   DrawCtx(..),
   withDrawCtx,
   Draw,
-  toCairoElementsDraw,
+  Drawing(..),
+  toDrawing,
+  drawingFindPath,
+  drawingRender,
   PrecPredicate,
   precAllow,
   Layout(vsep, field),
   noPrec,
   ALayoutFn(..),
   WritingDirection(..),
-  findPath,
 
   -- * React
   ReactResult(..),
@@ -124,7 +126,6 @@ import Data.HashMap.Strict (HashMap)
 import Data.HashSet (HashSet)
 import Data.Text (Text)
 import Numeric.Natural (Natural)
-import Data.Either
 import Data.List as List
 import Data.List.NonEmpty as NonEmpty hiding (cons)
 import Control.Applicative
@@ -143,6 +144,7 @@ import qualified Data.HashMap.Strict as HashMap
 import qualified Data.HashSet as HashSet
 import qualified Data.Text as Text
 import qualified Data.Char as Char
+import qualified Graphics.Rendering.Cairo as Cairo (Render)
 
 import Slay.Core
 import Slay.Cairo.Prim.Color
@@ -220,19 +222,6 @@ toCairoElementDraw :: Draw -> CairoElement DrawCtx
 toCairoElementDraw = \case
   DrawCairoElement ce -> ce
   DrawEmbed ce _ -> ce
-
-toCairoElementsDraw :: [Positioned Draw] -> [Positioned (CairoElement DrawCtx)]
-toCairoElementsDraw elements =
-    -- We want DrawEmbed elements to have a higher z-index,
-    -- so we place them after all other elements.
-    otherElements ++ embedElements
-  where
-    toEither (At o el) =
-      case el of
-        DrawEmbed ce _ -> Left (At o ce)
-        DrawCairoElement ce -> Right (At o ce)
-    (embedElements, otherElements) =
-      partitionEithers (List.map toEither elements)
 
 instance g ~ DrawCtx => Inj (CairoElement g) Draw where
   inj = DrawCairoElement
@@ -327,18 +316,48 @@ instance Layout ALayoutFn where
   field fieldName precPredicate =
     ALayoutFn (field fieldName precPredicate)
 
-findPath ::
-  NonEmpty (Positioned Draw) ->
-  Offset ->
-  Maybe Path
-findPath c o =
-  getFirst $ foldMap (First . check) c
+newtype FindPath = FindPath (Offset -> Maybe Path)
+
+instance Semigroup FindPath where
+  FindPath f1 <> FindPath f2 =
+    FindPath $ \point -> f1 point <|> f2 point
+
+instance Monoid FindPath where
+  mempty = FindPath (const Nothing)
+
+data Drawing = Drawing FindPath (CairoRender DrawCtx) (CairoRender DrawCtx)
+
+drawingFindPath :: Drawing -> Offset -> Maybe Path
+drawingFindPath (Drawing (FindPath f) _ _) = f
+
+drawingRender :: Drawing -> (forall x. DrawCtx x -> x) -> Cairo.Render ()
+drawingRender (Drawing _ p d) getG =
+  cairoRender (p <> d) getG
+
+instance Semigroup Drawing where
+  Drawing f1 p1 d1 <> Drawing f2 p2 d2 =
+    Drawing (f1 <> f2) (p1 <> p2) (d1 <> d2)
+
+findPathInBox :: Path -> (Offset, Extents) -> FindPath
+findPathInBox p box =
+  FindPath $ \point ->
+    if insideBox box point
+    then Just p
+    else Nothing
+
+toDrawing :: Positioned Draw -> Drawing
+toDrawing (At o (DrawEmbed ce p)) =
+    Drawing findPath pic dec
   where
-    check (At o' d) = do
-      let e = extentsOf d
-      DrawEmbed _ p <- Just d
-      guard $ insideBox (o', e) o
-      Just p
+    findPath = findPathInBox p (o, extentsOf ce)
+    pic = mempty
+    dec = cairoPositionedElementRender (At o ce)
+toDrawing (At o (DrawCairoElement ce)) =
+    Drawing findPath pic dec
+  where
+    findPath = mempty
+    pic = cairoPositionedElementRender (At o ce)
+    dec = mempty
 
 dark1, dark2, light1, white :: Color
 dark1  = RGB 41 41 41
