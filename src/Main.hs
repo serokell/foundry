@@ -80,7 +80,7 @@ foundryInitEditorState et = do
     case M.P.exprFromText (fromString et) of
       Left err -> die (show err)
       Right e -> M.I.load Nothing e
-  return $ EditorState expr offsetZero False False WritingDirectionLTR [] []
+  return $ EditorState expr offsetZero False False WritingDirectionLTR [] StackHidden [] []
 
 synImportExpr :: M.Expr Void -> Node
 synImportExpr = \case

@@ -9,10 +9,11 @@ module Source
     ) where
 
 import Control.Monad
-import Control.Monad.IO.Class
+import Control.Monad.State
 import qualified Graphics.UI.Gtk as Gtk
 import Data.IORef
-import Control.Lens ((^.), over, _Left)
+import Control.Lens
+import Data.Tuple
 import Text.Megaparsec (errorBundlePretty)
 
 import Slay.Core
@@ -35,6 +36,9 @@ createMainWindow pluginInfo esRef = do
   window <- Gtk.windowNew
   _ <- Gtk.on window Gtk.objectDestroy Gtk.mainQuit
 
+  initialStackVis <-
+    view NG.esStackVis <$> readIORef esRef
+
   canvas <- createMainCanvas
 
   -- TODO: PointerMotionHintMask; eventRequestMotions
@@ -49,8 +53,14 @@ createMainWindow pluginInfo esRef = do
   pointerRef :: IORef (Maybe Offset)
     <- newIORef Nothing
 
-  cursorPhaser <- newPhaser 530000 NG.CursorVisible NG.blink
-    (\_ -> Gtk.postGUIAsync (Gtk.widgetQueueDraw canvas))
+  cursorPhaser <- newPhaser 530000 NG.CursorVisible NG.blink $
+    \_ -> Gtk.postGUIAsync (Gtk.widgetQueueDraw canvas)
+
+  stackPhaser <- newPhaser 530000 initialStackVis (const NG.StackHidden) $
+    \t -> Gtk.postGUIAsync $ do
+      atomicRunStateIORef' esRef $ do
+        NG.esStackVis .= t
+      Gtk.widgetQueueDraw canvas
 
   let
     updateCanvas viewport = do
@@ -95,6 +105,7 @@ createMainWindow pluginInfo esRef = do
         NG.ReactOk es' -> do
           atomicWriteIORef esRef es'
           Gtk.widgetQueueDraw canvas
+          phaserReset stackPhaser (es ^. NG.esStackVis)
           return True
 
   void $ Gtk.on canvas Gtk.draw $ do
@@ -150,3 +161,9 @@ readTyEnv path = do
       Sdam.Parser.pEnv
       path
       tyEnvDesc
+
+-- | Atomically modifies the contents of an 'IORef' using the provided 'State'
+-- action. Forces both the value stored in the 'IORef' as well as the value
+-- returned.
+atomicRunStateIORef' :: IORef s -> State s a -> IO a
+atomicRunStateIORef' ref st = atomicModifyIORef' ref (swap . runState st)

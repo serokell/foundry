@@ -40,6 +40,7 @@ module Source.NewGen
   offsetZero,
   CursorBlink(..),
   blink,
+  StackVis(..),
   Selection(..),
   Paths(..),
   DrawCtx(..),
@@ -70,6 +71,8 @@ module Source.NewGen
   esHoverBarEnabled,
   esPrecBordersAlways,
   esWritingDirection,
+  esStack,
+  esStackVis,
   esUndo,
   esRedo,
 
@@ -188,6 +191,8 @@ blink = \case
   CursorVisible -> CursorInvisible
   CursorInvisible -> CursorVisible
 
+data StackVis = StackVisible | StackHidden
+
 data Selection =
   Selection
     { selectionPath :: Path,
@@ -246,6 +251,22 @@ centerOf (Extents vacantWidth vacantHeight) collage =
         right = excessWidth2,
         top = excessHeight1,
         bottom = excessHeight2 }
+
+topRightOf :: Extents -> Collage Draw -> LRTB Natural
+topRightOf (Extents vacantWidth vacantHeight) collage =
+  let
+    Extents width height = collageExtents collage
+    m = collageMargin collage
+    minus a b = fromInteger (max 0 (toInteger a - toInteger b))
+    excessWidth = vacantWidth `minus` (width + marginRight m)
+    excessHeight = vacantHeight `minus` (height + marginTop m)
+  in
+    LRTB
+      { left = excessWidth,
+        right = marginRight m,
+        top = marginTop m,
+        bottom = excessHeight }
+
 
 data WritingDirection = WritingDirectionLTR | WritingDirectionRTL
 
@@ -359,8 +380,9 @@ toDrawing (At o (DrawCairoElement ce)) =
     pic = cairoPositionedElementRender (At o ce)
     dec = mempty
 
-dark1, dark2, light1, white :: Color
+dark1, dark1', dark2, light1, white :: Color
 dark1  = RGB 41 41 41
+dark1' = RGB 35 35 35
 dark2  = RGB 77 77 77
 light1 = RGB 179 179 179
 white  = RGB 255 255 255
@@ -426,11 +448,15 @@ hashSet_isSubsetOf :: (Eq a, Hashable a) => HashSet a -> HashSet a -> Bool
 hashSet_isSubsetOf sub sup =
   all (\k -> HashSet.member k sup) sub
 
-layoutSel :: PrecBorder -> Path -> Collage Draw -> Collage Draw
-layoutSel (PrecBorder precBorder) path =
-  collageWithMargin (mkMargin (marginWidth - precBorderWidth)) .
-  active outlineWidth path .
-  (decorateMargin . DecorationAbove) (outline outlineWidth borderColor) .
+newtype ShowSel = ShowSel Bool
+
+layoutSel :: ShowSel -> PrecBorder -> Path -> Collage Draw -> Collage Draw
+layoutSel (ShowSel showSel) (PrecBorder precBorder) path =
+  (if showSel then
+    collageWithMargin (mkMargin (marginWidth - precBorderWidth)) .
+    active outlineWidth path .
+    (decorateMargin . DecorationAbove) (outline outlineWidth borderColor)
+   else id) .
   (if precBorder then precedenceBorder precBorderWidth else id) .
   collageWithMargin (mkMargin marginWidth)
   where
@@ -489,6 +515,8 @@ data EditorState =
       _esHoverBarEnabled :: Bool,
       _esPrecBordersAlways :: Bool,
       _esWritingDirection :: WritingDirection,
+      _esStack :: [Node],
+      _esStackVis :: StackVis,
       _esUndo :: [Node],
       _esRedo :: [Node]
     }
@@ -526,6 +554,13 @@ data RecMoveMap =
       rmmBackward :: HashMap FieldName FieldName
     }
 
+data ReactState =
+  ReactState
+    { _rstNode :: Node,
+      _rstStack :: [Node],
+      _rstStackVis :: StackVis
+    }
+
 --------------------------------------------------------------------------------
 ---- Lenses
 --------------------------------------------------------------------------------
@@ -534,6 +569,7 @@ makeLenses ''EditorState
 makeLenses ''NodeCreateFn
 makeLenses ''LayoutCtx
 makeLenses ''ReactCtx
+makeLenses ''ReactState
 
 --------------------------------------------------------------------------------
 ---- Utils
@@ -567,9 +603,8 @@ pprPointer Offset{offsetX,offsetY} =
 
 layoutEditorState :: LayoutCtx -> EditorState -> Collage Draw
 layoutEditorState lctx es =
-  (withBars . centered) collage
+  (withBars . withStackCollage) mainExprCollage
   where
-    (_, collage) = layoutNode lctx (es ^. esExpr) precPredicate
     precPredicate = PrecPredicate (const (PrecBorder False))
     hoverBar = do
       guard $ es ^. esHoverBarEnabled
@@ -583,8 +618,23 @@ layoutEditorState lctx es =
         Nothing -> id
         Just bars' -> \c ->
           collageCompose offsetZero c (foldr1 @NonEmpty vertLeft bars')
-    centered c =
+    withStackCollage =
+      case es ^. esStackVis of
+        StackHidden -> id
+        StackVisible ->
+          \c -> collageCompose offsetZero c nodeStackCollage
+    nodeStackCollage =
       let
+        c =
+          (decorateMargin . DecorationBelow) backgroundRect $
+          layoutNodeStack lctx (es ^. esStack)
+        backgroundRect = rect nothing (inj dark1')
+        padding = topRightOf (lctx ^. lctxViewport) c
+      in
+        substrate padding (rect nothing nothing) c
+    mainExprCollage =
+      let
+        (_, c) = layoutNode (ShowSel True) lctx (es ^. esExpr) precPredicate
         padding = centerOf (lctx ^. lctxViewport) c
         backgroundRect = rect nothing (inj dark1)
       in
@@ -609,34 +659,47 @@ pprSelection selection = Text.pack ('/' : goPath selectionPath "")
     goStrPos Nothing = id
     goStrPos (Just i) = ('[':) . shows i . (']':)
 
-layoutNode :: LayoutCtx -> Node -> PrecPredicate -> (PrecUnenclosed, Collage Draw)
-layoutNode lctx = \case
-  Hole -> \_precPredicate -> layoutHole lctx
-  Node _ object -> layoutObject lctx object
+layoutNodeStack :: LayoutCtx -> [Node] -> Collage Draw
+layoutNodeStack lctx nodes =
+  (decorateMargin . DecorationAbove) (outline outlineWidth borderColor) $
+  collageWithMargin (Margin 4 4 4 4) $
+    case nodes of
+      [] -> punct "end of stack"
+      n:_ -> snd (layoutNode (ShowSel False) lctx n precPredicate)
+  where
+    precPredicate = PrecPredicate (const (PrecBorder False))
+    outlineWidth = 2
+    borderColor = rgb 94 134 80
 
-layoutHole :: LayoutCtx -> (PrecUnenclosed, Collage Draw)
-layoutHole lctx =
+layoutNode :: ShowSel -> LayoutCtx -> Node -> PrecPredicate -> (PrecUnenclosed, Collage Draw)
+layoutNode ss lctx = \case
+  Hole -> \_precPredicate -> layoutHole ss lctx
+  Node _ object -> layoutObject ss lctx object
+
+layoutHole :: ShowSel -> LayoutCtx -> (PrecUnenclosed, Collage Draw)
+layoutHole ss lctx =
   (,) (mempty @PrecUnenclosed) $
-  layoutSel precBorder path $
+  layoutSel ss precBorder path $
   punct "_"
   where
     precBorder = PrecBorder (lctx ^. lctxPrecBordersAlways)
     path = buildPath (lctx ^. lctxPath)
 
 layoutObject ::
+  ShowSel ->
   LayoutCtx ->
   Object Node ->
   PrecPredicate ->
   (PrecUnenclosed, Collage Draw)
-layoutObject lctx = \case
-  Object tyName (ValueRec fields) -> layoutRec lctx tyName fields
+layoutObject ss lctx = \case
+  Object tyName (ValueRec fields) -> layoutRec ss lctx tyName fields
   Object _ (ValueSeq _) -> error "TODO (int-index): layoutObject ValueSeq"
-  Object _ (ValueStr str) -> \_precPredicate -> layoutStr lctx str
+  Object _ (ValueStr str) -> \_precPredicate -> layoutStr ss lctx str
 
-layoutStr :: LayoutCtx -> Text -> (PrecUnenclosed, Collage Draw)
-layoutStr lctx str =
+layoutStr :: ShowSel -> LayoutCtx -> Text -> (PrecUnenclosed, Collage Draw)
+layoutStr ss lctx str =
   (,) (mempty @PrecUnenclosed) $
-  layoutSel precBorder path $
+  layoutSel ss precBorder path $
   textWithCursor str
     (\Paths{pathsSelection} ->
      \case
@@ -653,14 +716,15 @@ layoutStr lctx str =
     path = buildPath (lctx ^. lctxPath)
 
 layoutRec ::
+  ShowSel ->
   LayoutCtx ->
   TyName ->
   HashMap FieldName Node ->
   PrecPredicate ->
   (PrecUnenclosed, Collage Draw)
-layoutRec lctx tyName fields precPredicate =
+layoutRec ss lctx tyName fields precPredicate =
   (,) (guardUnenclosed precBorder precUnenclosed') $
-  layoutSel precBorder path $
+  layoutSel ss precBorder path $
   collage
   where
     (precUnenclosed, collage) =
@@ -678,7 +742,7 @@ layoutRec lctx tyName fields precPredicate =
                 pathSegment = PathSegmentRec tyName fieldName
                 lctx' = lctx & lctxPath %~ (<> mkPathBuilder pathSegment)
               in
-                \obj -> layoutNode lctx' obj)
+                \obj -> layoutNode ss lctx' obj)
             fields
         wd :: WritingDirection
         wd = lctx ^. lctxWritingDirection
@@ -807,21 +871,24 @@ reactEditorState (KeyPress [Control] keyCode) _ es
        & esUndo %~ (expr:)
 
 reactEditorState inputEvent rctx es
-  | Just act <- getAction env nodeFactory wd sel inputEvent,
-    Just (UndoFlag undoFlag, expr') <- applyAction act rctx expr
+  | Just act <- getAction env nodeFactory wd sel stkVis inputEvent,
+    Just (UndoFlag undoFlag, rst') <- applyAction act rctx rst
   = ReactOk $
-    if undoFlag then
-      es & esExpr .~ expr'
-         & esUndo %~ (expr:)
-         & esRedo .~ []
-    else
-      es & esExpr .~ expr'
+    let es' = es & esExpr .~ (rst' ^. rstNode)
+                 & esStack .~ (rst' ^. rstStack)
+                 & esStackVis .~ (rst' ^. rstStackVis)
+    in if undoFlag then
+         es' & esUndo %~ (expr:)
+             & esRedo .~ []
+       else es'
   where
     env = rctx ^. rctxTyEnv
     nodeFactory = rctx ^. rctxNodeFactory
     wd = rctx ^. rctxWritingDirection
     sel = selectionOfNode expr
     expr = es ^. esExpr
+    stkVis = es ^. esStackVis
+    rst = ReactState expr (es ^. esStack) stkVis
 
 reactEditorState _ _ _ = UnknownEvent
 
@@ -835,6 +902,10 @@ newNodeTyName nodeFactory inputEvent =
 data Action =
   ActionDeleteNode Path |
   ActionCreateNode Path TyName |
+  ActionPushStack Path |
+  ActionPopSwapStack Path |
+  ActionRotateStack |
+  ActionDropStack |
   ActionEnterEditMode Path |
   ActionExitEditMode Path |
   ActionDeleteCharBackward Path |
@@ -852,6 +923,7 @@ getAction ::
   [NodeCreateFn] ->
   WritingDirection ->
   Selection ->
+  StackVis ->
   InputEvent ->
   Maybe Action
 getAction
@@ -859,6 +931,7 @@ getAction
     nodeFactory
     wd
     Selection{selectionPath, selectionTyName, selectionStrPos}
+    stkVis
     inputEvent
 
   -- Enter edit mode.
@@ -912,6 +985,12 @@ getAction
     Just c <- keyChar keyCode
   = Just $ ActionInsertLetter selectionPath c
 
+  -- Drop a node from the stack.
+  | StackVisible <- stkVis,
+    KeyPress [] keyCode <- inputEvent,
+    keyLetter 'x' keyCode
+  = Just ActionDropStack
+
   -- Delete node.
   | keyCodeLetter KeyCode.Delete 'x' inputEvent
   = Just $ ActionDeleteNode selectionPath
@@ -920,6 +999,21 @@ getAction
   | Nothing <- selectionTyName,  -- it's a hole
     Just tyName <- newNodeTyName nodeFactory inputEvent
   = Just $ ActionCreateNode selectionPath tyName
+
+  -- Push a node to the stack.
+  | KeyPress [] keyCode <- inputEvent,
+    keyLetter 'y' keyCode
+  = Just $ ActionPushStack selectionPath
+
+  -- Pop/swap a node from the stack.
+  | KeyPress [] keyCode <- inputEvent,
+    keyLetter 'p' keyCode
+  = Just $ ActionPopSwapStack selectionPath
+
+  -- Rotate stack.
+  | KeyPress [] keyCode <- inputEvent,
+    keyLetter 'r' keyCode
+  = Just ActionRotateStack
 
   -- Select parent node.
   | keyCodeLetter KeyCode.ArrowUp 'k' inputEvent
@@ -944,25 +1038,30 @@ getAction
   | otherwise
   = Nothing
 
-type ReactM = WriterT UndoFlag (ReaderT ReactCtx (StateT Node Maybe)) ()
+type ReactM s = WriterT UndoFlag (ReaderT ReactCtx (StateT s Maybe)) ()
 
-applyAction :: Action -> ReactCtx -> Node -> Maybe (UndoFlag, Node)
-applyAction act rctx node =
-  flip runStateT node $
+applyAction :: Action -> ReactCtx -> ReactState -> Maybe (UndoFlag, ReactState)
+applyAction act rctx rst =
+  flip runStateT rst $
   flip runReaderT rctx $
   execWriterT $
   applyActionM act
 
-applyActionM :: Action -> ReactM
+applyActionM :: Action -> ReactM ReactState
 
-applyActionM (ActionDeleteNode path) =
-  zoom (atPath path) $ do
-    Node{} <- get
-    put Hole
-    setUndoFlag
+applyActionM (ActionDeleteNode path) = do
+  rstStackVis .= StackVisible
+  nodes <-
+    zoom (rstNode . atPath path) $ do
+      node@Node{} <- get
+      put Hole
+      return [node]
+  forM_ nodes $ \node ->
+    rstStack %= (node:)
+  setUndoFlag
 
 applyActionM (ActionCreateNode path tyName) =
-  zoom (atPath path) $ do
+  zoom (rstNode . atPath path) $ do
     Hole <- get
     allowedFieldTypes <- view rctxAllowedFieldTypes
     guard (validChild allowedFieldTypes)
@@ -979,20 +1078,51 @@ applyActionM (ActionCreateNode path tyName) =
         Just (PathSegmentRec recTyName fieldName) ->
           HashSet.member tyName (allowedFieldTypes HashMap.! (recTyName, fieldName))
 
+applyActionM (ActionPushStack path) = do
+  rstStackVis .= StackVisible
+  parent <- use rstNode
+  let nodes = parent ^.. atPath path
+  forM_ nodes $ \node ->
+    rstStack %= (node:)
+
+applyActionM (ActionPopSwapStack path) = do
+  rstStackVis .= StackVisible
+  n:ns <- use rstStack
+  rstStack .= ns
+  nodes <-
+    zoom (rstNode . atPath path) $ do
+      node <- get
+      put n
+      setUndoFlag
+      case node of
+        Hole -> return []
+        Node{} -> return [node]
+  forM_ nodes $ \node ->
+    rstStack %= (node:)
+
+applyActionM ActionRotateStack = do
+  stkVis <- use rstStackVis
+  case stkVis of
+    StackVisible -> rstStack %= rotate
+    StackHidden -> rstStackVis .= StackVisible
+
+applyActionM ActionDropStack = do
+  rstStack %= List.drop 1
+
 applyActionM (ActionEnterEditMode path) =
-  zoom (atPath path) $ do
+  zoom (rstNode . atPath path) $ do
     Node nodeSel (Object tyName (ValueStr str)) <- get
     let NodeStrSel pos _ = nodeSel
     put $ Node (NodeStrSel pos True) (Object tyName (ValueStr str))
 
 applyActionM (ActionExitEditMode path) =
-  zoom (atPath path) $ do
+  zoom (rstNode . atPath path) $ do
     Node nodeSel (Object tyName (ValueStr str)) <- get
     let NodeStrSel pos _ = nodeSel
     put $ Node (NodeStrSel pos False) (Object tyName (ValueStr str))
 
 applyActionM (ActionDeleteCharBackward path) =
-  zoom (atPath path) $ do
+  zoom (rstNode . atPath path) $ do
     Node nodeSel (Object tyName (ValueStr str)) <- get
     let NodeStrSel pos em = nodeSel
     guard (pos > 0)
@@ -1003,7 +1133,7 @@ applyActionM (ActionDeleteCharBackward path) =
     setUndoFlag
 
 applyActionM (ActionDeleteCharForward path) =
-  zoom (atPath path) $ do
+  zoom (rstNode . atPath path) $ do
     Node nodeSel (Object tyName (ValueStr str)) <- get
     let NodeStrSel pos _ = nodeSel
     guard (pos < Text.length str)
@@ -1013,7 +1143,7 @@ applyActionM (ActionDeleteCharForward path) =
     setUndoFlag
 
 applyActionM (ActionMoveStrCursorBackward path) =
-  zoom (atPath path) $ do
+  zoom (rstNode . atPath path) $ do
     Node nodeSel (Object tyName (ValueStr str)) <- get
     let NodeStrSel pos em = nodeSel
     guard (pos > 0)
@@ -1021,7 +1151,7 @@ applyActionM (ActionMoveStrCursorBackward path) =
     put $ Node (NodeStrSel pos' em) (Object tyName (ValueStr str))
 
 applyActionM (ActionMoveStrCursorForward path) =
-  zoom (atPath path) $ do
+  zoom (rstNode . atPath path) $ do
     Node nodeSel (Object tyName (ValueStr str)) <- get
     let NodeStrSel pos em = nodeSel
     guard (pos < Text.length str)
@@ -1029,7 +1159,7 @@ applyActionM (ActionMoveStrCursorForward path) =
     put $ Node (NodeStrSel pos' em) (Object tyName (ValueStr str))
 
 applyActionM (ActionInsertLetter path c) =
-  zoom (atPath path) $ do
+  zoom (rstNode . atPath path) $ do
     Node nodeSel (Object tyName (ValueStr str)) <- get
     let NodeStrSel pos editMode = nodeSel
     guard editMode
@@ -1040,23 +1170,26 @@ applyActionM (ActionInsertLetter path c) =
     setUndoFlag
 
 applyActionM (ActionSelectParent path) = do
+  rstStackVis .= StackHidden
   path' <- maybeA (pathParent path)
-  zoom (atPath path') $ do
+  zoom (rstNode . atPath path') $ do
     Node nodeSel (Object tyName (ValueRec fields)) <- get
     let NodeRecSel recSel = nodeSel
     let recSel' = toRecSelSelf recSel
     put $ Node (NodeRecSel recSel') (Object tyName (ValueRec fields))
 
-applyActionM (ActionSelectChild path) =
-  zoom (atPath path) $ do
+applyActionM (ActionSelectChild path) = do
+  rstStackVis .= StackHidden
+  zoom (rstNode . atPath path) $ do
     Node nodeSel (Object tyName (ValueRec fields)) <- get
     let NodeRecSel recSel = nodeSel
     recSel' <- maybeA (toRecSelChild recSel)
     put $ Node (NodeRecSel recSel') (Object tyName (ValueRec fields))
 
 applyActionM (ActionSelectSiblingBackward path) = do
+  rstStackVis .= StackHidden
   path' <- maybeA (pathParent path)
-  zoomPathPrefix path' $ do
+  zoom rstNode $ zoomPathPrefix path' $ do
     Node nodeSel (Object tyName (ValueRec fields)) <- get
     let NodeRecSel recSel = nodeSel
     RecSel fieldName True <- pure recSel
@@ -1067,8 +1200,9 @@ applyActionM (ActionSelectSiblingBackward path) = do
     put $ Node (NodeRecSel recSel') (Object tyName (ValueRec fields))
 
 applyActionM (ActionSelectSiblingForward path) = do
+  rstStackVis .= StackHidden
   path' <- maybeA (pathParent path)
-  zoomPathPrefix path' $ do
+  zoom rstNode $ zoomPathPrefix path' $ do
     Node nodeSel (Object tyName (ValueRec fields)) <- get
     let NodeRecSel recSel = nodeSel
     RecSel fieldName True <- pure recSel
@@ -1077,6 +1211,10 @@ applyActionM (ActionSelectSiblingForward path) = do
     fieldName' <- maybeA (HashMap.lookup fieldName moveMap)
     let recSel' = RecSel fieldName' True
     put $ Node (NodeRecSel recSel') (Object tyName (ValueRec fields))
+
+rotate :: [a] -> [a]
+rotate [] = []
+rotate (x:xs) = xs ++ [x]
 
 pathTip :: Path -> Maybe PathSegment
 pathTip (Path ps) = listToMaybe (List.reverse ps)
@@ -1109,7 +1247,7 @@ atPathSegment (PathSegmentRec tyName fieldName) =
              in Node (NodeRecSel recSel) (Object tyName' (ValueRec fields'))
       _ -> pure node
 
-zoomPathPrefix :: Path -> ReactM -> ReactM
+zoomPathPrefix :: Path -> ReactM Node -> ReactM Node
 zoomPathPrefix p m =
   case unconsPath p of
     Nothing -> m
