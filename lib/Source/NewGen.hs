@@ -725,6 +725,7 @@ layoutHole :: ShowSel -> LayoutCtx -> (PrecUnenclosed, Collage Ann El)
 layoutHole ss lctx =
   (,) (mempty @PrecUnenclosed) $
   layoutSel ss precBorder path $
+  withJumptag path $
   punct "_"
   where
     precBorder = PrecBorder (lctx ^. lctxPrecBordersAlways)
