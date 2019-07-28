@@ -10,6 +10,8 @@
 {-# LANGUAGE RankNTypes #-}
 {-# LANGUAGE TemplateHaskell #-}
 
+{-# OPTIONS -fmax-pmcheck-iterations=10000000 #-}
+
 module Source.NewGen
   (
   -- * Names
@@ -43,16 +45,14 @@ module Source.NewGen
   StackVis(..),
   Selection(..),
   Paths(..),
-  DrawCtx(..),
-  withDrawCtx,
-  Draw,
-  Drawing(..),
-  toDrawing,
-  drawingFindPath,
-  drawingRender,
+  Ann,
+  El,
+  redrawUI,
+  cairoPositionedElementRender,
+  Find(..),
   PrecPredicate,
   precAllow,
-  Layout(vsep, field),
+  Layout(vsep, field, jumptag),
   noPrec,
   ALayoutFn(..),
   WritingDirection(..),
@@ -66,39 +66,26 @@ module Source.NewGen
 
   -- * Editor
   EditorState(..),
+  initEditorState,
   esExpr,
   esPointer,
-  esHoverBarEnabled,
   esPrecBordersAlways,
   esWritingDirection,
   esStack,
   esStackVis,
   esUndo,
   esRedo,
+  esRenderUI,
+  esPointerPath,
+  esJumptags,
+  esActiveJumptags,
 
   NodeCreateFn(..),
   ncfCheckInputEvent,
   ncfTyName,
 
-  LayoutCtx(..),
-  lctxPath,
-  lctxViewport,
-  lctxPrecBordersAlways,
-  lctxRecLayouts,
-  lctxWritingDirection,
-
-  ReactCtx(..),
-  rctxTyEnv,
-  rctxFindPath,
-  rctxNodeFactory,
-  rctxDefaultNodes,
-  rctxAllowedFieldTypes,
-  rctxRecMoveMaps,
-  rctxWritingDirection,
-
   RecMoveMap,
 
-  layoutEditorState,
   selectionOfEditorState,
   reactEditorState,
 
@@ -108,13 +95,7 @@ module Source.NewGen
   pluginRecLayouts,
   pluginNodeFactory,
 
-  PluginInfo(..),
-  pluginInfoTyEnv,
-  pluginInfoRecLayouts,
-  pluginInfoNodeFactory,
-  pluginInfoRecMoveMaps,
-  pluginInfoDefaultNodes,
-  pluginInfoAllowedFieldTypes,
+  PluginInfo,
   mkPluginInfo,
 
   -- * Utils
@@ -130,8 +111,8 @@ import Data.HashSet (HashSet)
 import Data.Text (Text)
 import Numeric.Natural (Natural)
 import Data.List as List
-import Data.List.NonEmpty as NonEmpty hiding (cons)
-import Control.Applicative
+import Data.DList as DList
+import Control.Applicative as A
 import Control.Monad
 import Control.Monad.Reader
 import Control.Monad.State
@@ -213,60 +194,25 @@ instance Inj p a => Inj p (DrawCtx a) where
 withDrawCtx :: Paths -> CursorBlink -> DrawCtx a -> a
 withDrawCtx paths curBlink (DrawCtx f) = f paths curBlink
 
-data Draw
-  = DrawCairoElement (CairoElement DrawCtx)
-  | DrawEmbed (CairoElement DrawCtx) Path
-
-instance HasExtents Draw where
-  extentsOf = extentsOf . toCairoElementDraw
-
-instance HasBaseline Draw where
-  baselineOf = baselineOf . toCairoElementDraw
-
-toCairoElementDraw :: Draw -> CairoElement DrawCtx
-toCairoElementDraw = \case
-  DrawCairoElement ce -> ce
-  DrawEmbed ce _ -> ce
-
-instance g ~ DrawCtx => Inj (CairoElement g) Draw where
-  inj = DrawCairoElement
-
 textline ::
   Inj (CairoElement DrawCtx) a =>
   Color -> Font -> Text -> (Paths -> CursorBlink -> Maybe Natural) -> a
 textline color font str cur = text font (inj color) str (DrawCtx cur)
 
-line :: Color -> Natural -> Collage Draw
+line :: Color -> Natural -> Collage Ann El
 line color w = rect nothing (inj color) (Extents w 1)
 
-centerOf :: Extents -> Collage Draw -> LRTB Natural
-centerOf (Extents vacantWidth vacantHeight) collage =
-  let
-    Extents width height = collageExtents collage
-    (excessWidth1, excessWidth2) = integralDistribExcess vacantWidth width
-    (excessHeight1, excessHeight2) = integralDistribExcess vacantHeight height
-  in
-    LRTB
-      { left = excessWidth1,
-        right = excessWidth2,
-        top = excessHeight1,
-        bottom = excessHeight2 }
+leftOf :: Collage n El -> Integer
+leftOf collage = toInteger (marginLeft (collageMargin collage))
 
-topRightOf :: Extents -> Collage Draw -> LRTB Natural
-topRightOf (Extents vacantWidth vacantHeight) collage =
+rightOf :: Extents -> Collage n El -> Integer
+rightOf (Extents vacantWidth _) collage =
   let
-    Extents width height = collageExtents collage
-    m = collageMargin collage
-    minus a b = fromInteger (max 0 (toInteger a - toInteger b))
-    excessWidth = vacantWidth `minus` (width + marginRight m)
-    excessHeight = vacantHeight `minus` (height + marginTop m)
+    Extents width _ = collageExtents collage
+    mRight =  marginRight (collageMargin collage)
+    minus a b = max 0 (toInteger a - toInteger b)
   in
-    LRTB
-      { left = excessWidth,
-        right = marginRight m,
-        top = marginTop m,
-        bottom = excessHeight }
-
+    vacantWidth `minus` (width + mRight)
 
 data WritingDirection = WritingDirectionLTR | WritingDirectionRTL
 
@@ -275,6 +221,7 @@ infixr 1 `vsep`
 class (IsString a, Semigroup a) => Layout a where
   vsep :: a -> a -> a
   field :: FieldName -> PrecPredicate -> a
+  jumptag :: a -> a
 
 noPrec :: PrecPredicate
 noPrec = PrecPredicate (const (PrecBorder True))
@@ -282,22 +229,23 @@ noPrec = PrecPredicate (const (PrecBorder True))
 newtype RecLayoutFn =
   RecLayoutFn {
     appRecLayoutFn ::
-      HashMap FieldName (PrecPredicate -> (PrecUnenclosed, Collage Draw)) ->
+      Path ->
+      HashMap FieldName (PrecPredicate -> (PrecUnenclosed, Collage Ann El)) ->
       WritingDirection ->
-      (PrecUnenclosed, Collage Draw)
+      (PrecUnenclosed, Collage Ann El)
   }
 
 instance IsString RecLayoutFn where
   fromString s =
-    RecLayoutFn $ \_ _ ->
+    RecLayoutFn $ \_ _ _ ->
       (mempty, punct (fromString s))
 
 instance Semigroup RecLayoutFn where
   RecLayoutFn a <> RecLayoutFn b =
-    RecLayoutFn $ \m wd ->
+    RecLayoutFn $ \path m wd ->
       let
-        (aUnenclosed, a') = a m wd
-        (bUnenclosed, b') = b m wd
+        (aUnenclosed, a') = a path m wd
+        (bUnenclosed, b') = b path m wd
         f = case wd of
           WritingDirectionLTR -> horizBaseline
           WritingDirectionRTL -> flip horizBaseline
@@ -307,10 +255,10 @@ instance Semigroup RecLayoutFn where
 
 instance Layout RecLayoutFn where
   RecLayoutFn a `vsep` RecLayoutFn b =
-    RecLayoutFn $ \m wd ->
+    RecLayoutFn $ \path m wd ->
       let
-        (aUnenclosed, a') = a m wd
-        (bUnenclosed, b') = b m wd
+        (aUnenclosed, a') = a path m wd
+        (bUnenclosed, b') = b path m wd
         f = case wd of
           WritingDirectionLTR -> vertLeft
           WritingDirectionRTL -> vertRight
@@ -319,8 +267,18 @@ instance Layout RecLayoutFn where
         (,) (aUnenclosed <> bUnenclosed) $
         a' `f` line light1 maxWidth `f` b'
   field fieldName precPredicate =
-    RecLayoutFn $ \m _ ->
+    RecLayoutFn $ \_ m _ ->
       (m HashMap.! fieldName) precPredicate
+  jumptag (RecLayoutFn a) =
+    RecLayoutFn $ \path m wd ->
+      let (aUnenclosed, a') = a path m wd
+      in  (aUnenclosed, withJumptag path a')
+
+withJumptag :: Path -> Collage Ann El -> Collage Ann El
+withJumptag path =
+    collageAnnotate (\o -> (mempty, mempty, pathJumptag o))
+  where
+    pathJumptag offset = DList.singleton (Jumptag offset path)
 
 newtype ALayoutFn = ALayoutFn (forall a. Layout a => a)
 
@@ -336,63 +294,93 @@ instance Layout ALayoutFn where
     ALayoutFn (a `vsep` b)
   field fieldName precPredicate =
     ALayoutFn (field fieldName precPredicate)
+  jumptag (ALayoutFn a) = ALayoutFn (jumptag a)
 
-newtype FindPath = FindPath (Offset -> Maybe Path)
+newtype Find a b = Find (a -> Maybe b)
 
-instance Semigroup FindPath where
-  FindPath f1 <> FindPath f2 =
-    FindPath $ \point -> f1 point <|> f2 point
+instance Semigroup (Find a b) where
+  Find f1 <> Find f2 =
+    Find $ \a -> f1 a <|> f2 a
 
-instance Monoid FindPath where
-  mempty = FindPath (const Nothing)
+instance Monoid (Find a b) where
+  mempty = Find (const Nothing)
 
-data Drawing = Drawing FindPath (CairoRender DrawCtx) (CairoRender DrawCtx)
+type FindPath = Find Offset Path
+type FindZone = Find Path (Offset, Extents)
 
-drawingFindPath :: Drawing -> Offset -> Maybe Path
-drawingFindPath (Drawing (FindPath f) _ _) = f
+data Jumptag = Jumptag Offset Path
 
-drawingRender :: Drawing -> (forall x. DrawCtx x -> x) -> Cairo.Render ()
-drawingRender (Drawing _ p d) getG =
-  cairoRender (p <> d) getG
+-- Collage elements:
+type El = CairoElement DrawCtx
 
-instance Semigroup Drawing where
-  Drawing f1 p1 d1 <> Drawing f2 p2 d2 =
-    Drawing (f1 <> f2) (p1 <> p2) (d1 <> d2)
+-- Collage annotations:
+type Ann = (FindPath, FindZone, DList Jumptag)
+
+renderSelectionBorder :: FindZone -> CairoRender DrawCtx
+renderSelectionBorder (Find findZone) =
+  CairoRender $ \getG ->
+  getG $ DrawCtx $ \Paths{pathsSelection} _ ->
+    case findZone (selectionPath pathsSelection) of
+      Just (o, e) -> do
+        let ((), pic) =
+              foldCairoCollage o $
+              outline 2 selectionBorderColor e
+        cairoRender pic getG
+      Nothing -> return ()
+
+renderHoverBorder :: FindZone -> CairoRender DrawCtx
+renderHoverBorder (Find findZone) =
+  CairoRender $ \getG ->
+  getG $ DrawCtx $ \Paths{pathsCursor} _ ->
+    case pathsCursor of
+      Just p | Just (o, e) <- findZone p -> do
+        let ((), pic) =
+              foldCairoCollage o $
+              outline 2 hoverBorderColor e
+        cairoRender pic getG
+      _ -> return ()
+
+renderJumptagLabels :: [(Char, Jumptag)] -> CairoRender DrawCtx
+renderJumptagLabels jumptags =
+  CairoRender $ \getG ->
+  forM_ jumptags $ \(c, Jumptag o _) -> do
+    let label = Text.toUpper (Text.singleton c)
+        ((), pic) =
+          foldCairoCollage o $
+          substrate 1 (rect nothing dark2) $
+          textline (rgb 255 127 80) ubuntuMonoFont label nothing
+    cairoRender pic getG
 
 findPathInBox :: Path -> (Offset, Extents) -> FindPath
 findPathInBox p box =
-  FindPath $ \point ->
+  Find $ \point ->
     if insideBox box point
     then Just p
     else Nothing
 
-toDrawing :: Positioned Draw -> Drawing
-toDrawing (At o (DrawEmbed ce p)) =
-    Drawing findPath pic dec
-  where
-    findPath = findPathInBox p (o, extentsOf ce)
-    pic = mempty
-    dec = cairoPositionedElementRender (At o ce)
-toDrawing (At o (DrawCairoElement ce)) =
-    Drawing findPath pic dec
-  where
-    findPath = mempty
-    pic = cairoPositionedElementRender (At o ce)
-    dec = mempty
+findBoxAtPath :: Path -> (Offset, Extents) -> FindZone
+findBoxAtPath p box =
+  Find $ \p' ->
+    if p == p'
+    then Just box
+    else Nothing
 
-dark1, dark1', dark2, light1, white :: Color
-dark1  = RGB 41 41 41
-dark1' = RGB 35 35 35
-dark2  = RGB 77 77 77
-light1 = RGB 179 179 179
-white  = RGB 255 255 255
+dark1, dark1', dark2, light1, white :: Inj Color a => a
+dark1  = grayscale 41
+dark1' = grayscale 35
+dark2  = grayscale 77
+light1 = grayscale 179
+white  = grayscale 255
 
-textWithCursor :: Text -> (Paths -> CursorBlink -> Maybe Natural) -> Collage Draw
+selectionBorderColor, hoverBorderColor :: Inj Color a => a
+selectionBorderColor = rgb 94 80 134
+hoverBorderColor = rgb 255 127 80
+
+textWithCursor :: Text -> (Paths -> CursorBlink -> Maybe Natural) -> Collage Ann El
 textWithCursor = textline white ubuntuFont
 
-textWithoutCursor :: Text -> Collage Draw
-textWithoutCursor t =
-  textWithCursor t (\_ _ -> Nothing)
+textWithoutCursor :: Text -> Collage Ann El
+textWithoutCursor t = textWithCursor t nothing
 
 outline ::
   Inj (CairoElement DrawCtx) a =>
@@ -402,10 +390,13 @@ outline width = rect (inj (pure width :: LRTB Natural))
 punct ::
   Inj (CairoElement DrawCtx) a =>
   Text -> a
-punct t = textline light1 ubuntuFont t (\_ _ -> Nothing)
+punct t = textline light1 ubuntuFont t nothing
 
 ubuntuFont :: Font
 ubuntuFont = Font "Ubuntu" 12 FontWeightNormal
+
+ubuntuMonoFont :: Font
+ubuntuMonoFont = Font "Ubuntu Mono" 12 FontWeightNormal
 
 -- | Is a precedence border needed?
 newtype PrecBorder = PrecBorder Bool
@@ -450,41 +441,34 @@ hashSet_isSubsetOf sub sup =
 
 newtype ShowSel = ShowSel Bool
 
-layoutSel :: ShowSel -> PrecBorder -> Path -> Collage Draw -> Collage Draw
+layoutSel :: ShowSel -> PrecBorder -> Path -> Collage Ann El -> Collage Ann El
 layoutSel (ShowSel showSel) (PrecBorder precBorder) path =
   (if showSel then
     collageWithMargin (mkMargin (marginWidth - precBorderWidth)) .
-    active outlineWidth path .
-    (decorateMargin . DecorationAbove) (outline outlineWidth borderColor)
+    collageAnnotateMargin pathZone
    else id) .
   (if precBorder then precedenceBorder precBorderWidth else id) .
   collageWithMargin (mkMargin marginWidth)
   where
     mkMargin a = Margin a a a a
     (marginWidth, precBorderWidth) = (4, 1)
-    outlineWidth = 2
-    borderColor = mkColor (rgb 94 80 134)
-    mkColor color = DrawCtx $ \Paths{pathsSelection} _ ->
-      if selectionPath pathsSelection == path then color else nothing
+    pathZone box = (findPath, findZone, mempty)
+      where
+        findPath = findPathInBox path box
+        findZone = findBoxAtPath path box
 
-precedenceBorder :: Natural -> Collage Draw -> Collage Draw
+precedenceBorder :: Natural -> Collage Ann El -> Collage Ann El
 precedenceBorder width a =
   substrate
     (lrtbMargin (collageMargin a))
-    (outline width (inj dark2))
+    (outline width dark2)
     a
 
 lrtbMargin :: Margin -> LRTB Natural
 lrtbMargin (Margin l r t b) = lrtb l r t b
 
-active :: Natural -> Path -> Collage Draw -> Collage Draw
-active width p =
-    (decorateMargin . DecorationAbove) (collageSingleton . activeZone)
-  where
-    mkColor (Just path) | path == p = Just (rgb 255 127 80)
-    mkColor _ = Nothing
-    outlineRect = outline width (DrawCtx $ \Paths{pathsCursor} _ -> mkColor pathsCursor)
-    activeZone e = DrawEmbed (outlineRect e) p
+foldCairoCollage :: Offset -> Collage n (CairoElement g) -> (n, CairoRender g)
+foldCairoCollage = foldMapCollage cairoPositionedElementRender
 
 --------------------------------------------------------------------------------
 ---- Utils
@@ -502,7 +486,7 @@ instance {-# OVERLAPPING #-} Inj EmptyMaybe (Maybe a) where
   inj EmptyMaybe = Nothing
 
 maybeA :: Alternative f => Maybe a -> f a
-maybeA = maybe empty pure
+maybeA = maybe A.empty A.pure
 
 --------------------------------------------------------------------------------
 ---- Editor
@@ -512,13 +496,33 @@ data EditorState =
   EditorState
     { _esExpr :: Node,
       _esPointer :: Offset,
-      _esHoverBarEnabled :: Bool,
       _esPrecBordersAlways :: Bool,
       _esWritingDirection :: WritingDirection,
       _esStack :: [Node],
       _esStackVis :: StackVis,
       _esUndo :: [Node],
-      _esRedo :: [Node]
+      _esRedo :: [Node],
+      _esRenderUI :: CursorBlink -> Cairo.Render (),
+      _esPointerPath :: Maybe Path,
+      _esJumptags :: [Jumptag],
+      _esActiveJumptags :: [(Char, Jumptag)]
+    }
+
+initEditorState :: EditorState
+initEditorState =
+  EditorState
+    { _esExpr = Hole,
+      _esPointer = offsetZero,
+      _esPrecBordersAlways = False,
+      _esWritingDirection = WritingDirectionLTR,
+      _esStack = [],
+      _esStackVis = StackHidden,
+      _esUndo = [],
+      _esRedo = [],
+      _esRenderUI = const (pure ()),
+      _esPointerPath = Nothing,
+      _esJumptags = [],
+      _esActiveJumptags = []
     }
 
 data NodeCreateFn =
@@ -539,12 +543,11 @@ data LayoutCtx =
 data ReactCtx =
   ReactCtx
     { _rctxTyEnv :: Env,
-      _rctxFindPath :: Offset -> Maybe Path,
       _rctxNodeFactory :: [NodeCreateFn],
       _rctxDefaultNodes :: HashMap TyName Node,
       _rctxAllowedFieldTypes :: HashMap (TyName, FieldName) (HashSet TyName),
       _rctxRecMoveMaps :: HashMap TyName RecMoveMap,
-      _rctxWritingDirection :: WritingDirection
+      _rctxJumptags :: [Jumptag]
     }
 
 data RecMoveMap =
@@ -558,7 +561,8 @@ data ReactState =
   ReactState
     { _rstNode :: Node,
       _rstStack :: [Node],
-      _rstStackVis :: StackVis
+      _rstStackVis :: StackVis,
+      _rstActiveJumptags :: [(Char, Jumptag)]
     }
 
 --------------------------------------------------------------------------------
@@ -597,48 +601,101 @@ insertModeEvent = \case
 ---- Editor - Layout
 --------------------------------------------------------------------------------
 
-pprPointer :: Offset -> Text
-pprPointer Offset{offsetX,offsetY} =
-  Text.pack $ (shows offsetX . (',':) . shows offsetY) ""
+redrawUI ::
+  PluginInfo ->
+  Extents ->
+  EditorState ->
+  EditorState
+redrawUI pluginInfo viewport es =
+  es & esRenderUI .~ renderUI
+     & esPointerPath .~ pathsCursor
+     & esJumptags .~ jumptags
+  where
+    lctx =
+      LayoutCtx
+        { _lctxPath = mempty @PathBuilder,
+          _lctxViewport = viewport,
+          _lctxPrecBordersAlways = es ^. esPrecBordersAlways,
+          _lctxRecLayouts = pluginInfoRecLayouts pluginInfo,
+          _lctxWritingDirection = es ^. esWritingDirection
+        }
+    pointer = es ^. esPointer
+    activeJumptags = es ^. esActiveJumptags
+    infoBarLayout = layoutInfoBar es
+    stackLayout = layoutNodeStack lctx (es ^. esStack)
+    mainLayout = layoutMainExpr lctx (es ^. esExpr)
+    hOff :: Collage n a -> Integer
+    hOff c =
+      toInteger (heightOf infoBarLayout) +
+      toInteger (marginTop (collageMargin c)) +
+      10
+    mainOffset =
+      Offset { offsetX = leftOf mainLayout + 10,
+               offsetY = hOff mainLayout }
+    stackOffset =
+      Offset { offsetX = rightOf (lctx ^. lctxViewport) stackLayout,
+               offsetY = hOff stackLayout }
+    ((), backgroundRdr) =
+      foldCairoCollage offsetZero $
+      rect nothing dark1 (lctx ^. lctxViewport)
+    ((), barBackgroundRdr) =
+      foldCairoCollage offsetZero $
+      rect nothing selectionBorderColor $
+      Extents (extentsW (lctx ^. lctxViewport)) (heightOf infoBarLayout)
+    ((Find findPath, findZone, jumptags'), mainRdr) =
+      foldCairoCollage mainOffset mainLayout
+    ((), stackRdr') =
+      foldCairoCollage stackOffset stackLayout
+    ((), infoBarRdr) =
+      foldCairoCollage offsetZero infoBarLayout
+    jumptags = DList.toList jumptags'
+    stackRdr = case es ^. esStackVis of
+      StackHidden -> mempty
+      StackVisible -> stackRdr'
+    pathsCursor = findPath pointer
+    pathsSelection = selectionOfEditorState es
+    paths = Paths {pathsCursor, pathsSelection}
+    renderUI cursorBlink =
+      cairoRender
+        (backgroundRdr
+           <> mainRdr
+           <> renderSelectionBorder findZone
+           <> renderHoverBorder findZone
+           <> renderJumptagLabels activeJumptags
+           <> stackRdr
+           <> barBackgroundRdr
+           <> infoBarRdr)
+        (withDrawCtx paths cursorBlink)
 
-layoutEditorState :: LayoutCtx -> EditorState -> Collage Draw
-layoutEditorState lctx es =
-  (withBars . withStackCollage) mainExprCollage
+layoutMainExpr ::
+  LayoutCtx ->
+  Node ->
+  Collage Ann El
+layoutMainExpr lctx expr = collage
   where
     precPredicate = PrecPredicate (const (PrecBorder False))
-    hoverBar = do
-      guard $ es ^. esHoverBarEnabled
-      [textWithoutCursor (pprPointer $ es ^. esPointer)]
-    selectionBar = do
-      let sel = selectionOfEditorState es
-      [textWithoutCursor (pprSelection sel)]
-    bars = concat @[] [hoverBar, selectionBar]
-    withBars =
-      case nonEmpty bars of
-        Nothing -> id
-        Just bars' -> \c ->
-          collageCompose offsetZero c (foldr1 @NonEmpty vertLeft bars')
-    withStackCollage =
-      case es ^. esStackVis of
-        StackHidden -> id
-        StackVisible ->
-          \c -> collageCompose offsetZero c nodeStackCollage
-    nodeStackCollage =
-      let
-        c =
-          (decorateMargin . DecorationBelow) backgroundRect $
-          layoutNodeStack lctx (es ^. esStack)
-        backgroundRect = rect nothing (inj dark1')
-        padding = topRightOf (lctx ^. lctxViewport) c
-      in
-        substrate padding (rect nothing nothing) c
-    mainExprCollage =
-      let
-        (_, c) = layoutNode (ShowSel True) lctx (es ^. esExpr) precPredicate
-        padding = centerOf (lctx ^. lctxViewport) c
-        backgroundRect = rect nothing (inj dark1)
-      in
-        substrate padding backgroundRect c
+    (_, collage) = layoutNode (ShowSel True) lctx expr precPredicate
+
+layoutNodeStack :: Monoid n => LayoutCtx -> [Node] -> Collage n El
+layoutNodeStack lctx nodes =
+  mapCollageAnnotation (const mempty) $
+  substrate 0 backgroundRect $
+  substrate 4 (outline 2 borderColor) $
+  case nodes of
+    [] -> punct "end of stack"
+    n:_ -> snd (layoutNode (ShowSel False) lctx n precPredicate)
+  where
+    precPredicate = PrecPredicate (const (PrecBorder False))
+    borderColor = rgb 94 134 80
+    backgroundRect = rect nothing dark1'
+
+layoutInfoBar ::
+  Monoid n =>
+  EditorState ->
+  Collage n El
+layoutInfoBar es =
+  mapCollageAnnotation (const mempty) $
+  textWithoutCursor (pprSelection (selectionOfEditorState es))
 
 pprSelection :: Selection -> Text
 pprSelection selection = Text.pack ('/' : goPath selectionPath "")
@@ -659,24 +716,12 @@ pprSelection selection = Text.pack ('/' : goPath selectionPath "")
     goStrPos Nothing = id
     goStrPos (Just i) = ('[':) . shows i . (']':)
 
-layoutNodeStack :: LayoutCtx -> [Node] -> Collage Draw
-layoutNodeStack lctx nodes =
-  (decorateMargin . DecorationAbove) (outline outlineWidth borderColor) $
-  collageWithMargin (Margin 4 4 4 4) $
-    case nodes of
-      [] -> punct "end of stack"
-      n:_ -> snd (layoutNode (ShowSel False) lctx n precPredicate)
-  where
-    precPredicate = PrecPredicate (const (PrecBorder False))
-    outlineWidth = 2
-    borderColor = rgb 94 134 80
-
-layoutNode :: ShowSel -> LayoutCtx -> Node -> PrecPredicate -> (PrecUnenclosed, Collage Draw)
+layoutNode :: ShowSel -> LayoutCtx -> Node -> PrecPredicate -> (PrecUnenclosed, Collage Ann El)
 layoutNode ss lctx = \case
   Hole -> \_precPredicate -> layoutHole ss lctx
   Node _ object -> layoutObject ss lctx object
 
-layoutHole :: ShowSel -> LayoutCtx -> (PrecUnenclosed, Collage Draw)
+layoutHole :: ShowSel -> LayoutCtx -> (PrecUnenclosed, Collage Ann El)
 layoutHole ss lctx =
   (,) (mempty @PrecUnenclosed) $
   layoutSel ss precBorder path $
@@ -690,16 +735,17 @@ layoutObject ::
   LayoutCtx ->
   Object Node ->
   PrecPredicate ->
-  (PrecUnenclosed, Collage Draw)
+  (PrecUnenclosed, Collage Ann El)
 layoutObject ss lctx = \case
   Object tyName (ValueRec fields) -> layoutRec ss lctx tyName fields
   Object _ (ValueSeq _) -> error "TODO (int-index): layoutObject ValueSeq"
   Object _ (ValueStr str) -> \_precPredicate -> layoutStr ss lctx str
 
-layoutStr :: ShowSel -> LayoutCtx -> Text -> (PrecUnenclosed, Collage Draw)
+layoutStr :: ShowSel -> LayoutCtx -> Text -> (PrecUnenclosed, Collage Ann El)
 layoutStr ss lctx str =
   (,) (mempty @PrecUnenclosed) $
   layoutSel ss precBorder path $
+  withJumptag path $
   textWithCursor str
     (\Paths{pathsSelection} ->
      \case
@@ -721,7 +767,7 @@ layoutRec ::
   TyName ->
   HashMap FieldName Node ->
   PrecPredicate ->
-  (PrecUnenclosed, Collage Draw)
+  (PrecUnenclosed, Collage Ann El)
 layoutRec ss lctx tyName fields precPredicate =
   (,) (guardUnenclosed precBorder precUnenclosed') $
   layoutSel ss precBorder path $
@@ -734,7 +780,7 @@ layoutRec ss lctx tyName fields precPredicate =
           case HashMap.lookup tyName (lctx ^. lctxRecLayouts) of
             Nothing -> fromString (show tyName)
             Just (ALayoutFn fn) -> fn
-        drawnFields :: HashMap FieldName (PrecPredicate -> (PrecUnenclosed, Collage Draw))
+        drawnFields :: HashMap FieldName (PrecPredicate -> (PrecUnenclosed, Collage Ann El))
         drawnFields =
           HashMap.mapWithKey
             (\fieldName ->
@@ -747,7 +793,7 @@ layoutRec ss lctx tyName fields precPredicate =
         wd :: WritingDirection
         wd = lctx ^. lctxWritingDirection
       in
-        appRecLayoutFn layoutFields drawnFields wd
+        appRecLayoutFn layoutFields path drawnFields wd
     precUnenclosed' = addUnenclosed tyName precUnenclosed
     precBorder =
       PrecBorder (lctx ^. lctxPrecBordersAlways) <>
@@ -836,18 +882,16 @@ instance Monoid UndoFlag where
 
 data ReactResult a = UnknownEvent | ReactOk a
 
-reactEditorState :: InputEvent -> ReactCtx -> EditorState -> ReactResult EditorState
+reactEditorState :: PluginInfo -> InputEvent -> EditorState -> ReactResult EditorState
 
-reactEditorState (PointerMotion x y) _ es = ReactOk $
+reactEditorState _ (PointerMotion x y) es = ReactOk $
   es & esPointer .~ Offset (fromIntegral x) (fromIntegral y)
 
-reactEditorState ButtonPress rctx es
-  | Just p <- (rctx ^. rctxFindPath) (es ^. esPointer)
+reactEditorState _ ButtonPress es
+  | Just p <- es ^. esPointerPath
   = ReactOk $ es & esExpr %~ updatePathNode p
 
-reactEditorState (KeyPress [Control] keyCode) _ es
-  | keyLetter 'h' keyCode
-  = ReactOk $ es & esHoverBarEnabled %~ not
+reactEditorState _ (KeyPress [Control] keyCode) es
   | keyLetter 'b' keyCode
   = ReactOk $ es & esPrecBordersAlways %~ not
   | keyLetter 'w' keyCode
@@ -870,13 +914,14 @@ reactEditorState (KeyPress [Control] keyCode) _ es
        & esRedo .~ rs
        & esUndo %~ (expr:)
 
-reactEditorState inputEvent rctx es
-  | Just act <- getAction env nodeFactory wd sel stkVis inputEvent,
+reactEditorState pluginInfo inputEvent es
+  | Just act <- getAction env nodeFactory wd sel stkVis activeJumptags inputEvent,
     Just (UndoFlag undoFlag, rst') <- applyAction act rctx rst
   = ReactOk $
     let es' = es & esExpr .~ (rst' ^. rstNode)
                  & esStack .~ (rst' ^. rstStack)
                  & esStackVis .~ (rst' ^. rstStackVis)
+                 & esActiveJumptags .~ (rst' ^. rstActiveJumptags)
     in if undoFlag then
          es' & esUndo %~ (expr:)
              & esRedo .~ []
@@ -884,11 +929,21 @@ reactEditorState inputEvent rctx es
   where
     env = rctx ^. rctxTyEnv
     nodeFactory = rctx ^. rctxNodeFactory
-    wd = rctx ^. rctxWritingDirection
+    wd = es ^. esWritingDirection
     sel = selectionOfNode expr
     expr = es ^. esExpr
     stkVis = es ^. esStackVis
-    rst = ReactState expr (es ^. esStack) stkVis
+    activeJumptags = es ^. esActiveJumptags
+    rst = ReactState expr (es ^. esStack) stkVis activeJumptags
+    rctx =
+      ReactCtx
+        { _rctxTyEnv = pluginInfoTyEnv pluginInfo,
+          _rctxNodeFactory = pluginInfoNodeFactory pluginInfo,
+          _rctxDefaultNodes = pluginInfoDefaultNodes pluginInfo,
+          _rctxAllowedFieldTypes = pluginInfoAllowedFieldTypes pluginInfo,
+          _rctxRecMoveMaps = pluginInfoRecMoveMaps pluginInfo,
+          _rctxJumptags = es ^. esJumptags
+        }
 
 reactEditorState _ _ _ = UnknownEvent
 
@@ -916,7 +971,9 @@ data Action =
   ActionSelectParent Path |
   ActionSelectChild Path |
   ActionSelectSiblingBackward Path |
-  ActionSelectSiblingForward Path
+  ActionSelectSiblingForward Path |
+  ActionActivateJumptags |
+  ActionJumptagLookup Char
 
 getAction ::
   Env ->
@@ -924,6 +981,7 @@ getAction ::
   WritingDirection ->
   Selection ->
   StackVis ->
+  [(Char, Jumptag)] ->
   InputEvent ->
   Maybe Action
 getAction
@@ -932,7 +990,13 @@ getAction
     wd
     Selection{selectionPath, selectionTyName, selectionStrPos}
     stkVis
+    activeJumptags
     inputEvent
+
+  | not (null activeJumptags),
+    KeyPress [] keyCode <- inputEvent,
+    Just c <- keyChar keyCode
+  = Just $ ActionJumptagLookup c
 
   -- Enter edit mode.
   | Just tyName <- selectionTyName,
@@ -990,6 +1054,12 @@ getAction
     KeyPress [] keyCode <- inputEvent,
     keyLetter 'x' keyCode
   = Just ActionDropStack
+
+  -- Enter jumptag mode.
+  | Nothing <- selectionStrPos,
+    KeyPress [] keyCode <- inputEvent,
+    keyLetter 'g' keyCode
+  = Just $ ActionActivateJumptags
 
   -- Delete node.
   | keyCodeLetter KeyCode.Delete 'x' inputEvent
@@ -1212,6 +1282,28 @@ applyActionM (ActionSelectSiblingForward path) = do
     let recSel' = RecSel fieldName' True
     put $ Node (NodeRecSel recSel') (Object tyName (ValueRec fields))
 
+applyActionM ActionActivateJumptags = do
+  jumptags <- view rctxJumptags
+  rstActiveJumptags .= zip jumptagLabels jumptags
+
+applyActionM (ActionJumptagLookup c) = do
+  activeJumptags <- use rstActiveJumptags
+  let activeJumptags' =
+        List.map (\(_, jt) -> jt) $
+        List.filter (\(c', _) -> c == c') $
+        activeJumptags
+  case activeJumptags' of
+    [] -> A.empty
+    [Jumptag _ path] -> do
+      rstNode %= updatePathNode path
+      rstActiveJumptags .= []
+    jumptags -> rstActiveJumptags .= zip jumptagLabels jumptags
+
+
+jumptagLabels :: [Char]
+jumptagLabels = List.cycle "aoeuhtnspcrjm"
+    -- Dvorak-friendly, should be configurable.
+
 rotate :: [a] -> [a]
 rotate [] = []
 rotate (x:xs) = xs ++ [x]
@@ -1310,6 +1402,7 @@ instance Layout VisualFieldList where
   VisualFieldList a `vsep` VisualFieldList b =
     VisualFieldList (a <> b)
   field fieldName _ = VisualFieldList [fieldName]
+  jumptag = id
 
 sortByVisualOrder :: ALayoutFn -> [FieldName]
 sortByVisualOrder recLayoutFn = sortedFields
@@ -1333,26 +1426,25 @@ data Plugin =
 -- derived from the user specification.
 data PluginInfo =
   PluginInfo
-    { _pluginInfoTyEnv :: Env,
-      _pluginInfoRecLayouts :: HashMap TyName ALayoutFn,
-      _pluginInfoNodeFactory :: [NodeCreateFn],
-      _pluginInfoRecMoveMaps :: HashMap TyName RecMoveMap,
-      _pluginInfoDefaultNodes :: HashMap TyName Node,
-      _pluginInfoAllowedFieldTypes :: HashMap (TyName, FieldName) (HashSet TyName)
+    { pluginInfoTyEnv :: Env,
+      pluginInfoRecLayouts :: HashMap TyName ALayoutFn,
+      pluginInfoNodeFactory :: [NodeCreateFn],
+      pluginInfoRecMoveMaps :: HashMap TyName RecMoveMap,
+      pluginInfoDefaultNodes :: HashMap TyName Node,
+      pluginInfoAllowedFieldTypes :: HashMap (TyName, FieldName) (HashSet TyName)
     }
 
 makeLenses ''Plugin
-makeLenses ''PluginInfo
 
 mkPluginInfo :: Plugin -> PluginInfo
 mkPluginInfo plugin =
   PluginInfo
-    { _pluginInfoTyEnv = tyEnv,
-      _pluginInfoRecLayouts = recLayouts,
-      _pluginInfoNodeFactory = nodeFactory,
-      _pluginInfoRecMoveMaps = recMoveMaps,
-      _pluginInfoDefaultNodes = defaultNodes,
-      _pluginInfoAllowedFieldTypes = allowedFieldTypes
+    { pluginInfoTyEnv = tyEnv,
+      pluginInfoRecLayouts = recLayouts,
+      pluginInfoNodeFactory = nodeFactory,
+      pluginInfoRecMoveMaps = recMoveMaps,
+      pluginInfoDefaultNodes = defaultNodes,
+      pluginInfoAllowedFieldTypes = allowedFieldTypes
     }
   where
     tyEnv = plugin ^. pluginTyEnv

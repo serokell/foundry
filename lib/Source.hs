@@ -22,11 +22,11 @@ import Source.Input (InputEvent(..), Modifier(..))
 import qualified Source.NewGen as NG
 import qualified Sdam.Parser
 
-runGUI :: NG.Plugin -> IO NG.EditorState -> IO ()
-runGUI plugin initEditorState = do
+runGUI :: NG.Plugin -> NG.EditorState -> IO ()
+runGUI plugin editorState = do
   let pluginInfo = NG.mkPluginInfo plugin
   _ <- Gtk.initGUI
-  esRef <- initEditorState >>= newIORef
+  esRef <- newIORef editorState
   window <- createMainWindow pluginInfo esRef
   Gtk.widgetShowAll window
   Gtk.mainGUI
@@ -47,12 +47,6 @@ createMainWindow pluginInfo esRef = do
       , Gtk.ButtonPressMask
       ]
 
-  layoutRef :: IORef (Collage NG.Draw)
-    <- newIORef (error "layoutRef used before initialization")
-
-  pointerRef :: IORef (Maybe Offset)
-    <- newIORef Nothing
-
   cursorPhaser <- newPhaser 530000 NG.CursorVisible NG.blink $
     \_ -> Gtk.postGUIAsync (Gtk.widgetQueueDraw canvas)
 
@@ -64,40 +58,16 @@ createMainWindow pluginInfo esRef = do
 
   let
     updateCanvas viewport = do
-      es <- liftIO $ readIORef esRef
-      let
-        lctx =
-          NG.LayoutCtx
-            { NG._lctxPath = mempty @NG.PathBuilder,
-              NG._lctxViewport = viewport,
-              NG._lctxPrecBordersAlways = es ^. NG.esPrecBordersAlways,
-              NG._lctxRecLayouts = pluginInfo ^. NG.pluginInfoRecLayouts,
-              NG._lctxWritingDirection = es ^. NG.esWritingDirection }
-        layout = NG.layoutEditorState lctx es
-      liftIO $ writeIORef layoutRef layout
-      cursorVisible <- liftIO $ phaserCurrent cursorPhaser
-      let
-        drawing = foldMapCollage NG.toDrawing offsetZero layout
-        pathsCursor = NG.drawingFindPath drawing (es ^. NG.esPointer)
-        pathsSelection = NG.selectionOfEditorState es
-        paths = NG.Paths {NG.pathsCursor, NG.pathsSelection}
-      NG.drawingRender drawing (NG.withDrawCtx paths cursorVisible)
+      es <- liftIO $
+        atomicRunStateIORef' esRef $ do
+          modify (NG.redrawUI pluginInfo viewport)
+          get
+      cursorBlink <- liftIO $ phaserCurrent cursorPhaser
+      (es ^. NG.esRenderUI) cursorBlink
 
     handleInputEvent inputEvent = do
       es <- readIORef esRef
-      layout <- readIORef layoutRef
-      let
-        drawing = foldMapCollage NG.toDrawing offsetZero layout
-        rctx =
-          NG.ReactCtx
-            { NG._rctxTyEnv = pluginInfo ^. NG.pluginInfoTyEnv,
-              NG._rctxFindPath = NG.drawingFindPath drawing,
-              NG._rctxNodeFactory = pluginInfo ^. NG.pluginInfoNodeFactory,
-              NG._rctxDefaultNodes = pluginInfo ^. NG.pluginInfoDefaultNodes,
-              NG._rctxAllowedFieldTypes = pluginInfo ^. NG.pluginInfoAllowedFieldTypes,
-              NG._rctxRecMoveMaps = pluginInfo ^. NG.pluginInfoRecMoveMaps,
-              NG._rctxWritingDirection = es ^. NG.esWritingDirection }
-        mEs' = NG.reactEditorState inputEvent rctx es
+      let mEs' = NG.reactEditorState pluginInfo inputEvent es
       case mEs' of
         NG.UnknownEvent -> do
           print inputEvent
@@ -131,7 +101,6 @@ createMainWindow pluginInfo esRef = do
   void $ Gtk.on canvas Gtk.motionNotifyEvent $ do
     (x, y) <- Gtk.eventCoordinates
     let (x', y') = (round x, round y)
-    liftIO $ atomicWriteIORef pointerRef (Just (Offset x' y'))
     let event = PointerMotion (fromInteger x') (fromInteger y')
     liftIO (handleInputEvent event)
 

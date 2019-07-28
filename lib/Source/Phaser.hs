@@ -32,18 +32,15 @@ newPhaser ::
 newPhaser d initSt transition hook = do
   ref <- newIORef initSt
   tId <- forkIO $
-    let
-      act :: (forall b. IO b -> IO b) -> IO ()
-      act restore = forever $ do
-        a <- readIORef ref
-        (b, a') <- restore $
-          try (threadDelay d) >>= \case
-            Left (TimerReset st) -> return (False, st)
-            Right () -> return (True, transition a)
-        atomicWriteIORef ref a'
-        when b (hook a')
-    in
-      mask (\restore -> act restore)
+    mask $ \restore ->
+    forever $ do
+      a <- readIORef ref
+      (b, a') <- restore $
+        try (threadDelay d) >>= \case
+          Left (TimerReset st) -> return (False, st)
+          Right () -> return (True, transition a)
+      atomicWriteIORef ref a'
+      when b (hook a')
   return Phaser
     { phaserCurrent = readIORef ref,
       phaserStop = killThread tId,

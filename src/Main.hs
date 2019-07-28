@@ -28,7 +28,11 @@ main = do
     [et] -> return et
     _ -> die "Usage: foundry EXPR"
   tyEnv <- either die return =<< readTyEnv "morte.sdam"
-  runGUI (foundryPlugin tyEnv) (foundryInitEditorState et)
+  expr <- synImportExpr <$>
+    case M.P.exprFromText (fromString et) of
+      Left err -> die (show err)
+      Right e -> M.I.load Nothing e
+  runGUI (foundryPlugin tyEnv) initEditorState{ _esExpr = expr }
 
 foundryPlugin :: Env -> Plugin
 foundryPlugin env =
@@ -45,8 +49,8 @@ foundryRecLayouts = recLayouts
       [ ("Lam", recLayoutLam),
         ("Pi", recLayoutPi),
         ("App", recLayoutApp),
-        ("Star", "★"),
-        ("Box", "□"),
+        ("Star", jumptag "★"),
+        ("Box", jumptag "□"),
         ("IVar", recLayoutIVar) ]
     precAll = precAllow (HashMap.keysSet recLayouts)
     precAtoms = ["Star", "Box"]
@@ -55,13 +59,13 @@ foundryRecLayouts = recLayouts
      field "fn" (prec ["App"]) <>
      field "arg" (prec [])
     recLayoutLam =
-      "λ" <> field "var" noPrec <> ":" <> field "ty" precAll
+      jumptag "λ" <> field "var" noPrec <> ":" <> field "ty" precAll
       `vsep` field "body" precAll
     recLayoutPi =
-      "Π" <> field "var" noPrec <> ":" <> field "ty" precAll
+      jumptag "Π" <> field "var" noPrec <> ":" <> field "ty" precAll
       `vsep` field "body" precAll
     recLayoutIVar =
-      field "var" noPrec <> "@" <> field "index" noPrec
+      field "var" noPrec <> jumptag "@" <> field "index" noPrec
 
 foundryNodeFactory :: [NodeCreateFn]
 foundryNodeFactory =
@@ -73,14 +77,6 @@ foundryNodeFactory =
     NodeCreateFn (shiftChar 'A') "App",
     NodeCreateFn (shiftChar 'S') "Star",
     NodeCreateFn (shiftChar 'B') "Box" ]
-
-foundryInitEditorState :: String -> IO EditorState
-foundryInitEditorState et = do
-  expr <- synImportExpr <$>
-    case M.P.exprFromText (fromString et) of
-      Left err -> die (show err)
-      Right e -> M.I.load Nothing e
-  return $ EditorState expr offsetZero False False WritingDirectionLTR [] StackHidden [] []
 
 synImportExpr :: M.Expr Void -> Node
 synImportExpr = \case

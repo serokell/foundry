@@ -13,6 +13,7 @@ library
 
   build-depends:       base >=4.7
                ,       containers
+               ,       dlist
                ,       unordered-containers
                ,       hashable
                ,       lens >=4.11
