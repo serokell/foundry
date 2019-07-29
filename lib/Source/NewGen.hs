@@ -314,40 +314,38 @@ type El = CairoElement DrawCtx
 -- Collage annotations:
 type Ann = (FindPath, FindZone, DList Jumptag)
 
-renderSelectionBorder :: FindZone -> CairoRender DrawCtx
-renderSelectionBorder (Find findZone) =
-  CairoRender $ \getG ->
-  getG $ DrawCtx $ \Paths{pathsSelection} _ ->
-    case findZone (selectionPath pathsSelection) of
-      Just (o, e) -> do
-        let ((), pic) =
-              foldCairoCollage o $
-              outline 2 selectionBorderColor e
-        cairoRender pic getG
-      Nothing -> return ()
+getNoAnn :: ((), a) -> a
+getNoAnn = snd
 
-renderHoverBorder :: FindZone -> CairoRender DrawCtx
-renderHoverBorder (Find findZone) =
-  CairoRender $ \getG ->
-  getG $ DrawCtx $ \Paths{pathsCursor} _ ->
-    case pathsCursor of
-      Just p | Just (o, e) <- findZone p -> do
-        let ((), pic) =
-              foldCairoCollage o $
-              outline 2 hoverBorderColor e
-        cairoRender pic getG
-      _ -> return ()
+renderSelectionBorder :: Paths -> FindZone -> CairoRender DrawCtx
+renderSelectionBorder Paths{pathsSelection} (Find findZone) =
+  case findZone (selectionPath pathsSelection) of
+    Just (o, e) ->
+      getNoAnn $
+      foldCairoCollage o $
+      outline 2 selectionBorderColor e
+    Nothing -> mempty
+
+renderHoverBorder :: Paths -> FindZone -> CairoRender DrawCtx
+renderHoverBorder Paths{pathsCursor} (Find findZone) =
+  case pathsCursor of
+    Just p | Just (o, e) <- findZone p ->
+      getNoAnn $
+      foldCairoCollage o $
+      outline 2 hoverBorderColor e
+    _ -> mempty
 
 renderJumptagLabels :: [(Char, Jumptag)] -> CairoRender DrawCtx
-renderJumptagLabels jumptags =
-  CairoRender $ \getG ->
-  forM_ jumptags $ \(c, Jumptag o _) -> do
-    let label = Text.toUpper (Text.singleton c)
-        ((), pic) =
-          foldCairoCollage o $
-          substrate 1 (rect nothing dark2) $
-          textline (rgb 255 127 80) ubuntuMonoFont label nothing
-    cairoRender pic getG
+renderJumptagLabels = foldMap renderJumptagLabel
+
+renderJumptagLabel :: (Char, Jumptag) -> CairoRender DrawCtx
+renderJumptagLabel (c, Jumptag o _) =
+    getNoAnn $
+    foldCairoCollage o $
+    substrate 1 (rect nothing dark2) $
+    textline (rgb 255 127 80) ubuntuMonoFont label nothing
+  where
+    label = Text.toUpper (Text.singleton c)
 
 findPathInBox :: Path -> (Offset, Extents) -> FindPath
 findPathInBox p box =
@@ -634,8 +632,8 @@ redrawUI pluginInfo viewport es =
       cairoRender
         (backgroundRdr
            <> mainRdr
-           <> renderSelectionBorder findZone
-           <> renderHoverBorder findZone
+           <> renderSelectionBorder paths findZone
+           <> renderHoverBorder paths findZone
            <> renderJumptagLabels activeJumptags
            <> stackRdr
            <> barBackgroundRdr
