@@ -38,8 +38,7 @@ foundryPlugin :: Env -> Plugin
 foundryPlugin env =
   Plugin
     { _pluginTyEnv = env,
-      _pluginRecLayouts = foundryRecLayouts,
-      _pluginNodeFactory = foundryNodeFactory
+      _pluginRecLayouts = foundryRecLayouts
     }
 
 foundryRecLayouts :: HashMap TyName ALayoutFn
@@ -66,17 +65,6 @@ foundryRecLayouts = recLayouts
       `vsep` field "body" precAll
     recLayoutIVar =
       field "var" noPrec <> jumptag "@" <> field "index" noPrec
-
-foundryNodeFactory :: [NodeCreateFn]
-foundryNodeFactory =
-  [ NodeCreateFn insertModeEvent "Var",
-    NodeCreateFn insertModeEvent "Nat",
-    NodeCreateFn (shiftChar 'V') "IVar",
-    NodeCreateFn (shiftChar 'L') "Lam",
-    NodeCreateFn (shiftChar 'P') "Pi",
-    NodeCreateFn (shiftChar 'A') "App",
-    NodeCreateFn (shiftChar 'S') "Star",
-    NodeCreateFn (shiftChar 'B') "Box" ]
 
 synImportExpr :: M.Expr Void -> Node
 synImportExpr = \case

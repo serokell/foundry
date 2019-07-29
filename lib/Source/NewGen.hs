@@ -57,10 +57,6 @@ module Source.NewGen
 
   -- * React
   ReactResult(..),
-  keyLetter,
-  keyCodeLetter,
-  shiftChar,
-  insertModeEvent,
 
   -- * Editor
   EditorState(..),
@@ -78,10 +74,6 @@ module Source.NewGen
   esJumptags,
   esActiveJumptags,
 
-  NodeCreateFn(..),
-  ncfCheckInputEvent,
-  ncfTyName,
-
   RecMoveMap,
 
   selectionOfEditorState,
@@ -89,9 +81,6 @@ module Source.NewGen
 
   -- * Plugin
   Plugin(..),
-  pluginTyEnv,
-  pluginRecLayouts,
-  pluginNodeFactory,
 
   PluginInfo,
   mkPluginInfo,
@@ -109,6 +98,7 @@ import Data.HashSet (HashSet)
 import Data.Text (Text)
 import Numeric.Natural (Natural)
 import Data.List as List
+import Data.List.NonEmpty as NonEmpty
 import Data.DList as DList
 import Control.Applicative as A
 import Control.Monad
@@ -139,6 +129,7 @@ import Source.Input
 import qualified Source.Input.KeyCode as KeyCode
 
 import Sdam.Core
+import Sdam.Name
 
 mkTyUnion :: [TyName] -> TyUnion
 mkTyUnion = TyUnion . HashSet.fromList
@@ -347,6 +338,22 @@ renderJumptagLabel (c, Jumptag o _) =
   where
     label = Text.toUpper (Text.singleton c)
 
+renderMotion :: Motion -> Paths -> FindZone -> CairoRender DrawCtx
+renderMotion motion Paths{pathsSelection} (Find findZone) =
+  case findZone (selectionPath pathsSelection) of
+    Nothing -> error "renderMotion: no selection"
+    Just (o, e) ->
+      getNoAnn $
+      foldCairoCollage o $
+      mapCollageAnnotation (const mempty) $
+      substrate 0 (rect nothing dark1') $
+      substrateMargin (outline 2 motionBorderColor . extentsMax e) $
+      collageWithMargin (Margin 4 4 4 4) $
+      (punct label :: Collage Ann El)
+  where
+    label = case motion of
+      Motion s -> "_" <> s
+
 findPathInBox :: Path -> (Offset, Extents) -> FindPath
 findPathInBox p box =
   Find $ \point ->
@@ -369,9 +376,14 @@ light1 = grayscale 179
 white  = grayscale 255
 red    = rgb 255 0 0
 
-selectionBorderColor, hoverBorderColor :: Inj Color a => a
+selectionBorderColor,
+  hoverBorderColor,
+  stackBorderColor,
+  motionBorderColor :: Inj Color a => a
 selectionBorderColor = rgb 94 80 134
 hoverBorderColor = rgb 255 127 80
+stackBorderColor = rgb 45 134 108
+motionBorderColor = rgb 45 134 108
 
 textWithCursor :: Text -> (Paths -> CursorBlink -> Maybe Natural) -> Collage Ann El
 textWithCursor = textline white ubuntuFont
@@ -439,6 +451,14 @@ hashSet_isSubsetOf sub sup =
 lrtbMargin :: Margin -> LRTB Natural
 lrtbMargin (Margin l r t b) = lrtb l r t b
 
+substrateMargin ::
+  Semigroup n =>
+  (Extents -> Collage n a) ->
+  Collage n a ->
+  Collage n a
+substrateMargin f a =
+  substrate (lrtbMargin (collageMargin a)) f a
+
 foldCairoCollage :: Offset -> Collage n (CairoElement g) -> (n, CairoRender g)
 foldCairoCollage = foldMapCollage cairoPositionedElementRender
 
@@ -464,6 +484,8 @@ maybeA = maybe A.empty A.pure
 ---- Editor
 --------------------------------------------------------------------------------
 
+data Motion = Motion Text
+
 data EditorState =
   EditorState
     { _esExpr :: Node,
@@ -477,7 +499,8 @@ data EditorState =
       _esRenderUI :: CursorBlink -> Cairo.Render (),
       _esPointerPath :: Maybe Path,
       _esJumptags :: [Jumptag],
-      _esActiveJumptags :: [(Char, Jumptag)]
+      _esActiveJumptags :: [(Char, Jumptag)],
+      _esMotion :: Maybe Motion
     }
 
 initEditorState :: EditorState
@@ -494,13 +517,8 @@ initEditorState =
       _esRenderUI = const (pure ()),
       _esPointerPath = Nothing,
       _esJumptags = [],
-      _esActiveJumptags = []
-    }
-
-data NodeCreateFn =
-  NodeCreateFn
-    { _ncfCheckInputEvent :: InputEvent -> Bool,
-      _ncfTyName :: TyName
+      _esActiveJumptags = [],
+      _esMotion = Nothing
     }
 
 data LayoutCtx =
@@ -516,7 +534,6 @@ data LayoutCtx =
 data ReactCtx =
   ReactCtx
     { _rctxTyEnv :: Env,
-      _rctxNodeFactory :: [NodeCreateFn],
       _rctxDefaultNodes :: HashMap TyName Node,
       _rctxRecMoveMaps :: HashMap TyName RecMoveMap,
       _rctxJumptags :: [Jumptag]
@@ -534,7 +551,8 @@ data ReactState =
     { _rstNode :: Node,
       _rstStack :: [Node],
       _rstStackVis :: StackVis,
-      _rstActiveJumptags :: [(Char, Jumptag)]
+      _rstActiveJumptags :: [(Char, Jumptag)],
+      _rstMotion :: Maybe Motion
     }
 
 --------------------------------------------------------------------------------
@@ -542,7 +560,6 @@ data ReactState =
 --------------------------------------------------------------------------------
 
 makeLenses ''EditorState
-makeLenses ''NodeCreateFn
 makeLenses ''LayoutCtx
 makeLenses ''ReactCtx
 makeLenses ''ReactState
@@ -557,16 +574,6 @@ keyLetter c keyCode = keyChar keyCode == Just c
 keyCodeLetter :: KeyCode -> Char -> InputEvent -> Bool
 keyCodeLetter kc c = \case
   KeyPress [] keyCode -> keyCode == kc || keyLetter c keyCode
-  _ -> False
-
-shiftChar :: Char -> InputEvent -> Bool
-shiftChar c = \case
-  KeyPress [Shift] keyCode -> keyLetter c keyCode
-  _ -> False
-
-insertModeEvent :: InputEvent -> Bool
-insertModeEvent = \case
-  KeyPress [] keyCode -> keyLetter 'i' keyCode
   _ -> False
 
 --------------------------------------------------------------------------------
@@ -632,7 +639,9 @@ redrawUI pluginInfo viewport es =
       cairoRender
         (backgroundRdr
            <> mainRdr
-           <> renderSelectionBorder paths findZone
+           <> (case es ^. esMotion of
+                 Nothing -> renderSelectionBorder paths findZone
+                 Just a -> renderMotion a paths findZone)
            <> renderHoverBorder paths findZone
            <> renderJumptagLabels activeJumptags
            <> stackRdr
@@ -653,13 +662,12 @@ layoutNodeStack :: Monoid n => LayoutCtx -> [Node] -> Collage n El
 layoutNodeStack lctx nodes =
   mapCollageAnnotation (const mempty) $
   substrate 0 backgroundRect $
-  substrate 4 (outline 2 borderColor) $
+  substrate 4 (outline 2 stackBorderColor) $
   case nodes of
     [] -> punct "end of stack"
     n:_ -> snd (layoutNode lctx n precPredicate)
   where
     precPredicate = PrecPredicate (const (PrecBorder False))
-    borderColor = rgb 94 134 80
     backgroundRect = rect nothing dark1'
 
 layoutInfoBar ::
@@ -801,11 +809,8 @@ layoutBorder borderWidth = \case
     BorderValid (PrecBorder True) -> addBorder dark2
     BorderValid (PrecBorder False) -> id
   where
-    addBorder color a =
-      substrate
-        (lrtbMargin (collageMargin a))
-        (outline borderWidth color)
-        a
+    addBorder color =
+      substrateMargin (outline borderWidth color)
 
 validChild :: LayoutCtx -> TyName -> Bool
 validChild lctx tyName =
@@ -955,30 +960,30 @@ reactEditorState _ (KeyPress [Control] keyCode) es
        & esUndo %~ (expr:)
 
 reactEditorState pluginInfo inputEvent es
-  | Just act <- getAction env nodeFactory wd sel stkVis activeJumptags inputEvent,
+  | Just act <- getAction env wd sel stkVis activeJumptags motion inputEvent,
     Just (UndoFlag undoFlag, rst') <- applyAction act rctx rst
   = ReactOk $
     let es' = es & esExpr .~ (rst' ^. rstNode)
                  & esStack .~ (rst' ^. rstStack)
                  & esStackVis .~ (rst' ^. rstStackVis)
                  & esActiveJumptags .~ (rst' ^. rstActiveJumptags)
+                 & esMotion .~ (rst' ^. rstMotion)
     in if undoFlag then
          es' & esUndo %~ (expr:)
              & esRedo .~ []
        else es'
   where
     env = rctx ^. rctxTyEnv
-    nodeFactory = rctx ^. rctxNodeFactory
     wd = es ^. esWritingDirection
     sel = selectionOfNode expr
     expr = es ^. esExpr
     stkVis = es ^. esStackVis
     activeJumptags = es ^. esActiveJumptags
-    rst = ReactState expr (es ^. esStack) stkVis activeJumptags
+    motion = es ^. esMotion
+    rst = ReactState expr (es ^. esStack) stkVis activeJumptags motion
     rctx =
       ReactCtx
         { _rctxTyEnv = pluginInfoTyEnv pluginInfo,
-          _rctxNodeFactory = pluginInfoNodeFactory pluginInfo,
           _rctxDefaultNodes = pluginInfoDefaultNodes pluginInfo,
           _rctxRecMoveMaps = pluginInfoRecMoveMaps pluginInfo,
           _rctxJumptags = es ^. esJumptags
@@ -986,16 +991,8 @@ reactEditorState pluginInfo inputEvent es
 
 reactEditorState _ _ _ = UnknownEvent
 
-newNodeTyName :: [NodeCreateFn] -> InputEvent -> Maybe TyName
-newNodeTyName nodeFactory inputEvent =
-  listToMaybe $ do
-    ncf <- nodeFactory
-    guard $ (ncf ^. ncfCheckInputEvent) inputEvent
-    [ncf ^. ncfTyName]
-
 data Action =
   ActionDeleteNode Path |
-  ActionCreateNode Path TyName |
   ActionPushStack Path |
   ActionPopSwapStack Path |
   ActionRotateStack |
@@ -1013,24 +1010,27 @@ data Action =
   ActionSelectSiblingForward Path |
   ActionActivateJumptags |
   ActionDeactivateJumptags |
-  ActionJumptagLookup Char
+  ActionJumptagLookup Char |
+  ActionStartMotion |
+  ActionCancelMotion |
+  ActionAppendMotion Char Path
 
 getAction ::
   Env ->
-  [NodeCreateFn] ->
   WritingDirection ->
   Selection ->
   StackVis ->
   [(Char, Jumptag)] ->
+  Maybe Motion ->
   InputEvent ->
   Maybe Action
 getAction
     Env{envMap}
-    nodeFactory
     wd
     Selection{selectionPath, selectionTyName, selectionStrPos}
     stkVis
     activeJumptags
+    motion
     inputEvent
 
   -- Exit jumptag mode.
@@ -1038,7 +1038,19 @@ getAction
     KeyPress [] KeyCode.Escape <- inputEvent
   = Just $ ActionDeactivateJumptags
 
-  -- | Jumptag lookup.
+  -- Exit motion mode.
+  | Just _ <- motion,
+    KeyPress [] KeyCode.Escape<- inputEvent
+  = return ActionCancelMotion
+
+  -- Append a letter to the motion.
+  | Just _ <- motion,
+    KeyPress mods keyCode <- inputEvent,
+    Control `notElem` mods,
+    Just c <- keyChar keyCode
+  = Just $ ActionAppendMotion c selectionPath
+
+  -- Jumptag lookup.
   | not (null activeJumptags),
     KeyPress [] keyCode <- inputEvent,
     Just c <- keyChar keyCode
@@ -1062,6 +1074,7 @@ getAction
   -- Use Shift-Space to enter a space character.
   | Just tyName <- selectionTyName,
     Just TyStr <- HashMap.lookup tyName envMap,
+    Just _ <- selectionStrPos,
     KeyPress [] KeyCode.Space <- inputEvent
   = Just $ ActionExitEditMode selectionPath
 
@@ -1118,11 +1131,6 @@ getAction
   | keyCodeLetter KeyCode.Delete 'x' inputEvent
   = Just $ ActionDeleteNode selectionPath
 
-  -- Create node.
-  | Nothing <- selectionTyName,  -- it's a hole
-    Just tyName <- newNodeTyName nodeFactory inputEvent
-  = Just $ ActionCreateNode selectionPath tyName
-
   -- Push a node to the stack.
   | KeyPress [] keyCode <- inputEvent,
     keyLetter 'y' keyCode
@@ -1158,6 +1166,11 @@ getAction
       WritingDirectionLTR -> ActionSelectSiblingForward selectionPath
       WritingDirectionRTL -> ActionSelectSiblingBackward selectionPath
 
+  -- Enter motion mode.
+  | Nothing <- motion,
+    KeyPress [] KeyCode.Space <- inputEvent
+  = return ActionStartMotion
+
   | otherwise
   = Nothing
 
@@ -1182,14 +1195,6 @@ applyActionM (ActionDeleteNode path) = do
   forM_ nodes $ \node ->
     rstStack %= (node:)
   setUndoFlag
-
-applyActionM (ActionCreateNode path tyName) =
-  zoom (rstNode . atPath path) $ do
-    Hole <- get
-    defaultNodes <- view rctxDefaultNodes
-    let node = defaultNodes HashMap.! tyName
-    put node
-    setUndoFlag
 
 applyActionM (ActionPushStack path) = do
   rstStackVis .= StackVisible
@@ -1327,7 +1332,7 @@ applyActionM (ActionSelectSiblingForward path) = do
 
 applyActionM ActionActivateJumptags = do
   jumptags <- view rctxJumptags
-  rstActiveJumptags .= zip jumptagLabels jumptags
+  rstActiveJumptags .= List.zip jumptagLabels jumptags
 
 applyActionM ActionDeactivateJumptags = do
   rstActiveJumptags .= []
@@ -1343,8 +1348,35 @@ applyActionM (ActionJumptagLookup c) = do
     [Jumptag _ path] -> do
       rstNode %= setPathNode path
       rstActiveJumptags .= []
-    jumptags -> rstActiveJumptags .= zip jumptagLabels jumptags
+    jumptags -> rstActiveJumptags .= List.zip jumptagLabels jumptags
 
+applyActionM ActionStartMotion = do
+  rstMotion .= Just (Motion "")
+
+applyActionM ActionCancelMotion = do
+  rstMotion .= Nothing
+
+applyActionM (ActionAppendMotion c path) = do
+  Just (Motion s) <- use rstMotion
+  defaultNodes <- view rctxDefaultNodes
+  let
+    motion' = Motion (s <> Text.singleton c)
+    newNodes = filterByMotion motion' (HashMap.toList defaultNodes)
+  case newNodes of
+    [newNode] -> do
+      rstMotion .= Nothing
+      oldNodes <-
+        zoom (rstNode . atPath path) $ do
+          oldNode <- get
+          put newNode
+          setUndoFlag
+          case oldNode of
+            Hole -> return []
+            Node{} -> return [oldNode]
+      forM_ oldNodes $ \oldNode -> do
+        rstStackVis .= StackVisible
+        rstStack %= (oldNode:)
+    _ -> rstMotion .= Just motion'
 
 jumptagLabels :: [Char]
 jumptagLabels = List.cycle "aoeuhtnspcrjm"
@@ -1388,6 +1420,23 @@ zoomPathPrefix p m =
     Nothing -> m
     Just (ps, p') ->
       zoom (atPathSegment ps) (zoomPathPrefix p' m) <|> m
+
+matchMotion :: Motion -> TyName -> Bool
+matchMotion (Motion motionStr) (TyName tyName) =
+  let
+    tyNameParts =
+      List.map (Text.pack . List.map letterToChar . NonEmpty.toList) $
+      NonEmpty.toList (nameParts tyName)
+    motionParts = Text.splitOn "-" motionStr
+    matchPart (motionPart, tyNamePart) =
+      not (Text.null motionPart) &&
+      (Text.isPrefixOf `on` Text.toCaseFold) motionPart tyNamePart
+  in
+    List.all matchPart (List.zip motionParts tyNameParts)
+
+filterByMotion :: Motion -> [(TyName, a)] -> [a]
+filterByMotion motion =
+  List.map snd . List.filter (matchMotion motion . fst)
 
 mkDefaultNodes :: Env -> HashMap TyName RecMoveMap -> HashMap TyName Node
 mkDefaultNodes env recMoveMaps =
@@ -1461,8 +1510,7 @@ sortByVisualOrder recLayoutFn = sortedFields
 data Plugin =
   Plugin
     { _pluginTyEnv :: Env,
-      _pluginRecLayouts :: HashMap TyName ALayoutFn,
-      _pluginNodeFactory :: [NodeCreateFn]
+      _pluginRecLayouts :: HashMap TyName ALayoutFn
     }
 
 -- | A plugin as consumed by the editor, with additional information
@@ -1471,7 +1519,6 @@ data PluginInfo =
   PluginInfo
     { pluginInfoTyEnv :: Env,
       pluginInfoRecLayouts :: HashMap TyName ALayoutFn,
-      pluginInfoNodeFactory :: [NodeCreateFn],
       pluginInfoRecMoveMaps :: HashMap TyName RecMoveMap,
       pluginInfoDefaultNodes :: HashMap TyName Node,
       pluginInfoAllowedFieldTypes :: HashMap (TyName, FieldName) (HashSet TyName)
@@ -1484,7 +1531,6 @@ mkPluginInfo plugin =
   PluginInfo
     { pluginInfoTyEnv = tyEnv,
       pluginInfoRecLayouts = recLayouts,
-      pluginInfoNodeFactory = nodeFactory,
       pluginInfoRecMoveMaps = recMoveMaps,
       pluginInfoDefaultNodes = defaultNodes,
       pluginInfoAllowedFieldTypes = allowedFieldTypes
@@ -1492,7 +1538,6 @@ mkPluginInfo plugin =
   where
     tyEnv = plugin ^. pluginTyEnv
     recLayouts = plugin ^. pluginRecLayouts
-    nodeFactory = plugin ^. pluginNodeFactory
     recMoveMaps = mkRecMoveMaps recLayouts
     defaultNodes = mkDefaultNodes tyEnv recMoveMaps
     allowedFieldTypes = mkAllowedFieldTypes tyEnv
