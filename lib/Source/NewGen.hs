@@ -10,8 +10,6 @@
 {-# LANGUAGE RankNTypes #-}
 {-# LANGUAGE TemplateHaskell #-}
 
-{-# OPTIONS -fmax-pmcheck-iterations=10000000 #-}
-
 module Source.NewGen
   (
   -- * Names
@@ -1060,6 +1058,13 @@ getAction
   | Just tyName <- selectionTyName,
     Just TyStr <- HashMap.lookup tyName envMap,
     KeyPress [] KeyCode.Escape <- inputEvent
+  = Just $ ActionExitEditMode selectionPath
+
+  -- Exit edit mode with Space.
+  -- Use Shift-Space to enter a space character.
+  | Just tyName <- selectionTyName,
+    Just TyStr <- HashMap.lookup tyName envMap,
+    KeyPress [] KeyCode.Space <- inputEvent
   = Just $ ActionExitEditMode selectionPath
 
   -- Delete character backward.
