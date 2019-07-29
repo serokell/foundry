@@ -365,12 +365,13 @@ findBoxAtPath p box =
     then Just box
     else Nothing
 
-dark1, dark1', dark2, light1, white :: Inj Color a => a
+dark1, dark1', dark2, light1, white, red :: Inj Color a => a
 dark1  = grayscale 41
 dark1' = grayscale 35
 dark2  = grayscale 77
 light1 = grayscale 179
 white  = grayscale 255
+red    = rgb 255 0 0
 
 selectionBorderColor, hoverBorderColor :: Inj Color a => a
 selectionBorderColor = rgb 94 80 134
@@ -438,31 +439,6 @@ precAllow allowed =
 hashSet_isSubsetOf :: (Eq a, Hashable a) => HashSet a -> HashSet a -> Bool
 hashSet_isSubsetOf sub sup =
   all (\k -> HashSet.member k sup) sub
-
-newtype ShowSel = ShowSel Bool
-
-layoutSel :: ShowSel -> PrecBorder -> Path -> Collage Ann El -> Collage Ann El
-layoutSel (ShowSel showSel) (PrecBorder precBorder) path =
-  (if showSel then
-    collageWithMargin (mkMargin (marginWidth - precBorderWidth)) .
-    collageAnnotateMargin pathZone
-   else id) .
-  (if precBorder then precedenceBorder precBorderWidth else id) .
-  collageWithMargin (mkMargin marginWidth)
-  where
-    mkMargin a = Margin a a a a
-    (marginWidth, precBorderWidth) = (4, 1)
-    pathZone box = (findPath, findZone, mempty)
-      where
-        findPath = findPathInBox path box
-        findZone = findBoxAtPath path box
-
-precedenceBorder :: Natural -> Collage Ann El -> Collage Ann El
-precedenceBorder width a =
-  substrate
-    (lrtbMargin (collageMargin a))
-    (outline width dark2)
-    a
 
 lrtbMargin :: Margin -> LRTB Natural
 lrtbMargin (Margin l r t b) = lrtb l r t b
@@ -537,6 +513,7 @@ data LayoutCtx =
       _lctxViewport :: Extents,
       _lctxPrecBordersAlways :: Bool,
       _lctxRecLayouts :: HashMap TyName ALayoutFn,
+      _lctxAllowedFieldTypes :: HashMap (TyName, FieldName) (HashSet TyName),
       _lctxWritingDirection :: WritingDirection
     }
 
@@ -545,7 +522,6 @@ data ReactCtx =
     { _rctxTyEnv :: Env,
       _rctxNodeFactory :: [NodeCreateFn],
       _rctxDefaultNodes :: HashMap TyName Node,
-      _rctxAllowedFieldTypes :: HashMap (TyName, FieldName) (HashSet TyName),
       _rctxRecMoveMaps :: HashMap TyName RecMoveMap,
       _rctxJumptags :: [Jumptag]
     }
@@ -617,6 +593,7 @@ redrawUI pluginInfo viewport es =
           _lctxViewport = viewport,
           _lctxPrecBordersAlways = es ^. esPrecBordersAlways,
           _lctxRecLayouts = pluginInfoRecLayouts pluginInfo,
+          _lctxAllowedFieldTypes = pluginInfoAllowedFieldTypes pluginInfo,
           _lctxWritingDirection = es ^. esWritingDirection
         }
     pointer = es ^. esPointer
@@ -674,7 +651,7 @@ layoutMainExpr ::
 layoutMainExpr lctx expr = collage
   where
     precPredicate = PrecPredicate (const (PrecBorder False))
-    (_, collage) = layoutNode (ShowSel True) lctx expr precPredicate
+    (_, collage) = layoutNode lctx expr precPredicate
 
 layoutNodeStack :: Monoid n => LayoutCtx -> [Node] -> Collage n El
 layoutNodeStack lctx nodes =
@@ -683,7 +660,7 @@ layoutNodeStack lctx nodes =
   substrate 4 (outline 2 borderColor) $
   case nodes of
     [] -> punct "end of stack"
-    n:_ -> snd (layoutNode (ShowSel False) lctx n precPredicate)
+    n:_ -> snd (layoutNode lctx n precPredicate)
   where
     precPredicate = PrecPredicate (const (PrecBorder False))
     borderColor = rgb 94 134 80
@@ -716,15 +693,15 @@ pprSelection selection = Text.pack ('/' : goPath selectionPath "")
     goStrPos Nothing = id
     goStrPos (Just i) = ('[':) . shows i . (']':)
 
-layoutNode :: ShowSel -> LayoutCtx -> Node -> PrecPredicate -> (PrecUnenclosed, Collage Ann El)
-layoutNode ss lctx = \case
-  Hole -> \_precPredicate -> layoutHole ss lctx
-  Node _ object -> layoutObject ss lctx object
+layoutNode :: LayoutCtx -> Node -> PrecPredicate -> (PrecUnenclosed, Collage Ann El)
+layoutNode lctx = \case
+  Hole -> \_precPredicate -> layoutHole lctx
+  Node _ object -> layoutObject lctx object
 
-layoutHole :: ShowSel -> LayoutCtx -> (PrecUnenclosed, Collage Ann El)
-layoutHole ss lctx =
+layoutHole :: LayoutCtx -> (PrecUnenclosed, Collage Ann El)
+layoutHole lctx =
   (,) (mempty @PrecUnenclosed) $
-  layoutSel ss precBorder path $
+  layoutSel (BorderValid precBorder) path $
   withJumptag path $
   punct "_"
   where
@@ -732,20 +709,26 @@ layoutHole ss lctx =
     path = buildPath (lctx ^. lctxPath)
 
 layoutObject ::
-  ShowSel ->
   LayoutCtx ->
   Object Node ->
   PrecPredicate ->
   (PrecUnenclosed, Collage Ann El)
-layoutObject ss lctx = \case
-  Object tyName (ValueRec fields) -> layoutRec ss lctx tyName fields
-  Object _ (ValueSeq _) -> error "TODO (int-index): layoutObject ValueSeq"
-  Object _ (ValueStr str) -> \_precPredicate -> layoutStr ss lctx str
+layoutObject lctx = \case
+  Object tyName (ValueRec fields) ->
+    layoutRec lctx tyName fields
+  Object _ (ValueSeq _) ->
+    error "TODO (int-index): layoutObject ValueSeq"
+  Object tyName (ValueStr str) -> \_precPredicate ->
+    layoutStr lctx tyName str
 
-layoutStr :: ShowSel -> LayoutCtx -> Text -> (PrecUnenclosed, Collage Ann El)
-layoutStr ss lctx str =
+layoutStr ::
+  LayoutCtx ->
+  TyName ->
+  Text ->
+  (PrecUnenclosed, Collage Ann El)
+layoutStr lctx tyName str =
   (,) (mempty @PrecUnenclosed) $
-  layoutSel ss precBorder path $
+  layoutSel (toBorder lctx tyName precBorder) path $
   withJumptag path $
   textWithCursor str
     (\Paths{pathsSelection} ->
@@ -763,15 +746,14 @@ layoutStr ss lctx str =
     path = buildPath (lctx ^. lctxPath)
 
 layoutRec ::
-  ShowSel ->
   LayoutCtx ->
   TyName ->
   HashMap FieldName Node ->
   PrecPredicate ->
   (PrecUnenclosed, Collage Ann El)
-layoutRec ss lctx tyName fields precPredicate =
+layoutRec lctx tyName fields precPredicate =
   (,) (guardUnenclosed precBorder precUnenclosed') $
-  layoutSel ss precBorder path $
+  layoutSel (toBorder lctx tyName precBorder) path $
   collage
   where
     (precUnenclosed, collage) =
@@ -789,7 +771,7 @@ layoutRec ss lctx tyName fields precPredicate =
                 pathSegment = PathSegmentRec tyName fieldName
                 lctx' = lctx & lctxPath %~ (<> mkPathBuilder pathSegment)
               in
-                \obj -> layoutNode ss lctx' obj)
+                \obj -> layoutNode lctx' obj)
             fields
         wd :: WritingDirection
         wd = lctx ^. lctxWritingDirection
@@ -800,6 +782,54 @@ layoutRec ss lctx tyName fields precPredicate =
       PrecBorder (lctx ^. lctxPrecBordersAlways) <>
       appPrecPredicate precPredicate precUnenclosed'
     path = buildPath (lctx ^. lctxPath)
+
+data Border = BorderValid PrecBorder | BorderInvalid
+
+layoutSel :: Border -> Path -> Collage Ann El -> Collage Ann El
+layoutSel border path =
+  collageWithMargin (mkMargin (marginWidth - borderWidth)) .
+  collageAnnotateMargin pathZone .
+  layoutBorder borderWidth border .
+  collageWithMargin (mkMargin marginWidth)
+  where
+    mkMargin a = Margin a a a a
+    (marginWidth, borderWidth) = (4, 1)
+    pathZone box = (findPath, findZone, mempty)
+      where
+        findPath = findPathInBox path box
+        findZone = findBoxAtPath path box
+
+layoutBorder :: Natural -> Border -> Collage Ann El -> Collage Ann El
+layoutBorder borderWidth = \case
+    BorderInvalid -> addBorder red
+    BorderValid (PrecBorder True) -> addBorder dark2
+    BorderValid (PrecBorder False) -> id
+  where
+    addBorder color a =
+      substrate
+        (lrtbMargin (collageMargin a))
+        (outline borderWidth color)
+        a
+
+validChild :: LayoutCtx -> TyName -> Bool
+validChild lctx tyName =
+  case pathTip of
+    Nothing -> True
+    Just (PathSegmentSeq _ _) ->
+      error "TODO (int-index): validChild PathSegmentSeq"
+    Just (PathSegmentRec recTyName fieldName) ->
+      HashSet.member tyName (allowedFieldTypes HashMap.! (recTyName, fieldName))
+  where
+    pathTip = listToMaybe (List.reverse ps)
+    Path ps = buildPath (lctx ^. lctxPath)
+    allowedFieldTypes = lctx ^. lctxAllowedFieldTypes
+
+toBorder :: LayoutCtx -> TyName -> PrecBorder -> Border
+toBorder lctx tyName =
+  if validChild lctx tyName
+  then BorderValid
+  else const BorderInvalid
+
 
 --------------------------------------------------------------------------------
 ---- Editor - Selection
@@ -954,7 +984,6 @@ reactEditorState pluginInfo inputEvent es
         { _rctxTyEnv = pluginInfoTyEnv pluginInfo,
           _rctxNodeFactory = pluginInfoNodeFactory pluginInfo,
           _rctxDefaultNodes = pluginInfoDefaultNodes pluginInfo,
-          _rctxAllowedFieldTypes = pluginInfoAllowedFieldTypes pluginInfo,
           _rctxRecMoveMaps = pluginInfoRecMoveMaps pluginInfo,
           _rctxJumptags = es ^. esJumptags
         }
@@ -1154,20 +1183,10 @@ applyActionM (ActionDeleteNode path) = do
 applyActionM (ActionCreateNode path tyName) =
   zoom (rstNode . atPath path) $ do
     Hole <- get
-    allowedFieldTypes <- view rctxAllowedFieldTypes
-    guard (validChild allowedFieldTypes)
     defaultNodes <- view rctxDefaultNodes
     let node = defaultNodes HashMap.! tyName
     put node
     setUndoFlag
-  where
-    validChild allowedFieldTypes =
-      case pathTip path of
-        Nothing -> True
-        Just (PathSegmentSeq _ _) ->
-          error "TODO (int-index): validChild PathSegmentSeq"
-        Just (PathSegmentRec recTyName fieldName) ->
-          HashSet.member tyName (allowedFieldTypes HashMap.! (recTyName, fieldName))
 
 applyActionM (ActionPushStack path) = do
   rstStackVis .= StackVisible
@@ -1331,9 +1350,6 @@ jumptagLabels = List.cycle "aoeuhtnspcrjm"
 rotate :: [a] -> [a]
 rotate [] = []
 rotate (x:xs) = xs ++ [x]
-
-pathTip :: Path -> Maybe PathSegment
-pathTip (Path ps) = listToMaybe (List.reverse ps)
 
 pathParent :: Path -> Maybe Path
 pathParent (Path ps) =
