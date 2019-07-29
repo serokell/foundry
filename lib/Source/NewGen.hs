@@ -832,6 +832,16 @@ selectionOfNode = \case
         in
           Selection (consPath pathSegment pathTail) tyName' strPos
 
+-- | Set self-selection for all nodes.
+resetPathNode :: Node -> Node
+resetPathNode node =
+  case node of
+    Hole -> node
+    Node sel obj -> Node (resetSel sel) (fmap resetPathNode obj)
+  where
+    resetSel (NodeRecSel recSel) = NodeRecSel (toRecSelSelf recSel)
+    resetSel s@(NodeStrSel _ _) = s
+
 updatePathNode :: Path -> Node -> Node
 updatePathNode path node = case node of
   Hole -> node
@@ -857,6 +867,9 @@ updatePathNode path node = case node of
               recSel' = RecSel fieldName True
             in
               Node (NodeRecSel recSel') (Object tyName (ValueRec fields'))
+
+setPathNode :: Path -> Node -> Node
+setPathNode path node = updatePathNode path (resetPathNode node)
 
 toRecSelSelf :: RecSel -> RecSel
 toRecSelSelf RecSel0 = RecSel0
@@ -890,7 +903,7 @@ reactEditorState _ (PointerMotion x y) es = ReactOk $
 
 reactEditorState _ ButtonPress es
   | Just p <- es ^. esPointerPath
-  = ReactOk $ es & esExpr %~ updatePathNode p
+  = ReactOk $ es & esExpr %~ setPathNode p
 
 reactEditorState _ (KeyPress [Control] keyCode) es
   | keyLetter 'b' keyCode
@@ -1306,7 +1319,7 @@ applyActionM (ActionJumptagLookup c) = do
   case activeJumptags' of
     [] -> A.empty
     [Jumptag _ path] -> do
-      rstNode %= updatePathNode path
+      rstNode %= setPathNode path
       rstActiveJumptags .= []
     jumptags -> rstActiveJumptags .= zip jumptagLabels jumptags
 
