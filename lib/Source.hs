@@ -87,16 +87,16 @@ createMainWindow pluginInfo esRef = do
   void $ Gtk.on canvas Gtk.keyPressEvent $ do
     modifier <- Gtk.eventModifier
     keyVal <- Gtk.eventKeyVal
-    let
-      event = KeyPress (modifier >>= gtkMod) keyVal
-      gtkMod = \case
-        Gtk.Control -> [Control]
-        Gtk.Shift -> [Shift]
-        Gtk.Alt -> [Alt]
-        _ -> []
+    let event = KeyPress (modifier >>= gtkMod) keyVal
     liftIO $ do
       phaserReset cursorPhaser NG.CursorVisible
       handleInputEvent event
+
+  void $ Gtk.on canvas Gtk.keyReleaseEvent $ do
+    modifier <- Gtk.eventModifier
+    keyVal <- Gtk.eventKeyVal
+    let event = KeyRelease (modifier >>= gtkMod) keyVal
+    liftIO $ handleInputEvent event
 
   void $ Gtk.on canvas Gtk.motionNotifyEvent $ do
     (x, y) <- Gtk.eventCoordinates
@@ -110,6 +110,13 @@ createMainWindow pluginInfo esRef = do
   Gtk.containerAdd window canvas
   Gtk.windowMaximize window
   return window
+
+gtkMod :: Gtk.Modifier -> [Modifier]
+gtkMod = \case
+  Gtk.Control -> [Control]
+  Gtk.Shift -> [Shift]
+  Gtk.Alt -> [Alt]
+  _ -> []
 
 createMainCanvas :: IO Gtk.DrawingArea
 createMainCanvas = do

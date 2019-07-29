@@ -351,8 +351,7 @@ renderMotion motion Paths{pathsSelection} (Find findZone) =
       collageWithMargin (Margin 4 4 4 4) $
       (punct label :: Collage Ann El)
   where
-    label = case motion of
-      Motion s -> "_" <> s
+    Motion label = motion
 
 findPathInBox :: Path -> (Offset, Extents) -> FindPath
 findPathInBox p box =
@@ -1012,8 +1011,8 @@ data Action =
   ActionDeactivateJumptags |
   ActionJumptagLookup Char |
   ActionStartMotion |
-  ActionCancelMotion |
-  ActionAppendMotion Char Path
+  ActionAppendMotion Char |
+  ActionCommitMotion Path
 
 getAction ::
   Env ->
@@ -1038,17 +1037,18 @@ getAction
     KeyPress [] KeyCode.Escape <- inputEvent
   = Just $ ActionDeactivateJumptags
 
-  -- Exit motion mode.
-  | Just _ <- motion,
-    KeyPress [] KeyCode.Escape<- inputEvent
-  = return ActionCancelMotion
-
   -- Append a letter to the motion.
   | Just _ <- motion,
     KeyPress mods keyCode <- inputEvent,
     Control `notElem` mods,
+    keyCode /= KeyCode.Space,
     Just c <- keyChar keyCode
-  = Just $ ActionAppendMotion c selectionPath
+  = Just $ ActionAppendMotion c
+
+  -- Append a letter to the motion.
+  | Just _ <- motion,
+    KeyRelease _ KeyCode.Space <- inputEvent
+  = Just $ ActionCommitMotion selectionPath
 
   -- Jumptag lookup.
   | not (null activeJumptags),
@@ -1207,16 +1207,7 @@ applyActionM (ActionPopSwapStack path) = do
   rstStackVis .= StackVisible
   n:ns <- use rstStack
   rstStack .= ns
-  nodes <-
-    zoom (rstNode . atPath path) $ do
-      node <- get
-      put n
-      setUndoFlag
-      case node of
-        Hole -> return []
-        Node{} -> return [node]
-  forM_ nodes $ \node ->
-    rstStack %= (node:)
+  popSwapNode path n
 
 applyActionM ActionRotateStack = do
   stkVis <- use rstStackVis
@@ -1353,30 +1344,33 @@ applyActionM (ActionJumptagLookup c) = do
 applyActionM ActionStartMotion = do
   rstMotion .= Just (Motion "")
 
-applyActionM ActionCancelMotion = do
-  rstMotion .= Nothing
-
-applyActionM (ActionAppendMotion c path) = do
+applyActionM (ActionAppendMotion c) = do
   Just (Motion s) <- use rstMotion
+  let motion' = Motion (s <> Text.singleton c)
+  rstMotion .= Just motion'
+
+applyActionM (ActionCommitMotion path) = do
+  Just motion <- use rstMotion
+  rstMotion .= Nothing
   defaultNodes <- view rctxDefaultNodes
-  let
-    motion' = Motion (s <> Text.singleton c)
-    newNodes = filterByMotion motion' (HashMap.toList defaultNodes)
-  case newNodes of
-    [newNode] -> do
-      rstMotion .= Nothing
-      oldNodes <-
-        zoom (rstNode . atPath path) $ do
-          oldNode <- get
-          put newNode
-          setUndoFlag
-          case oldNode of
-            Hole -> return []
-            Node{} -> return [oldNode]
-      forM_ oldNodes $ \oldNode -> do
-        rstStackVis .= StackVisible
-        rstStack %= (oldNode:)
-    _ -> rstMotion .= Just motion'
+  let nodes = filterByMotion motion (HashMap.toList defaultNodes)
+  case nodes of
+    [n] -> popSwapNode path n
+    _ -> return ()
+
+popSwapNode :: Path -> Node -> ReactM ReactState
+popSwapNode path n = do
+  nodes <-
+    zoom (rstNode . atPath path) $ do
+      node <- get
+      put n
+      setUndoFlag
+      case node of
+        Hole -> return []
+        Node{} -> return [node]
+  forM_ nodes $ \node -> do
+    rstStackVis .= StackVisible
+    rstStack %= (node:)
 
 jumptagLabels :: [Char]
 jumptagLabels = List.cycle "aoeuhtnspcrjm"

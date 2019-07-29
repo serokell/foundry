@@ -18,6 +18,7 @@ keyChar = Gtk.keyToChar
 
 data InputEvent
   = KeyPress [Modifier] KeyCode
+  | KeyRelease [Modifier] KeyCode
   | PointerMotion Int Int
   | ButtonPress
   deriving (Eq, Show)
