@@ -974,6 +974,7 @@ data Action =
   ActionSelectSiblingBackward Path |
   ActionSelectSiblingForward Path |
   ActionActivateJumptags |
+  ActionDeactivateJumptags |
   ActionJumptagLookup Char
 
 getAction ::
@@ -994,6 +995,12 @@ getAction
     activeJumptags
     inputEvent
 
+  -- Exit jumptag mode.
+  | not (null activeJumptags),
+    KeyPress [] KeyCode.Escape <- inputEvent
+  = Just $ ActionDeactivateJumptags
+
+  -- | Jumptag lookup.
   | not (null activeJumptags),
     KeyPress [] keyCode <- inputEvent,
     Just c <- keyChar keyCode
@@ -1286,6 +1293,9 @@ applyActionM (ActionSelectSiblingForward path) = do
 applyActionM ActionActivateJumptags = do
   jumptags <- view rctxJumptags
   rstActiveJumptags .= zip jumptagLabels jumptags
+
+applyActionM ActionDeactivateJumptags = do
+  rstActiveJumptags .= []
 
 applyActionM (ActionJumptagLookup c) = do
   activeJumptags <- use rstActiveJumptags
