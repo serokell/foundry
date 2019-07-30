@@ -1,5 +1,5 @@
 { pkgs ? import <nixpkgs> {},
-  hc ? "ghc844"
+  hc ? "ghc865"
 }:
 
 pkgs.stdenv.mkDerivation rec {
