@@ -27,19 +27,61 @@ main = do
   et <- getArgs >>= \case
     [et] -> return et
     _ -> die "Usage: foundry EXPR"
-  tyEnv <- either die return =<< readTyEnv "morte.sdam"
   expr <- synImportExpr <$>
     case M.P.exprFromText (fromString et) of
       Left err -> die (show err)
       Right e -> M.I.load Nothing e
-  runGUI (foundryPlugin tyEnv) initEditorState{ _esExpr = expr }
+  runGUI foundryPlugin initEditorState{ _esExpr = expr }
 
-foundryPlugin :: Env -> Plugin
-foundryPlugin env =
+foundryPlugin :: Plugin
+foundryPlugin =
   Plugin
-    { _pluginTyEnv = env,
+    { _pluginTyEnv = foundryTyEnv,
       _pluginRecLayouts = foundryRecLayouts
     }
+
+foundryTyEnv :: Env
+foundryTyEnv =
+  Env
+    { envMap =
+        HashMap.fromList
+          [ ("Nat", TyStr),
+            ("Var", TyStr),
+            ("IVar", tyIVar),
+            ("Lam", tyLam),
+            ("Pi", tyPi),
+            ("App", tyApp),
+            ("Star", TyRec []),
+            ("Box", TyRec []) ]
+    }
+  where
+    tyIVar =
+      TyRec
+        [ ("var", mkTyUnion ["Var"]),
+          ("index", mkTyUnion ["Nat"]) ]
+    tyLam =
+      TyRec
+        [ ("var", mkTyUnion ["Var"]),
+          ("ty", tyExpr),
+          ("body", tyExpr) ]
+    tyPi =
+      TyRec
+        [ ("var", mkTyUnion ["Var"]),
+          ("ty", tyExpr),
+          ("body", tyExpr) ]
+    tyApp =
+      TyRec
+        [ ("fn", tyExpr),
+          ("arg", tyExpr) ]
+    tyExpr =
+      mkTyUnion
+        [ "Lam",
+          "Pi",
+          "App",
+          "Star",
+          "Box",
+          "Var",
+          "IVar" ]
 
 foundryRecLayouts :: HashMap TyName ALayoutFn
 foundryRecLayouts = recLayouts

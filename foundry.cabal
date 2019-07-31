@@ -32,7 +32,6 @@ library
                ,       slay-combinators
                ,       slay-cairo
                ,       sdam
-               ,       megaparsec
 
   hs-source-dirs:      lib
 

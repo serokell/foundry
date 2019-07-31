@@ -4,8 +4,7 @@
 {-# LANGUAGE ScopedTypeVariables #-}
 
 module Source
-    ( runGUI,
-      readTyEnv,
+    ( runGUI
     ) where
 
 import Control.Monad
@@ -14,13 +13,11 @@ import qualified Graphics.UI.Gtk as Gtk
 import Data.IORef
 import Control.Lens
 import Data.Tuple
-import Text.Megaparsec (errorBundlePretty)
 
 import Slay.Core
 import Source.Phaser
 import Source.Input (InputEvent(..), Modifier(..))
 import qualified Source.NewGen as NG
-import qualified Sdam.Parser
 
 runGUI :: NG.Plugin -> NG.EditorState -> IO ()
 runGUI plugin editorState = do
@@ -127,16 +124,6 @@ createMainCanvas = do
     , Gtk.widgetHasFocus Gtk.:= True
     ]
   return canvas
-
-
-readTyEnv :: FilePath -> IO (Either String NG.Env)
-readTyEnv path = do
-  tyEnvDesc <- readFile path
-  return $ over _Left errorBundlePretty $
-    Sdam.Parser.parse
-      Sdam.Parser.pEnv
-      path
-      tyEnvDesc
 
 -- | Atomically modifies the contents of an 'IORef' using the provided 'State'
 -- action. Forces both the value stored in the 'IORef' as well as the value
