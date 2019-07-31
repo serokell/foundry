@@ -17,7 +17,7 @@ module Source.NewGen
   FieldName,
 
   -- * Types
-  Env(..),
+  Schema(..),
   Ty(..),
   TyUnion(..),
   mkTyUnion,
@@ -532,7 +532,7 @@ data LayoutCtx =
 
 data ReactCtx =
   ReactCtx
-    { _rctxTyEnv :: Env,
+    { _rctxSchema :: Schema,
       _rctxDefaultNodes :: HashMap TyName Node,
       _rctxRecMoveMaps :: HashMap TyName RecMoveMap,
       _rctxJumptags :: [Jumptag]
@@ -959,7 +959,7 @@ reactEditorState _ (KeyPress [Control] keyCode) es
        & esUndo %~ (expr:)
 
 reactEditorState pluginInfo inputEvent es
-  | Just act <- getAction env wd sel stkVis activeJumptags motion inputEvent,
+  | Just act <- getAction schema wd sel stkVis activeJumptags motion inputEvent,
     Just (UndoFlag undoFlag, rst') <- applyAction act rctx rst
   = ReactOk $
     let es' = es & esExpr .~ (rst' ^. rstNode)
@@ -972,7 +972,7 @@ reactEditorState pluginInfo inputEvent es
              & esRedo .~ []
        else es'
   where
-    env = rctx ^. rctxTyEnv
+    schema = rctx ^. rctxSchema
     wd = es ^. esWritingDirection
     sel = selectionOfNode expr
     expr = es ^. esExpr
@@ -982,7 +982,7 @@ reactEditorState pluginInfo inputEvent es
     rst = ReactState expr (es ^. esStack) stkVis activeJumptags motion
     rctx =
       ReactCtx
-        { _rctxTyEnv = pluginInfoTyEnv pluginInfo,
+        { _rctxSchema = pluginInfoSchema pluginInfo,
           _rctxDefaultNodes = pluginInfoDefaultNodes pluginInfo,
           _rctxRecMoveMaps = pluginInfoRecMoveMaps pluginInfo,
           _rctxJumptags = es ^. esJumptags
@@ -1015,7 +1015,7 @@ data Action =
   ActionCommitMotion Path
 
 getAction ::
-  Env ->
+  Schema ->
   WritingDirection ->
   Selection ->
   StackVis ->
@@ -1024,7 +1024,7 @@ getAction ::
   InputEvent ->
   Maybe Action
 getAction
-    Env{envMap}
+    Schema{schemaTypes}
     wd
     Selection{selectionPath, selectionTyName, selectionStrPos}
     stkVis
@@ -1058,7 +1058,7 @@ getAction
 
   -- Enter edit mode.
   | Just tyName <- selectionTyName,
-    Just TyStr <- HashMap.lookup tyName envMap,
+    Just TyStr <- HashMap.lookup tyName schemaTypes,
     Nothing <- selectionStrPos,
     KeyPress [] keyCode <- inputEvent,
     keyLetter 'i' keyCode
@@ -1066,49 +1066,49 @@ getAction
 
   -- Exit edit mode.
   | Just tyName <- selectionTyName,
-    Just TyStr <- HashMap.lookup tyName envMap,
+    Just TyStr <- HashMap.lookup tyName schemaTypes,
     KeyPress [] KeyCode.Escape <- inputEvent
   = Just $ ActionExitEditMode selectionPath
 
   -- Exit edit mode with Space.
   -- Use Shift-Space to enter a space character.
   | Just tyName <- selectionTyName,
-    Just TyStr <- HashMap.lookup tyName envMap,
+    Just TyStr <- HashMap.lookup tyName schemaTypes,
     Just _ <- selectionStrPos,
     KeyPress [] KeyCode.Space <- inputEvent
   = Just $ ActionExitEditMode selectionPath
 
   -- Delete character backward.
   | Just tyName <- selectionTyName,
-    Just TyStr <- HashMap.lookup tyName envMap,
+    Just TyStr <- HashMap.lookup tyName schemaTypes,
     Just _ <- selectionStrPos,
     KeyPress [] KeyCode.Backspace <- inputEvent
   = Just $ ActionDeleteCharBackward selectionPath
 
   -- Delete character forward.
   | Just tyName <- selectionTyName,
-    Just TyStr <- HashMap.lookup tyName envMap,
+    Just TyStr <- HashMap.lookup tyName schemaTypes,
     Just _ <- selectionStrPos,
     KeyPress [] KeyCode.Delete <- inputEvent
   = Just $ ActionDeleteCharForward selectionPath
 
   -- Move string cursor backward.
   | Just tyName <- selectionTyName,
-    Just TyStr <- HashMap.lookup tyName envMap,
+    Just TyStr <- HashMap.lookup tyName schemaTypes,
     Just _ <- selectionStrPos,
     KeyPress [] KeyCode.ArrowLeft <- inputEvent
   = Just $ ActionMoveStrCursorBackward selectionPath
 
   -- Move string cursor forward.
   | Just tyName <- selectionTyName,
-    Just TyStr <- HashMap.lookup tyName envMap,
+    Just TyStr <- HashMap.lookup tyName schemaTypes,
     Just _ <- selectionStrPos,
     KeyPress [] KeyCode.ArrowRight <- inputEvent
   = Just $ ActionMoveStrCursorForward selectionPath
 
   -- Insert letter.
   | Just tyName <- selectionTyName,
-    Just TyStr <- HashMap.lookup tyName envMap,
+    Just TyStr <- HashMap.lookup tyName schemaTypes,
     Just _ <- selectionStrPos,
     KeyPress mods keyCode <- inputEvent,
     Control `notElem` mods,
@@ -1432,9 +1432,9 @@ filterByMotion :: Motion -> [(TyName, a)] -> [a]
 filterByMotion motion =
   List.map snd . List.filter (matchMotion motion . fst)
 
-mkDefaultNodes :: Env -> HashMap TyName RecMoveMap -> HashMap TyName Node
-mkDefaultNodes env recMoveMaps =
-  HashMap.mapWithKey mkDefNode (envMap env)
+mkDefaultNodes :: Schema -> HashMap TyName RecMoveMap -> HashMap TyName Node
+mkDefaultNodes schema recMoveMaps =
+  HashMap.mapWithKey mkDefNode (schemaTypes schema)
   where
     mkDefNode :: TyName -> Ty -> Node
     mkDefNode tyName = \case
@@ -1451,11 +1451,11 @@ mkDefaultNodes env recMoveMaps =
         in
           Node (NodeRecSel recSel) (Object tyName (ValueRec fields))
 
-mkAllowedFieldTypes :: Env -> HashMap (TyName, FieldName) (HashSet TyName)
-mkAllowedFieldTypes env =
+mkAllowedFieldTypes :: Schema -> HashMap (TyName, FieldName) (HashSet TyName)
+mkAllowedFieldTypes schema =
   HashMap.fromList
     [ ((tyName, fieldName), tys) |
-      (tyName, TyRec fields) <- HashMap.toList (envMap env),
+      (tyName, TyRec fields) <- HashMap.toList (schemaTypes schema),
       (fieldName, TyUnion tys) <- HashMap.toList fields ]
 
 mkRecMoveMaps :: HashMap TyName ALayoutFn -> HashMap TyName RecMoveMap
@@ -1503,7 +1503,7 @@ sortByVisualOrder recLayoutFn = sortedFields
 -- | A plugin as specified by the user.
 data Plugin =
   Plugin
-    { _pluginTyEnv :: Env,
+    { _pluginSchema :: Schema,
       _pluginRecLayouts :: HashMap TyName ALayoutFn
     }
 
@@ -1511,7 +1511,7 @@ data Plugin =
 -- derived from the user specification.
 data PluginInfo =
   PluginInfo
-    { pluginInfoTyEnv :: Env,
+    { pluginInfoSchema :: Schema,
       pluginInfoRecLayouts :: HashMap TyName ALayoutFn,
       pluginInfoRecMoveMaps :: HashMap TyName RecMoveMap,
       pluginInfoDefaultNodes :: HashMap TyName Node,
@@ -1523,15 +1523,15 @@ makeLenses ''Plugin
 mkPluginInfo :: Plugin -> PluginInfo
 mkPluginInfo plugin =
   PluginInfo
-    { pluginInfoTyEnv = tyEnv,
+    { pluginInfoSchema = schema,
       pluginInfoRecLayouts = recLayouts,
       pluginInfoRecMoveMaps = recMoveMaps,
       pluginInfoDefaultNodes = defaultNodes,
       pluginInfoAllowedFieldTypes = allowedFieldTypes
     }
   where
-    tyEnv = plugin ^. pluginTyEnv
+    schema = plugin ^. pluginSchema
     recLayouts = plugin ^. pluginRecLayouts
     recMoveMaps = mkRecMoveMaps recLayouts
-    defaultNodes = mkDefaultNodes tyEnv recMoveMaps
-    allowedFieldTypes = mkAllowedFieldTypes tyEnv
+    defaultNodes = mkDefaultNodes schema recMoveMaps
+    allowedFieldTypes = mkAllowedFieldTypes schema

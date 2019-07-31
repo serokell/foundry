@@ -36,14 +36,14 @@ main = do
 foundryPlugin :: Plugin
 foundryPlugin =
   Plugin
-    { _pluginTyEnv = foundryTyEnv,
+    { _pluginSchema = foundrySchema,
       _pluginRecLayouts = foundryRecLayouts
     }
 
-foundryTyEnv :: Env
-foundryTyEnv =
-  Env
-    { envMap =
+foundrySchema :: Schema
+foundrySchema =
+  Schema
+    { schemaTypes =
         HashMap.fromList
           [ ("Nat", TyStr),
             ("Var", TyStr),
