@@ -108,7 +108,6 @@ import Control.Monad.Writer
 import Control.Lens as Lens hiding (elements)
 import Data.Function (on)
 import Data.String
-import Data.Maybe
 import Inj
 import Inj.Base ()
 
@@ -130,6 +129,7 @@ import qualified Source.Input.KeyCode as KeyCode
 
 import Sdam.Core
 import Sdam.Name
+import Sdam.Validator
 
 mkTyUnion :: [TyName] -> TyUnion
 mkTyUnion = TyUnion . HashSet.fromList
@@ -149,6 +149,18 @@ data RecSel =
   RecSel0 |
   -- for records with children
   RecSel FieldName Bool   -- True = child selected
+
+--------------------------------------------------------------------------------
+---- Validation
+--------------------------------------------------------------------------------
+
+toValidationObject :: Node -> ValidationObject
+toValidationObject Hole = SkipValidation
+toValidationObject (Node _ object) =
+  ValidationObject (fmap toValidationObject object)
+
+validateNode :: Schema -> Node -> ValidationResult
+validateNode schema node = validate schema (toValidationObject node)
 
 --------------------------------------------------------------------------------
 ---- Drawing
@@ -523,10 +535,10 @@ initEditorState =
 data LayoutCtx =
   LayoutCtx
     { _lctxPath :: PathBuilder,
+      _lctxValidationResult :: ValidationResult,
       _lctxViewport :: Extents,
       _lctxPrecBordersAlways :: Bool,
       _lctxRecLayouts :: HashMap TyName ALayoutFn,
-      _lctxAllowedFieldTypes :: HashMap (TyName, FieldName) (HashSet TyName),
       _lctxWritingDirection :: WritingDirection
     }
 
@@ -592,17 +604,19 @@ redrawUI pluginInfo viewport es =
     lctx =
       LayoutCtx
         { _lctxPath = mempty @PathBuilder,
+          _lctxValidationResult = mempty, -- initialized in layoutNodeStack
+                                          --            and layoutMainExpr
           _lctxViewport = viewport,
           _lctxPrecBordersAlways = es ^. esPrecBordersAlways,
           _lctxRecLayouts = pluginInfoRecLayouts pluginInfo,
-          _lctxAllowedFieldTypes = pluginInfoAllowedFieldTypes pluginInfo,
           _lctxWritingDirection = es ^. esWritingDirection
         }
+    schema = pluginInfoSchema pluginInfo
     pointer = es ^. esPointer
     activeJumptags = es ^. esActiveJumptags
     infoBarLayout = layoutInfoBar es
-    stackLayout = layoutNodeStack lctx (es ^. esStack)
-    mainLayout = layoutMainExpr lctx (es ^. esExpr)
+    stackLayout = layoutNodeStack schema lctx (es ^. esStack)
+    mainLayout = layoutMainExpr schema lctx (es ^. esExpr)
     hOff :: Collage n a -> Integer
     hOff c =
       toInteger (heightOf infoBarLayout) +
@@ -649,23 +663,26 @@ redrawUI pluginInfo viewport es =
         (withDrawCtx paths cursorBlink)
 
 layoutMainExpr ::
+  Schema ->
   LayoutCtx ->
   Node ->
   Collage Ann El
-layoutMainExpr lctx expr = collage
+layoutMainExpr schema lctx expr = collage
   where
+    lctx' n = lctx{ _lctxValidationResult = validateNode schema n }
     precPredicate = PrecPredicate (const (PrecBorder False))
-    (_, collage) = layoutNode lctx expr precPredicate
+    (_, collage) = layoutNode (lctx' expr) expr precPredicate
 
-layoutNodeStack :: Monoid n => LayoutCtx -> [Node] -> Collage n El
-layoutNodeStack lctx nodes =
+layoutNodeStack :: Monoid n => Schema -> LayoutCtx -> [Node] -> Collage n El
+layoutNodeStack schema lctx nodes =
   mapCollageAnnotation (const mempty) $
   substrate 0 backgroundRect $
   substrate 4 (outline 2 stackBorderColor) $
   case nodes of
     [] -> punct "end of stack"
-    n:_ -> snd (layoutNode lctx n precPredicate)
+    n:_ -> snd (layoutNode (lctx' n) n precPredicate)
   where
+    lctx' n = lctx{ _lctxValidationResult = validateNode schema n }
     precPredicate = PrecPredicate (const (PrecBorder False))
     backgroundRect = rect nothing dark1'
 
@@ -721,17 +738,16 @@ layoutObject lctx = \case
     layoutRec lctx tyName fields
   Object _ (ValueSeq _) ->
     error "TODO (int-index): layoutObject ValueSeq"
-  Object tyName (ValueStr str) -> \_precPredicate ->
-    layoutStr lctx tyName str
+  Object _ (ValueStr str) -> \_precPredicate ->
+    layoutStr lctx str
 
 layoutStr ::
   LayoutCtx ->
-  TyName ->
   Text ->
   (PrecUnenclosed, Collage Ann El)
-layoutStr lctx tyName str =
+layoutStr lctx str =
   (,) (mempty @PrecUnenclosed) $
-  layoutSel (toBorder lctx tyName precBorder) path $
+  layoutSel (toBorder lctx precBorder) path $
   withJumptag path $
   textWithCursor str
     (\Paths{pathsSelection} ->
@@ -756,7 +772,7 @@ layoutRec ::
   (PrecUnenclosed, Collage Ann El)
 layoutRec lctx tyName fields precPredicate =
   (,) (guardUnenclosed precBorder precUnenclosed') $
-  layoutSel (toBorder lctx tyName precBorder) path $
+  layoutSel (toBorder lctx precBorder) path $
   collage
   where
     (precUnenclosed, collage) =
@@ -773,6 +789,7 @@ layoutRec lctx tyName fields precPredicate =
               let
                 pathSegment = PathSegmentRec tyName fieldName
                 lctx' = lctx & lctxPath %~ (<> mkPathBuilder pathSegment)
+                             & lctxValidationResult %~ pathTrieLookup pathSegment
               in
                 \obj -> layoutNode lctx' obj)
             fields
@@ -811,25 +828,13 @@ layoutBorder borderWidth = \case
     addBorder color =
       substrateMargin (outline borderWidth color)
 
-validChild :: LayoutCtx -> TyName -> Bool
-validChild lctx tyName =
-  case pathTip of
-    Nothing -> True
-    Just (PathSegmentSeq _ _) ->
-      error "TODO (int-index): validChild PathSegmentSeq"
-    Just (PathSegmentRec recTyName fieldName) ->
-      HashSet.member tyName (allowedFieldTypes HashMap.! (recTyName, fieldName))
+toBorder :: LayoutCtx -> PrecBorder -> Border
+toBorder lctx
+    | validChild = BorderValid
+    | otherwise = const BorderInvalid
   where
-    pathTip = listToMaybe (List.reverse ps)
-    Path ps = buildPath (lctx ^. lctxPath)
-    allowedFieldTypes = lctx ^. lctxAllowedFieldTypes
-
-toBorder :: LayoutCtx -> TyName -> PrecBorder -> Border
-toBorder lctx tyName =
-  if validChild lctx tyName
-  then BorderValid
-  else const BorderInvalid
-
+    validChild =
+      HashSet.null (pathTrieRoot (lctx ^. lctxValidationResult))
 
 --------------------------------------------------------------------------------
 ---- Editor - Selection
@@ -1451,13 +1456,6 @@ mkDefaultNodes schema recMoveMaps =
         in
           Node (NodeRecSel recSel) (Object tyName (ValueRec fields))
 
-mkAllowedFieldTypes :: Schema -> HashMap (TyName, FieldName) (HashSet TyName)
-mkAllowedFieldTypes schema =
-  HashMap.fromList
-    [ ((tyName, fieldName), tys) |
-      (tyName, TyRec fields) <- HashMap.toList (schemaTypes schema),
-      (fieldName, TyUnion tys) <- HashMap.toList fields ]
-
 mkRecMoveMaps :: HashMap TyName ALayoutFn -> HashMap TyName RecMoveMap
 mkRecMoveMaps = HashMap.map mkRecMoveMap
 
@@ -1514,8 +1512,7 @@ data PluginInfo =
     { pluginInfoSchema :: Schema,
       pluginInfoRecLayouts :: HashMap TyName ALayoutFn,
       pluginInfoRecMoveMaps :: HashMap TyName RecMoveMap,
-      pluginInfoDefaultNodes :: HashMap TyName Node,
-      pluginInfoAllowedFieldTypes :: HashMap (TyName, FieldName) (HashSet TyName)
+      pluginInfoDefaultNodes :: HashMap TyName Node
     }
 
 makeLenses ''Plugin
@@ -1526,12 +1523,10 @@ mkPluginInfo plugin =
     { pluginInfoSchema = schema,
       pluginInfoRecLayouts = recLayouts,
       pluginInfoRecMoveMaps = recMoveMaps,
-      pluginInfoDefaultNodes = defaultNodes,
-      pluginInfoAllowedFieldTypes = allowedFieldTypes
+      pluginInfoDefaultNodes = defaultNodes
     }
   where
     schema = plugin ^. pluginSchema
     recLayouts = plugin ^. pluginRecLayouts
     recMoveMaps = mkRecMoveMaps recLayouts
     defaultNodes = mkDefaultNodes schema recMoveMaps
-    allowedFieldTypes = mkAllowedFieldTypes schema
