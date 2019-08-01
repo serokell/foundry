@@ -4,7 +4,7 @@
 {-# LANGUAGE ScopedTypeVariables #-}
 
 module Source
-    ( runGUI
+    ( runSource
     ) where
 
 import Control.Monad
@@ -14,16 +14,22 @@ import Data.IORef
 import Control.Lens
 import Data.Tuple
 
+import Sdam.Parser (ParsedObject)
 import Slay.Core
 import Source.Phaser
 import Source.Input (InputEvent(..), Modifier(..))
 import qualified Source.NewGen as NG
 
-runGUI :: NG.Plugin -> NG.EditorState -> IO ()
-runGUI plugin editorState = do
+runSource :: NG.Plugin -> Maybe ParsedObject -> IO ()
+runSource plugin mParsedObject = do
   let pluginInfo = NG.mkPluginInfo plugin
   _ <- Gtk.initGUI
-  esRef <- newIORef editorState
+  esRef <- newIORef $
+    case mParsedObject of
+      Nothing -> NG.initEditorState
+      Just a ->
+        let expr = NG.fromParsedObject pluginInfo a
+        in NG.initEditorState{ NG._esExpr = expr }
   window <- createMainWindow pluginInfo esRef
   Gtk.widgetShowAll window
   Gtk.mainGUI

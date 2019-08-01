@@ -61,6 +61,7 @@ module Source.NewGen
   -- * Editor
   EditorState(..),
   initEditorState,
+  fromParsedObject,
   esExpr,
   esPointer,
   esPrecBordersAlways,
@@ -130,6 +131,7 @@ import qualified Source.Input.KeyCode as KeyCode
 import Sdam.Core
 import Sdam.Name
 import Sdam.Validator
+import Sdam.Parser
 
 mkTyUnion :: [TyName] -> TyUnion
 mkTyUnion = TyUnion . HashSet.fromList
@@ -1530,3 +1532,24 @@ mkPluginInfo plugin =
     recLayouts = plugin ^. pluginRecLayouts
     recMoveMaps = mkRecMoveMaps recLayouts
     defaultNodes = mkDefaultNodes schema recMoveMaps
+
+
+--------------------------------------------------------------------------------
+---- Parsing
+--------------------------------------------------------------------------------
+
+fromParsedObject :: PluginInfo -> ParsedObject -> Node
+fromParsedObject pluginInfo = go
+  where
+    go (ParsedObject obj) =
+      Node (mkNodeSel obj) (fmap go obj)
+    mkNodeSel (Object _ (ValueStr str)) =
+      NodeStrSel (Text.length str) False
+    mkNodeSel (Object _ (ValueSeq _)) =
+      error "TODO (int-index): mkDefNodeSel ValueSeq"
+    mkNodeSel (Object tyName (ValueRec _)) =
+      NodeRecSel $
+      case rmmFieldOrder (recMoveMaps HashMap.! tyName) of
+        [] -> RecSel0
+        fieldName:_ -> RecSel fieldName False
+    recMoveMaps = pluginInfoRecMoveMaps pluginInfo

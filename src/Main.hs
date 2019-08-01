@@ -6,32 +6,25 @@ module Main where
 
 import qualified Data.HashMap.Strict as HashMap
 import Data.HashMap.Strict (HashMap)
-import Data.Void
 import System.Exit (die)
 import System.Environment (getArgs)
-import Data.String (fromString)
+import Text.Megaparsec as Megaparsec
 
-import Data.Text (Text)
-import qualified Data.Text as Text
-import qualified Data.Text.Lazy as Text.Lazy
-
+import Sdam.Parser (pObject, parse)
 import Source.NewGen
 import Source
 
-import qualified Morte.Core as M
-import qualified Morte.Parser as M.P
-import qualified Morte.Import as M.I
-
 main :: IO ()
 main = do
-  et <- getArgs >>= \case
-    [et] -> return et
-    _ -> die "Usage: foundry EXPR"
-  expr <- synImportExpr <$>
-    case M.P.exprFromText (fromString et) of
-      Left err -> die (show err)
-      Right e -> M.I.load Nothing e
-  runGUI foundryPlugin initEditorState{ _esExpr = expr }
+  mParsedObject <- getArgs >>= \case
+    [filepath] -> do
+      content <- readFile filepath
+      case parse pObject filepath content of
+        Left e -> die (Megaparsec.errorBundlePretty e)
+        Right a -> return (Just a)
+    [] -> return Nothing
+    _ -> die "Usage: foundry FILE.sd"
+  runSource foundryPlugin mParsedObject
 
 foundryPlugin :: Plugin
 foundryPlugin =
@@ -107,61 +100,3 @@ foundryRecLayouts = recLayouts
       `vsep` field "body" precAll
     recLayoutIVar =
       field "var" noPrec <> jumptag "@" <> field "index" noPrec
-
-synImportExpr :: M.Expr Void -> Node
-synImportExpr = \case
-  M.Const c -> synImportConst c
-  M.Var v -> synImportVar v
-  M.Lam x _A b -> synImportLam x _A b
-  M.Pi  x _A _B -> synImportPi x _A _B
-  M.App f a -> synImportApp f a
-  M.Embed e -> absurd e
-
-synImportConst :: M.Const -> Node
-synImportConst = \case
-  M.Star -> mkRecObject "Star" [] Nothing
-  M.Box -> mkRecObject "Box" [] Nothing
-
-synImportVar :: M.Var -> Node
-synImportVar = \case
-  M.V t 0 -> mkStrObject "Var" (Text.Lazy.toStrict t)
-  M.V t n ->
-    mkRecObject "IVar"
-      [ ("var", mkStrObject "Var" (Text.Lazy.toStrict t)),
-        ("index", mkStrObject "Nat" (Text.pack (show n))) ]
-      (Just 0)
-
-synImportLam :: Text.Lazy.Text -> M.Expr Void -> M.Expr Void -> Node
-synImportLam x _A b =
-  mkRecObject "Lam"
-    [ ("var", mkStrObject "Var" (Text.Lazy.toStrict x)),
-      ("ty", synImportExpr _A),
-      ("body", synImportExpr b) ]
-    (Just 2)
-
-synImportPi :: Text.Lazy.Text -> M.Expr Void -> M.Expr Void -> Node
-synImportPi x _A _B =
-  mkRecObject "Pi"
-    [ ("var", mkStrObject "Var" (Text.Lazy.toStrict x)),
-      ("ty", synImportExpr _A),
-      ("body", synImportExpr _B) ]
-    (Just 2)
-
-synImportApp :: M.Expr Void -> M.Expr Void -> Node
-synImportApp f a =
-  mkRecObject "App"
-    [ ("fn", synImportExpr f),
-      ("arg", synImportExpr a) ]
-    (Just 0)
-
-mkRecObject :: TyName -> [(FieldName, Node)] -> Maybe Int -> Node
-mkRecObject tyName fields index =
-    Node (NodeRecSel recSel) (Object tyName (ValueRec (HashMap.fromList fields)))
-  where
-    recSel = case index of
-      Nothing -> RecSel0
-      Just i -> RecSel (fst (fields !! i)) False
-
-mkStrObject :: TyName -> Text -> Node
-mkStrObject tyName str =
-  Node (NodeStrSel (Text.length str) False) (Object tyName (ValueStr str))
