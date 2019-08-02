@@ -22,4 +22,4 @@ source-repository-package
 source-repository-package
   type: git
   location: https://github.com/int-index/sdam
-  tag: bd6f995f3354dfac330ab2e0bcabc090b4a6e73c
+  tag: b2eaf3463315e447972b6b567bc695e4f85ae5e0

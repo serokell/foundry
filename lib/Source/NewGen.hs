@@ -136,8 +136,8 @@ import Sdam.Name
 import Sdam.Validator
 import Sdam.Parser
 
-mkTyUnion :: [TyName] -> TyUnion
-mkTyUnion = TyUnion . HashSet.fromList
+mkTyUnion :: [TyName] -> Maybe TyUnion -> TyUnion
+mkTyUnion xs = TyUnion (HashSet.fromList xs)
 
 --------------------------------------------------------------------------------
 -- Values
@@ -717,8 +717,8 @@ pprSelection selection = Text.pack (goPath selectionPath "")
       case ps of
         PathSegmentRec tyName fieldName ->
           (tyNameStr tyName++) . ('.':) . (fieldNameStr fieldName++)
-        PathSegmentSeq tyName i ->
-          (tyNameStr tyName++) . ('.':) . shows (indexToInt i)
+        PathSegmentSeq i ->
+          shows (indexToInt i)
     goStrPos Nothing = id
     goStrPos (Just i) = ('[':) . shows i . (']':)
 
@@ -745,8 +745,8 @@ layoutValue ::
 layoutValue lctx = \case
   ValueRec tyName fields ->
     layoutRec lctx tyName fields
-  ValueSeq tyName items ->
-    layoutSeq lctx tyName items
+  ValueSeq items ->
+    layoutSeq lctx items
   ValueStr _ str -> \_precPredicate ->
     layoutStr lctx str
 
@@ -812,11 +812,10 @@ layoutRec lctx tyName fields precPredicate =
 
 layoutSeq ::
   LayoutCtx ->
-  TyName ->
   Seq Node ->
   PrecPredicate ->
   (PrecUnenclosed, Collage Ann El)
-layoutSeq lctx tyName items precPredicate =
+layoutSeq lctx items precPredicate =
   (,) (guardUnenclosed precBorder precUnenclosed') $
   layoutSel (toBorder lctx precBorder) path $
   collage
@@ -825,13 +824,15 @@ layoutSeq lctx tyName items precPredicate =
     drawnItems =
       List.zipWith
         (\i node ->
-          let lctx' = lctxDescent (PathSegmentSeq tyName i) lctx
+          let lctx' = lctxDescent (PathSegmentSeq i) lctx
           in layoutNode lctx' node)
         (List.map intToIndex [0..])
         (Foldable.toList items)
     (precUnenclosed, collage) =
       layoutSeqItems path drawnItems wd
-    precUnenclosed' = addUnenclosed tyName precUnenclosed
+    precUnenclosed' =
+      -- TODO (int-index): add a sequence marker when non-empty
+      precUnenclosed
     precBorder =
       PrecBorder (lctx ^. lctxPrecBordersAlways) <>
       appPrecPredicate precPredicate precUnenclosed'
@@ -915,7 +916,7 @@ selectionOfNode = \case
   Node nodeSel (ValueStr tyName _) ->
     let NodeStrSel pos em = nodeSel
     in Selection emptyPath (Just tyName) (if em then Just pos else Nothing)
-  Node _ (ValueSeq _ _) ->
+  Node _ (ValueSeq _) ->
     error "TODO (int-index): selectionOfNode ValueSeq"
   Node nodeSel (ValueRec tyName fields) ->
     let NodeRecSel recSel = nodeSel in
@@ -947,7 +948,7 @@ updatePathNode :: Path -> Node -> Node
 updatePathNode path node = case node of
   Hole -> node
   Node _ (ValueStr _ _) -> node
-  Node _ (ValueSeq _ _) ->
+  Node _ (ValueSeq _) ->
     error "TODO (int-index): updatePathNode ValueSeq"
   Node nodeSel (ValueRec tyName fields) ->
     let NodeRecSel recSel = nodeSel in
@@ -955,7 +956,7 @@ updatePathNode path node = case node of
       Nothing ->
         let recSel' = toRecSelSelf recSel
         in Node (NodeRecSel recSel') (ValueRec tyName fields)
-      Just (PathSegmentSeq _ _, _) ->
+      Just (PathSegmentSeq _, _) ->
         error "TODO (int-index): updatePathRec PathSegmentSeq"
       Just (PathSegmentRec tyName' fieldName, path') ->
         if tyName' /= tyName then node else
@@ -1464,7 +1465,7 @@ atPath p =
     Just (ps, p') -> atPathSegment ps . atPath p'
 
 atPathSegment :: PathSegment -> Traversal' Node Node
-atPathSegment (PathSegmentSeq _ _) =
+atPathSegment (PathSegmentSeq _) =
   error "TODO (int-index): updatePathRec PathSegmentSeq"
 atPathSegment (PathSegmentRec tyName fieldName) =
   \f node ->
@@ -1509,7 +1510,6 @@ mkDefaultNodes schema recMoveMaps =
     mkDefNode :: TyName -> Ty -> Node
     mkDefNode tyName = \case
       TyStr -> Node (NodeStrSel 0 True) (ValueStr tyName "")
-      TySeq _ -> error "TODO (int-index): mkDefNode TySeq"
       TyRec fieldTys ->
         let
           fields = HashMap.map (const Hole) fieldTys
@@ -1608,7 +1608,7 @@ fromParsedValue pluginInfo = go
       Node (mkNodeSel value) (fmap go value)
     mkNodeSel (ValueStr _ str) =
       NodeStrSel (Text.length str) False
-    mkNodeSel (ValueSeq _ _) =
+    mkNodeSel (ValueSeq _) =
       error "TODO (int-index): mkDefNodeSel ValueSeq"
     mkNodeSel (ValueRec tyName _) =
       NodeRecSel $

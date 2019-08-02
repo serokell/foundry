@@ -50,16 +50,16 @@ foundrySchema =
   where
     tyIVar =
       TyRec
-        [ ("var", mkTyUnion ["Var"]),
-          ("index", mkTyUnion ["Nat"]) ]
+        [ ("var", mkTyUnion ["Var"] Nothing),
+          ("index", mkTyUnion ["Nat"] Nothing) ]
     tyLam =
       TyRec
-        [ ("var", mkTyUnion ["Var"]),
+        [ ("var", mkTyUnion ["Var"] Nothing),
           ("ty", tyExpr),
           ("body", tyExpr) ]
     tyPi =
       TyRec
-        [ ("var", mkTyUnion ["Var"]),
+        [ ("var", mkTyUnion ["Var"] Nothing),
           ("ty", tyExpr),
           ("body", tyExpr) ]
     tyApp =
@@ -75,6 +75,7 @@ foundrySchema =
           "Box",
           "Var",
           "IVar" ]
+        Nothing
 
 foundryRecLayouts :: HashMap TyName ALayoutFn
 foundryRecLayouts = recLayouts
