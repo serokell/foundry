@@ -14,21 +14,21 @@ import Data.IORef
 import Control.Lens
 import Data.Tuple
 
-import Sdam.Parser (ParsedObject)
+import Sdam.Parser (ParsedValue)
 import Slay.Core
 import Source.Phaser
 import Source.Input (InputEvent(..), Modifier(..))
 import qualified Source.NewGen as NG
 
-runSource :: NG.Plugin -> Maybe ParsedObject -> IO ()
-runSource plugin mParsedObject = do
+runSource :: NG.Plugin -> Maybe ParsedValue -> IO ()
+runSource plugin mParsedValue = do
   let pluginInfo = NG.mkPluginInfo plugin
   _ <- Gtk.initGUI
   esRef <- newIORef $
-    case mParsedObject of
+    case mParsedValue of
       Nothing -> NG.initEditorState
       Just a ->
-        let expr = NG.fromParsedObject pluginInfo a
+        let expr = NG.fromParsedValue pluginInfo a
         in NG.initEditorState{ NG._esExpr = expr }
   window <- createMainWindow pluginInfo esRef
   Gtk.widgetShowAll window

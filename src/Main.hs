@@ -10,21 +10,21 @@ import System.Exit (die)
 import System.Environment (getArgs)
 import Text.Megaparsec as Megaparsec
 
-import Sdam.Parser (pObject, parse)
+import Sdam.Parser (pValue, parse)
 import Source.NewGen
 import Source
 
 main :: IO ()
 main = do
-  mParsedObject <- getArgs >>= \case
+  mParsedValue <- getArgs >>= \case
     [filepath] -> do
       content <- readFile filepath
-      case parse pObject filepath content of
+      case parse pValue filepath content of
         Left e -> die (Megaparsec.errorBundlePretty e)
         Right a -> return (Just a)
     [] -> return Nothing
     _ -> die "Usage: foundry FILE.sd"
-  runSource foundryPlugin mParsedObject
+  runSource foundryPlugin mParsedValue
 
 foundryPlugin :: Plugin
 foundryPlugin =

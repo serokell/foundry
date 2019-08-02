@@ -24,7 +24,6 @@ module Source.NewGen
 
   -- * Values
   Node(..),
-  Object(..),
   Value(..),
 
   NodeSel(..),
@@ -62,7 +61,7 @@ module Source.NewGen
   -- * Editor
   EditorState(..),
   initEditorState,
-  fromParsedObject,
+  fromParsedValue,
   esExpr,
   esPointer,
   esPrecBordersAlways,
@@ -144,7 +143,7 @@ mkTyUnion = TyUnion . HashSet.fromList
 -- Values
 --------------------------------------------------------------------------------
 
-data Node = Hole | Node NodeSel (Object Node)
+data Node = Hole | Node NodeSel (Value Node)
 
 data NodeSel =
   NodeRecSel RecSel |
@@ -160,13 +159,13 @@ data RecSel =
 ---- Validation
 --------------------------------------------------------------------------------
 
-toValidationObject :: Node -> ValidationObject
-toValidationObject Hole = SkipValidation
-toValidationObject (Node _ object) =
-  ValidationObject (fmap toValidationObject object)
+toValidationValue :: Node -> ValidationValue
+toValidationValue Hole = SkipValidation
+toValidationValue (Node _ value) =
+  ValidationValue (fmap toValidationValue value)
 
 validateNode :: Schema -> Node -> ValidationResult
-validateNode schema node = validate schema (toValidationObject node)
+validateNode schema node = validate schema (toValidationValue node)
 
 --------------------------------------------------------------------------------
 ---- Drawing
@@ -726,7 +725,7 @@ pprSelection selection = Text.pack (goPath selectionPath "")
 layoutNode :: LayoutCtx -> Node -> PrecPredicate -> (PrecUnenclosed, Collage Ann El)
 layoutNode lctx = \case
   Hole -> \_precPredicate -> layoutHole lctx
-  Node _ object -> layoutObject lctx object
+  Node _ value -> layoutValue lctx value
 
 layoutHole :: LayoutCtx -> (PrecUnenclosed, Collage Ann El)
 layoutHole lctx =
@@ -738,17 +737,17 @@ layoutHole lctx =
     precBorder = PrecBorder (lctx ^. lctxPrecBordersAlways)
     path = buildPath (lctx ^. lctxPath)
 
-layoutObject ::
+layoutValue ::
   LayoutCtx ->
-  Object Node ->
+  Value Node ->
   PrecPredicate ->
   (PrecUnenclosed, Collage Ann El)
-layoutObject lctx = \case
-  Object tyName (ValueRec fields) ->
+layoutValue lctx = \case
+  ValueRec tyName fields ->
     layoutRec lctx tyName fields
-  Object tyName (ValueSeq items) ->
+  ValueSeq tyName items ->
     layoutSeq lctx tyName items
-  Object _ (ValueStr str) -> \_precPredicate ->
+  ValueStr _ str -> \_precPredicate ->
     layoutStr lctx str
 
 layoutStr ::
@@ -913,12 +912,12 @@ selectionOfEditorState es = selectionOfNode (es ^. esExpr)
 selectionOfNode :: Node -> Selection
 selectionOfNode = \case
   Hole -> Selection emptyPath Nothing Nothing
-  Node nodeSel (Object tyName (ValueStr _)) ->
+  Node nodeSel (ValueStr tyName _) ->
     let NodeStrSel pos em = nodeSel
     in Selection emptyPath (Just tyName) (if em then Just pos else Nothing)
-  Node _ (Object _ (ValueSeq _)) ->
+  Node _ (ValueSeq _ _) ->
     error "TODO (int-index): selectionOfNode ValueSeq"
-  Node nodeSel (Object tyName (ValueRec fields)) ->
+  Node nodeSel (ValueRec tyName fields) ->
     let NodeRecSel recSel = nodeSel in
     case recSel of
       RecSel0 ->
@@ -939,7 +938,7 @@ resetPathNode :: Node -> Node
 resetPathNode node =
   case node of
     Hole -> node
-    Node sel obj -> Node (resetSel sel) (fmap resetPathNode obj)
+    Node sel value -> Node (resetSel sel) (fmap resetPathNode value)
   where
     resetSel (NodeRecSel recSel) = NodeRecSel (toRecSelSelf recSel)
     resetSel s@(NodeStrSel _ _) = s
@@ -947,15 +946,15 @@ resetPathNode node =
 updatePathNode :: Path -> Node -> Node
 updatePathNode path node = case node of
   Hole -> node
-  Node _ (Object _ (ValueStr _)) -> node
-  Node _ (Object _ (ValueSeq _)) ->
+  Node _ (ValueStr _ _) -> node
+  Node _ (ValueSeq _ _) ->
     error "TODO (int-index): updatePathNode ValueSeq"
-  Node nodeSel (Object tyName (ValueRec fields)) ->
+  Node nodeSel (ValueRec tyName fields) ->
     let NodeRecSel recSel = nodeSel in
     case unconsPath path of
       Nothing ->
         let recSel' = toRecSelSelf recSel
-        in Node (NodeRecSel recSel') (Object tyName (ValueRec fields))
+        in Node (NodeRecSel recSel') (ValueRec tyName fields)
       Just (PathSegmentSeq _ _, _) ->
         error "TODO (int-index): updatePathRec PathSegmentSeq"
       Just (PathSegmentRec tyName' fieldName, path') ->
@@ -968,7 +967,7 @@ updatePathNode path node = case node of
               fields' = HashMap.insert fieldName a' fields
               recSel' = RecSel fieldName True
             in
-              Node (NodeRecSel recSel') (Object tyName (ValueRec fields'))
+              Node (NodeRecSel recSel') (ValueRec tyName fields')
 
 setPathNode :: Path -> Node -> Node
 setPathNode path node = updatePathNode path (resetPathNode node)
@@ -1292,106 +1291,106 @@ applyActionM ActionDropStack = do
 
 applyActionM (ActionEnterEditMode path) =
   zoom (rstNode . atPath path) $ do
-    Node nodeSel (Object tyName (ValueStr str)) <- get
+    Node nodeSel (ValueStr tyName str) <- get
     let NodeStrSel pos _ = nodeSel
-    put $ Node (NodeStrSel pos True) (Object tyName (ValueStr str))
+    put $ Node (NodeStrSel pos True) (ValueStr tyName str)
 
 applyActionM (ActionExitEditMode path) =
   zoom (rstNode . atPath path) $ do
-    Node nodeSel (Object tyName (ValueStr str)) <- get
+    Node nodeSel (ValueStr tyName str) <- get
     let NodeStrSel pos _ = nodeSel
-    put $ Node (NodeStrSel pos False) (Object tyName (ValueStr str))
+    put $ Node (NodeStrSel pos False) (ValueStr tyName str)
 
 applyActionM (ActionDeleteCharBackward path) =
   zoom (rstNode . atPath path) $ do
-    Node nodeSel (Object tyName (ValueStr str)) <- get
+    Node nodeSel (ValueStr tyName str) <- get
     let NodeStrSel pos em = nodeSel
     guard (pos > 0)
     let pos' = pos - 1
     let (before, after) = Text.splitAt pos' str
         str' = before <> Text.drop 1 after
-    put $ Node (NodeStrSel pos' em) (Object tyName (ValueStr str'))
+    put $ Node (NodeStrSel pos' em) (ValueStr tyName str')
     setUndoFlag
 
 applyActionM (ActionDeleteCharForward path) =
   zoom (rstNode . atPath path) $ do
-    Node nodeSel (Object tyName (ValueStr str)) <- get
+    Node nodeSel (ValueStr tyName str) <- get
     let NodeStrSel pos _ = nodeSel
     guard (pos < Text.length str)
     let (before, after) = Text.splitAt pos str
         str' = before <> Text.drop 1 after
-    put $ Node nodeSel (Object tyName (ValueStr str'))
+    put $ Node nodeSel (ValueStr tyName str')
     setUndoFlag
 
 applyActionM (ActionMoveStrCursorBackward path) =
   zoom (rstNode . atPath path) $ do
-    Node nodeSel (Object tyName (ValueStr str)) <- get
+    Node nodeSel (ValueStr tyName str) <- get
     let NodeStrSel pos em = nodeSel
     guard (pos > 0)
     let pos' = pos - 1
-    put $ Node (NodeStrSel pos' em) (Object tyName (ValueStr str))
+    put $ Node (NodeStrSel pos' em) (ValueStr tyName str)
 
 applyActionM (ActionMoveStrCursorForward path) =
   zoom (rstNode . atPath path) $ do
-    Node nodeSel (Object tyName (ValueStr str)) <- get
+    Node nodeSel (ValueStr tyName str) <- get
     let NodeStrSel pos em = nodeSel
     guard (pos < Text.length str)
     let pos' = pos + 1
-    put $ Node (NodeStrSel pos' em) (Object tyName (ValueStr str))
+    put $ Node (NodeStrSel pos' em) (ValueStr tyName str)
 
 applyActionM (ActionInsertLetter path c) =
   zoom (rstNode . atPath path) $ do
-    Node nodeSel (Object tyName (ValueStr str)) <- get
+    Node nodeSel (ValueStr tyName str) <- get
     let NodeStrSel pos editMode = nodeSel
     guard editMode
     let (before, after) = Text.splitAt pos str
         str' = before <> Text.singleton c <> after
         pos' = pos + 1
-    put $ Node (NodeStrSel pos' editMode) (Object tyName (ValueStr str'))
+    put $ Node (NodeStrSel pos' editMode) (ValueStr tyName str')
     setUndoFlag
 
 applyActionM (ActionSelectParent path) = do
   rstStackVis .= StackHidden
   path' <- maybeA (pathParent path)
   zoom (rstNode . atPath path') $ do
-    Node nodeSel (Object tyName (ValueRec fields)) <- get
+    Node nodeSel (ValueRec tyName fields) <- get
     let NodeRecSel recSel = nodeSel
     let recSel' = toRecSelSelf recSel
-    put $ Node (NodeRecSel recSel') (Object tyName (ValueRec fields))
+    put $ Node (NodeRecSel recSel') (ValueRec tyName fields)
 
 applyActionM (ActionSelectChild path) = do
   rstStackVis .= StackHidden
   zoom (rstNode . atPath path) $ do
-    Node nodeSel (Object tyName (ValueRec fields)) <- get
+    Node nodeSel (ValueRec tyName fields) <- get
     let NodeRecSel recSel = nodeSel
     recSel' <- maybeA (toRecSelChild recSel)
-    put $ Node (NodeRecSel recSel') (Object tyName (ValueRec fields))
+    put $ Node (NodeRecSel recSel') (ValueRec tyName fields)
 
 applyActionM (ActionSelectSiblingBackward path) = do
   rstStackVis .= StackHidden
   path' <- maybeA (pathParent path)
   zoom rstNode $ zoomPathPrefix path' $ do
-    Node nodeSel (Object tyName (ValueRec fields)) <- get
+    Node nodeSel (ValueRec tyName fields) <- get
     let NodeRecSel recSel = nodeSel
     RecSel fieldName True <- pure recSel
     recMoveMaps <- view rctxRecMoveMaps
     let moveMap = rmmBackward (recMoveMaps HashMap.! tyName)
     fieldName' <- maybeA (HashMap.lookup fieldName moveMap)
     let recSel' = RecSel fieldName' True
-    put $ Node (NodeRecSel recSel') (Object tyName (ValueRec fields))
+    put $ Node (NodeRecSel recSel') (ValueRec tyName fields)
 
 applyActionM (ActionSelectSiblingForward path) = do
   rstStackVis .= StackHidden
   path' <- maybeA (pathParent path)
   zoom rstNode $ zoomPathPrefix path' $ do
-    Node nodeSel (Object tyName (ValueRec fields)) <- get
+    Node nodeSel (ValueRec tyName fields) <- get
     let NodeRecSel recSel = nodeSel
     RecSel fieldName True <- pure recSel
     recMoveMaps <- view rctxRecMoveMaps
     let moveMap = rmmForward (recMoveMaps HashMap.! tyName)
     fieldName' <- maybeA (HashMap.lookup fieldName moveMap)
     let recSel' = RecSel fieldName' True
-    put $ Node (NodeRecSel recSel') (Object tyName (ValueRec fields))
+    put $ Node (NodeRecSel recSel') (ValueRec tyName fields)
 
 applyActionM ActionActivateJumptags = do
   jumptags <- view rctxJumptags
@@ -1470,14 +1469,13 @@ atPathSegment (PathSegmentSeq _ _) =
 atPathSegment (PathSegmentRec tyName fieldName) =
   \f node ->
     case node of
-      Node nodeSel (Object tyName' value)
+      Node nodeSel (ValueRec tyName' fields)
         | tyName == tyName',
-          ValueRec fields <- value,
           let NodeRecSel recSel = nodeSel,
           Just a <- HashMap.lookup fieldName fields
         -> f a <&> \a' ->
              let fields' = (HashMap.insert fieldName a' fields)
-             in Node (NodeRecSel recSel) (Object tyName' (ValueRec fields'))
+             in Node (NodeRecSel recSel) (ValueRec tyName' fields')
       _ -> pure node
 
 zoomPathPrefix :: Path -> ReactM Node -> ReactM Node
@@ -1510,7 +1508,7 @@ mkDefaultNodes schema recMoveMaps =
   where
     mkDefNode :: TyName -> Ty -> Node
     mkDefNode tyName = \case
-      TyStr -> Node (NodeStrSel 0 True) (Object tyName (ValueStr ""))
+      TyStr -> Node (NodeStrSel 0 True) (ValueStr tyName "")
       TySeq _ -> error "TODO (int-index): mkDefNode TySeq"
       TyRec fieldTys ->
         let
@@ -1521,7 +1519,7 @@ mkDefaultNodes schema recMoveMaps =
               [] -> RecSel0
               fieldName:_ -> RecSel fieldName True
         in
-          Node (NodeRecSel recSel) (Object tyName (ValueRec fields))
+          Node (NodeRecSel recSel) (ValueRec tyName fields)
 
 mkRecMoveMaps :: HashMap TyName ALayoutFn -> HashMap TyName RecMoveMap
 mkRecMoveMaps = HashMap.map mkRecMoveMap
@@ -1603,16 +1601,16 @@ mkPluginInfo plugin =
 ---- Parsing
 --------------------------------------------------------------------------------
 
-fromParsedObject :: PluginInfo -> ParsedObject -> Node
-fromParsedObject pluginInfo = go
+fromParsedValue :: PluginInfo -> ParsedValue -> Node
+fromParsedValue pluginInfo = go
   where
-    go (ParsedObject obj) =
-      Node (mkNodeSel obj) (fmap go obj)
-    mkNodeSel (Object _ (ValueStr str)) =
+    go (ParsedValue value) =
+      Node (mkNodeSel value) (fmap go value)
+    mkNodeSel (ValueStr _ str) =
       NodeStrSel (Text.length str) False
-    mkNodeSel (Object _ (ValueSeq _)) =
+    mkNodeSel (ValueSeq _ _) =
       error "TODO (int-index): mkDefNodeSel ValueSeq"
-    mkNodeSel (Object tyName (ValueRec _)) =
+    mkNodeSel (ValueRec tyName _) =
       NodeRecSel $
       case rmmFieldOrder (recMoveMaps HashMap.! tyName) of
         [] -> RecSel0

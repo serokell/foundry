@@ -30,9 +30,9 @@ main = do
     case M.P.exprFromText (fromString et) of
       Left err -> die (show err)
       Right e -> M.I.load Nothing e
-  putStrLn $ render (rObject (convertExpr expr))
+  putStrLn $ render (rValue (convertExpr expr))
 
-convertExpr :: M.Expr Void -> RenderObject
+convertExpr :: M.Expr Void -> RenderValue
 convertExpr = \case
   M.Const c -> convertConst c
   M.Var v -> convertVar v
@@ -41,43 +41,43 @@ convertExpr = \case
   M.App f a -> convertApp f a
   M.Embed e -> absurd e
 
-convertConst :: M.Const -> RenderObject
+convertConst :: M.Const -> RenderValue
 convertConst = \case
-  M.Star -> mkRecObject "Star" []
-  M.Box -> mkRecObject "Box" []
+  M.Star -> mkRecValue "Star" []
+  M.Box -> mkRecValue "Box" []
 
-convertVar :: M.Var -> RenderObject
+convertVar :: M.Var -> RenderValue
 convertVar = \case
-  M.V t 0 -> mkStrObject "Var" (Text.Lazy.toStrict t)
+  M.V t 0 -> mkStrValue "Var" (Text.Lazy.toStrict t)
   M.V t n ->
-    mkRecObject "IVar"
-      [ ("var", mkStrObject "Var" (Text.Lazy.toStrict t)),
-        ("index", mkStrObject "Nat" (Text.pack (show n))) ]
+    mkRecValue "IVar"
+      [ ("var", mkStrValue "Var" (Text.Lazy.toStrict t)),
+        ("index", mkStrValue "Nat" (Text.pack (show n))) ]
 
-convertLam :: Text.Lazy.Text -> M.Expr Void -> M.Expr Void -> RenderObject
+convertLam :: Text.Lazy.Text -> M.Expr Void -> M.Expr Void -> RenderValue
 convertLam x _A b =
-  mkRecObject "Lam"
-    [ ("var", mkStrObject "Var" (Text.Lazy.toStrict x)),
+  mkRecValue "Lam"
+    [ ("var", mkStrValue "Var" (Text.Lazy.toStrict x)),
       ("ty", convertExpr _A),
       ("body", convertExpr b) ]
 
-convertPi :: Text.Lazy.Text -> M.Expr Void -> M.Expr Void -> RenderObject
+convertPi :: Text.Lazy.Text -> M.Expr Void -> M.Expr Void -> RenderValue
 convertPi x _A _B =
-  mkRecObject "Pi"
-    [ ("var", mkStrObject "Var" (Text.Lazy.toStrict x)),
+  mkRecValue "Pi"
+    [ ("var", mkStrValue "Var" (Text.Lazy.toStrict x)),
       ("ty", convertExpr _A),
       ("body", convertExpr _B) ]
 
-convertApp :: M.Expr Void -> M.Expr Void -> RenderObject
+convertApp :: M.Expr Void -> M.Expr Void -> RenderValue
 convertApp f a =
-  mkRecObject "App"
+  mkRecValue "App"
     [ ("fn", convertExpr f),
       ("arg", convertExpr a) ]
 
-mkRecObject :: TyName -> [(FieldName, RenderObject)] -> RenderObject
-mkRecObject tyName fields =
-  RenderObject (Object tyName (ValueRec (HashMap.fromList fields)))
+mkRecValue :: TyName -> [(FieldName, RenderValue)] -> RenderValue
+mkRecValue tyName fields =
+  RenderValue (ValueRec tyName (HashMap.fromList fields))
 
-mkStrObject :: TyName -> Text -> RenderObject
-mkStrObject tyName str =
-  RenderObject (Object tyName (ValueStr str))
+mkStrValue :: TyName -> Text -> RenderValue
+mkStrValue tyName str =
+  RenderValue (ValueStr tyName str)
