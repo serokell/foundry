@@ -697,14 +697,14 @@ layoutInfoBar es =
   textWithoutCursor (pprSelection (selectionOfEditorState es))
 
 pprSelection :: Selection -> Text
-pprSelection selection = Text.pack ('/' : goPath selectionPath "")
+pprSelection selection = Text.pack (goPath selectionPath "")
   where
     Selection{selectionPath, selectionTyName, selectionStrPos} = selection
     goPath p =
       case unconsPath p of
         Nothing -> goTip selectionTyName
-        Just (ps, p') -> goPathSegment ps . ('/':) . goPath p'
-    goTip Nothing = id
+        Just (ps, p') -> goPathSegment ps . ('→':) . goPath p'
+    goTip Nothing = ('_':)
     goTip (Just tyName) = (tyNameStr tyName++) . goStrPos selectionStrPos
     goPathSegment ps =
       case ps of
