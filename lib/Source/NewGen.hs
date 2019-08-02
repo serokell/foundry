@@ -50,6 +50,7 @@ module Source.NewGen
   Find(..),
   PrecPredicate,
   precAllow,
+  precAllowAll,
   Layout(vsep, field, jumptag),
   noPrec,
   ALayoutFn(..),
@@ -96,11 +97,14 @@ module Source.NewGen
 import Data.Hashable (Hashable)
 import Data.HashMap.Strict (HashMap)
 import Data.HashSet (HashSet)
+import Data.Sequence (Seq)
 import Data.Text (Text)
 import Numeric.Natural (Natural)
 import Data.List as List
 import Data.List.NonEmpty as NonEmpty
+import Data.Foldable as Foldable
 import Data.DList as DList
+import Data.Semigroup
 import Control.Applicative as A
 import Control.Monad
 import Control.Monad.Reader
@@ -204,6 +208,9 @@ textline color font str cur = text font (inj color) str (DrawCtx cur)
 
 line :: Color -> Natural -> Collage Ann El
 line color w = rect nothing (inj color) (Extents w 1)
+
+vline :: Color -> Natural -> Collage Ann El
+vline color h = rect nothing (inj color) (Extents 1 h)
 
 leftOf :: Collage n El -> Integer
 leftOf collage = toInteger (marginLeft (collageMargin collage))
@@ -457,6 +464,9 @@ precAllow allowed =
       -- Need a border unless all of unenclosed layouts are allowed.
       not (unenclosed `hashSet_isSubsetOf` allowed)
 
+precAllowAll :: PrecPredicate
+precAllowAll = PrecPredicate (const (PrecBorder False))
+
 hashSet_isSubsetOf :: (Eq a, Hashable a) => HashSet a -> HashSet a -> Bool
 hashSet_isSubsetOf sub sup =
   all (\k -> HashSet.member k sup) sub
@@ -672,8 +682,7 @@ layoutMainExpr ::
 layoutMainExpr schema lctx expr = collage
   where
     lctx' n = lctx{ _lctxValidationResult = validateNode schema n }
-    precPredicate = PrecPredicate (const (PrecBorder False))
-    (_, collage) = layoutNode (lctx' expr) expr precPredicate
+    (_, collage) = layoutNode (lctx' expr) expr precAllowAll
 
 layoutNodeStack :: Monoid n => Schema -> LayoutCtx -> [Node] -> Collage n El
 layoutNodeStack schema lctx nodes =
@@ -682,10 +691,9 @@ layoutNodeStack schema lctx nodes =
   substrate 4 (outline 2 stackBorderColor) $
   case nodes of
     [] -> punct "end of stack"
-    n:_ -> snd (layoutNode (lctx' n) n precPredicate)
+    n:_ -> snd (layoutNode (lctx' n) n precAllowAll)
   where
     lctx' n = lctx{ _lctxValidationResult = validateNode schema n }
-    precPredicate = PrecPredicate (const (PrecBorder False))
     backgroundRect = rect nothing dark1'
 
 layoutInfoBar ::
@@ -738,8 +746,8 @@ layoutObject ::
 layoutObject lctx = \case
   Object tyName (ValueRec fields) ->
     layoutRec lctx tyName fields
-  Object _ (ValueSeq _) ->
-    error "TODO (int-index): layoutObject ValueSeq"
+  Object tyName (ValueSeq items) ->
+    layoutSeq lctx tyName items
   Object _ (ValueStr str) -> \_precPredicate ->
     layoutStr lctx str
 
@@ -766,6 +774,11 @@ layoutStr lctx str =
       PrecBorder (Text.any Char.isSpace str)
     path = buildPath (lctx ^. lctxPath)
 
+lctxDescent :: PathSegment -> LayoutCtx -> LayoutCtx
+lctxDescent pathSegment lctx =
+  lctx & lctxPath %~ (<> mkPathBuilder pathSegment)
+       & lctxValidationResult %~ pathTrieLookup pathSegment
+
 layoutRec ::
   LayoutCtx ->
   TyName ->
@@ -777,33 +790,85 @@ layoutRec lctx tyName fields precPredicate =
   layoutSel (toBorder lctx precBorder) path $
   collage
   where
+    layoutFields :: RecLayoutFn
+    layoutFields =
+      case HashMap.lookup tyName (lctx ^. lctxRecLayouts) of
+        Nothing -> fromString (show tyName)
+        Just (ALayoutFn fn) -> fn
+    drawnFields :: HashMap FieldName (PrecPredicate -> (PrecUnenclosed, Collage Ann El))
+    drawnFields =
+      HashMap.mapWithKey
+        (\fieldName node ->
+          let lctx' = lctxDescent (PathSegmentRec tyName fieldName) lctx
+          in layoutNode lctx' node)
+        fields
     (precUnenclosed, collage) =
-      let
-        layoutFields :: RecLayoutFn
-        layoutFields =
-          case HashMap.lookup tyName (lctx ^. lctxRecLayouts) of
-            Nothing -> fromString (show tyName)
-            Just (ALayoutFn fn) -> fn
-        drawnFields :: HashMap FieldName (PrecPredicate -> (PrecUnenclosed, Collage Ann El))
-        drawnFields =
-          HashMap.mapWithKey
-            (\fieldName ->
-              let
-                pathSegment = PathSegmentRec tyName fieldName
-                lctx' = lctx & lctxPath %~ (<> mkPathBuilder pathSegment)
-                             & lctxValidationResult %~ pathTrieLookup pathSegment
-              in
-                \obj -> layoutNode lctx' obj)
-            fields
-        wd :: WritingDirection
-        wd = lctx ^. lctxWritingDirection
-      in
-        appRecLayoutFn layoutFields path drawnFields wd
+      appRecLayoutFn layoutFields path drawnFields wd
     precUnenclosed' = addUnenclosed tyName precUnenclosed
     precBorder =
       PrecBorder (lctx ^. lctxPrecBordersAlways) <>
       appPrecPredicate precPredicate precUnenclosed'
     path = buildPath (lctx ^. lctxPath)
+    wd = lctx ^. lctxWritingDirection
+
+layoutSeq ::
+  LayoutCtx ->
+  TyName ->
+  Seq Node ->
+  PrecPredicate ->
+  (PrecUnenclosed, Collage Ann El)
+layoutSeq lctx tyName items precPredicate =
+  (,) (guardUnenclosed precBorder precUnenclosed') $
+  layoutSel (toBorder lctx precBorder) path $
+  collage
+  where
+    drawnItems :: [PrecPredicate -> (PrecUnenclosed, Collage Ann El)]
+    drawnItems =
+      List.zipWith
+        (\i node ->
+          let lctx' = lctxDescent (PathSegmentSeq tyName i) lctx
+          in layoutNode lctx' node)
+        (List.map intToIndex [0..])
+        (Foldable.toList items)
+    (precUnenclosed, collage) =
+      layoutSeqItems path drawnItems wd
+    precUnenclosed' = addUnenclosed tyName precUnenclosed
+    precBorder =
+      PrecBorder (lctx ^. lctxPrecBordersAlways) <>
+      appPrecPredicate precPredicate precUnenclosed'
+    path = buildPath (lctx ^. lctxPath)
+    wd = lctx ^. lctxWritingDirection
+
+layoutSeqItems ::
+  Path ->
+  [PrecPredicate -> (PrecUnenclosed, Collage Ann El)] ->
+  WritingDirection ->
+  (PrecUnenclosed, Collage Ann El)
+layoutSeqItems path xs =
+  case nonEmpty xs of
+    Nothing -> \_wd -> (mempty, withJumptag path (punct "∅"))
+    Just xs' -> layoutSeqItems' xs'
+
+layoutSeqItems' ::
+  NonEmpty (PrecPredicate -> (PrecUnenclosed, Collage Ann El)) ->
+  WritingDirection ->
+  (PrecUnenclosed, Collage Ann El)
+layoutSeqItems' xs wd =
+  let
+    f = case wd of
+      WritingDirectionLTR -> vertLeft
+      WritingDirectionRTL -> vertRight
+    g = case wd of
+      WritingDirectionLTR -> horizTop
+      WritingDirectionRTL -> flip horizTop
+    addB x = vline dark2 (heightOf x) `g` x
+    (xsUnenclosed, xs') = NonEmpty.unzip (fmap ($ precAllowAll) xs)
+  in
+    (,) (sconcat xsUnenclosed) $
+    nefoldr1 f (fmap addB xs')
+
+nefoldr1 :: (a -> a -> a) -> NonEmpty a -> a
+nefoldr1 = List.foldr1 -- safe for non-empty lists
 
 data Border = BorderValid PrecBorder | BorderInvalid
 
