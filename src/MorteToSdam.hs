@@ -75,9 +75,9 @@ convertApp f a =
       ("arg", convertExpr a) ]
 
 mkRecObject :: TyName -> [(FieldName, RenderObject)] -> RenderObject
-mkRecObject tyName' fields =
-  RenderObject (Object tyName' (ValueRec (HashMap.fromList fields)))
+mkRecObject tyName fields =
+  RenderObject (Object tyName (ValueRec (HashMap.fromList fields)))
 
 mkStrObject :: TyName -> Text -> RenderObject
-mkStrObject tyName' str =
-  RenderObject (Object tyName' (ValueStr str))
+mkStrObject tyName str =
+  RenderObject (Object tyName (ValueStr str))
