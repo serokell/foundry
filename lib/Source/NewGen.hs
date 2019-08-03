@@ -1597,15 +1597,19 @@ filterByMotion motion =
   List.map snd . List.filter (matchMotion motion . fst)
 
 insertSeqMotion :: Text -> Maybe Int
+insertSeqMotion "0" = Just 0
+insertSeqMotion "1" = Just 1
 insertSeqMotion s
   | Text.null s = Nothing
-  | Text.all (==',') s = Just (Text.length s)
+  | Text.all (==',') s = Just (Text.length s + 1)
   | otherwise = Nothing
 
 defaultSeqNode :: Int -> Node
+defaultSeqNode 0 =
+  Node (NodeSeqSel SeqSel0) (ValueSeq Seq.empty)
 defaultSeqNode n =
   Node (NodeSeqSel (SeqSel (intToIndex 0) True))
-    (ValueSeq (Seq.replicate (n+1) Hole))
+    (ValueSeq (Seq.replicate n Hole))
 
 indexPred :: Index -> Maybe Index
 indexPred i =
