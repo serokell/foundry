@@ -514,6 +514,9 @@ instance {-# OVERLAPPING #-} Inj EmptyMaybe (Maybe a) where
 maybeA :: Alternative f => Maybe a -> f a
 maybeA = maybe A.empty A.pure
 
+alwaysSucceed :: Alternative f => f () -> f ()
+alwaysSucceed f = f <|> pure ()
+
 --------------------------------------------------------------------------------
 ---- Editor
 --------------------------------------------------------------------------------
@@ -1501,27 +1504,21 @@ applyActionM (ActionAppendMotion c) = do
 applyActionM (ActionCommitMotion path) = do
   Just motion <- use rstMotion
   rstMotion .= Nothing
-  case motion of
+  alwaysSucceed $ case motion of
     Motion "" -> do
       -- Enter/Exit edit mode with Space.
       -- Use Shift-Space to enter a space character.
       zoom (rstNode . atPath path) $ do
-        Node nodeSel value <- get
-        case value of
-          ValueStr _ _ -> do
-            let NodeStrSel pos em = nodeSel
-            put $ Node (NodeStrSel pos (not em)) value
-          _ -> return ()
+        Node nodeSel value@(ValueStr _ _) <- get
+        let NodeStrSel pos em = nodeSel
+        put $ Node (NodeStrSel pos (not em)) value
     (insertSeqMotion -> Just n) ->
       popSwapNode path (defaultSeqNode n)
     _ -> do
       defaultNodes <- view rctxDefaultNodes
-      let nodes
-            | Just n <- insertSeqMotion motion = [defaultSeqNode n]
-            | otherwise = filterByMotion motion (HashMap.toList defaultNodes)
-      case nodes of
-        [n] -> popSwapNode path n
-        _ -> return ()
+      let nodes = filterByMotion motion (HashMap.toList defaultNodes)
+      [node] <- pure nodes
+      popSwapNode path node
 
 popSwapNode :: Path -> Node -> ReactM ReactState
 popSwapNode path n = do
