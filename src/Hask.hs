@@ -49,7 +49,8 @@ haskSchema =
             ("App", tyApp),
             ("QVar", tyQVar),
             ("Sig", tySig),
-            ("Bind", tyBind)
+            ("Bind", tyBind),
+            ("Data", tyData)
           ]
     }
   where
@@ -98,6 +99,10 @@ haskSchema =
       TyRec
         [ ("v", mkTyUnion ["Var"] Nothing),
           ("b", tyExpr) ]
+    tyData =
+      TyRec
+        [ ("v", mkTyUnion ["Var"] Nothing),
+          ("alts", mkTyUnion [] (Just tyExpr)) ]
     tyExpr =
       mkTyUnion
         [ "Lam",
@@ -109,7 +114,8 @@ haskSchema =
     tyDecl =
       mkTyUnion
         [ "Sig",
-          "Bind" ]
+          "Bind",
+          "Data" ]
         Nothing
 
 haskRecLayouts :: HashMap TyName ALayoutFn
@@ -121,7 +127,8 @@ haskRecLayouts = recLayouts
         ("Mod", recLayoutMod),
         ("QVar", recLayoutQVar),
         ("Sig", recLayoutSig),
-        ("Bind", recLayoutBind)
+        ("Bind", recLayoutBind),
+        ("Data", recLayoutData)
       ]
     recLayoutQVar =
       field "q" noPrec <> "." <> field "v" precAllowAll
@@ -138,3 +145,5 @@ haskRecLayouts = recLayouts
       field "v" noPrec <> jumptag "::" <> field "t" precAllowAll
     recLayoutBind =
       field "v" noPrec <> jumptag "=" <> field "b" precAllowAll
+    recLayoutData =
+      jumptag "data" <> field "v" noPrec <> "=" <> field "alts" precAllowAll
