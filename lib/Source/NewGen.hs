@@ -1512,6 +1512,9 @@ applyActionM (ActionCommitMotion path) = do
       let nodes = filterByMotion motion (HashMap.toList defaultNodes)
       [node] <- pure nodes
       popSwapNode path node
+      case node of
+        Node _ (ValueStr _ _) -> rstMode .= ModeEdit
+        _ -> return ()
 
 popSwapNode :: Path -> Node -> ReactM ReactState
 popSwapNode path n = do
