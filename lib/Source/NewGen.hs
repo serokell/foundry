@@ -96,7 +96,7 @@ module Source.NewGen
 import Data.Hashable (Hashable)
 import Data.HashMap.Strict (HashMap)
 import Data.HashSet (HashSet)
-import Data.Sequence (Seq)
+import Data.Sequence as Seq
 import Data.Text (Text)
 import Numeric.Natural (Natural)
 import Data.List as List
@@ -109,7 +109,7 @@ import Control.Monad
 import Control.Monad.Reader
 import Control.Monad.State
 import Control.Monad.Writer
-import Control.Lens as Lens hiding (elements)
+import Control.Lens as Lens hiding (elements, Index)
 import Data.Function (on)
 import Data.String
 import Inj
@@ -147,6 +147,7 @@ data Node = Hole | Node NodeSel (Value Node)
 
 data NodeSel =
   NodeRecSel RecSel |
+  NodeSeqSel SeqSel |
   NodeStrSel Int Bool   -- True = edit mode
 
 data RecSel =
@@ -154,6 +155,12 @@ data RecSel =
   RecSel0 |
   -- for records with children
   RecSel FieldName Bool   -- True = child selected
+
+data SeqSel =
+  -- for empty sequences
+  SeqSel0 |
+  -- for non-empty sequences
+  SeqSel Index Bool   -- True = child selected
 
 --------------------------------------------------------------------------------
 ---- Validation
@@ -180,10 +187,14 @@ blink = \case
 
 data StackVis = StackVisible | StackHidden
 
+data SelectionTip =
+  SelectionTipLabeled TyName |
+  SelectionTipSeq
+
 data Selection =
   Selection
     { selectionPath :: Path,
-      selectionTyName :: Maybe TyName,
+      selectionTip :: Maybe SelectionTip,
       selectionStrPos :: Maybe Int }
 
 data Paths =
@@ -706,13 +717,15 @@ layoutInfoBar es =
 pprSelection :: Selection -> Text
 pprSelection selection = Text.pack (goPath selectionPath "")
   where
-    Selection{selectionPath, selectionTyName, selectionStrPos} = selection
+    Selection{selectionPath, selectionTip, selectionStrPos} = selection
     goPath p =
       case unconsPath p of
-        Nothing -> goTip selectionTyName
+        Nothing -> goTip selectionTip
         Just (ps, p') -> goPathSegment ps . ('→':) . goPath p'
     goTip Nothing = ('_':)
-    goTip (Just tyName) = (tyNameStr tyName++) . goStrPos selectionStrPos
+    goTip (Just (SelectionTipLabeled tyName)) =
+      (tyNameStr tyName++) . goStrPos selectionStrPos
+    goTip (Just SelectionTipSeq) = ('∗':)
     goPathSegment ps =
       case ps of
         PathSegmentRec tyName fieldName ->
@@ -915,24 +928,39 @@ selectionOfNode = \case
   Hole -> Selection emptyPath Nothing Nothing
   Node nodeSel (ValueStr tyName _) ->
     let NodeStrSel pos em = nodeSel
-    in Selection emptyPath (Just tyName) (if em then Just pos else Nothing)
-  Node _ (ValueSeq _) ->
-    error "TODO (int-index): selectionOfNode ValueSeq"
+    in Selection emptyPath
+        (Just (SelectionTipLabeled tyName))
+        (if em then Just pos else Nothing)
+  Node nodeSel (ValueSeq items) ->
+    let NodeSeqSel seqSel = nodeSel in
+    case seqSel of
+      SeqSel0 ->
+        Selection emptyPath (Just SelectionTipSeq) Nothing
+      SeqSel _ False ->
+        Selection emptyPath (Just SelectionTipSeq) Nothing
+      SeqSel i True ->
+        let
+          pathSegment = PathSegmentSeq i
+          seqItem = Seq.index items (indexToInt i)
+          Selection pathTail tip' strPos =
+            selectionOfNode seqItem
+        in
+          Selection (consPath pathSegment pathTail) tip' strPos
   Node nodeSel (ValueRec tyName fields) ->
     let NodeRecSel recSel = nodeSel in
     case recSel of
       RecSel0 ->
-        Selection emptyPath (Just tyName) Nothing
+        Selection emptyPath (Just (SelectionTipLabeled tyName)) Nothing
       RecSel _ False ->
-        Selection emptyPath (Just tyName) Nothing
+        Selection emptyPath (Just (SelectionTipLabeled tyName)) Nothing
       RecSel fieldName True ->
         let
           pathSegment = PathSegmentRec tyName fieldName
           recField = fields HashMap.! fieldName
-          Selection pathTail tyName' strPos =
+          Selection pathTail tip' strPos =
             selectionOfNode recField
         in
-          Selection (consPath pathSegment pathTail) tyName' strPos
+          Selection (consPath pathSegment pathTail) tip' strPos
 
 -- | Set self-selection for all nodes.
 resetPathNode :: Node -> Node
@@ -942,22 +970,38 @@ resetPathNode node =
     Node sel value -> Node (resetSel sel) (fmap resetPathNode value)
   where
     resetSel (NodeRecSel recSel) = NodeRecSel (toRecSelSelf recSel)
+    resetSel (NodeSeqSel seqSel) = NodeSeqSel (toSeqSelSelf seqSel)
     resetSel s@(NodeStrSel _ _) = s
 
 updatePathNode :: Path -> Node -> Node
 updatePathNode path node = case node of
   Hole -> node
   Node _ (ValueStr _ _) -> node
-  Node _ (ValueSeq _) ->
-    error "TODO (int-index): updatePathNode ValueSeq"
+  Node nodeSel (ValueSeq items) ->
+    let NodeSeqSel seqSel = nodeSel in
+    case unconsPath path of
+      Nothing ->
+        let seqSel' = toSeqSelSelf seqSel
+        in Node (NodeSeqSel seqSel') (ValueSeq items)
+      Just (PathSegmentRec _ _, _) -> node
+      Just (PathSegmentSeq i, path') ->
+        let i' = indexToInt i in
+        case Seq.lookup i' items of
+          Nothing -> node
+          Just a ->
+            let
+              a' = updatePathNode path' a
+              items' = Seq.update i' a' items
+              seqSel' = SeqSel i True
+            in
+              Node (NodeSeqSel seqSel') (ValueSeq items')
   Node nodeSel (ValueRec tyName fields) ->
     let NodeRecSel recSel = nodeSel in
     case unconsPath path of
       Nothing ->
         let recSel' = toRecSelSelf recSel
         in Node (NodeRecSel recSel') (ValueRec tyName fields)
-      Just (PathSegmentSeq _, _) ->
-        error "TODO (int-index): updatePathRec PathSegmentSeq"
+      Just (PathSegmentSeq _, _) -> node
       Just (PathSegmentRec tyName' fieldName, path') ->
         if tyName' /= tyName then node else
         case fields ^. at fieldName of
@@ -980,6 +1024,10 @@ toRecSelSelf (RecSel fieldName _) = RecSel fieldName False
 toRecSelChild :: RecSel -> Maybe RecSel
 toRecSelChild RecSel0 = Nothing
 toRecSelChild (RecSel fieldName _) = Just (RecSel fieldName True)
+
+toSeqSelSelf :: SeqSel -> SeqSel
+toSeqSelSelf SeqSel0 = SeqSel0
+toSeqSelSelf (SeqSel i _) = SeqSel i False
 
 --------------------------------------------------------------------------------
 ---- Editor - React
@@ -1098,14 +1146,14 @@ getAction ::
 getAction
     Schema{schemaTypes}
     wd
-    Selection{selectionPath, selectionTyName, selectionStrPos}
+    Selection{selectionPath, selectionTip, selectionStrPos}
     stkVis
     activeJumptags
     motion
     inputEvent
 
   -- Exit jumptag mode.
-  | not (null activeJumptags),
+  | not (Foldable.null activeJumptags),
     KeyPress [] KeyCode.Escape <- inputEvent
   = Just $ ActionDeactivateJumptags
 
@@ -1123,13 +1171,13 @@ getAction
   = Just $ ActionCommitMotion selectionPath
 
   -- Jumptag lookup.
-  | not (null activeJumptags),
+  | not (Foldable.null activeJumptags),
     KeyPress [] keyCode <- inputEvent,
     Just c <- keyChar keyCode
   = Just $ ActionJumptagLookup c
 
   -- Enter edit mode.
-  | Just tyName <- selectionTyName,
+  | Just (SelectionTipLabeled tyName) <- selectionTip,
     Just TyStr <- HashMap.lookup tyName schemaTypes,
     Nothing <- selectionStrPos,
     KeyPress [] keyCode <- inputEvent,
@@ -1137,49 +1185,49 @@ getAction
   = Just $ ActionEnterEditMode selectionPath
 
   -- Exit edit mode.
-  | Just tyName <- selectionTyName,
+  | Just (SelectionTipLabeled tyName) <- selectionTip,
     Just TyStr <- HashMap.lookup tyName schemaTypes,
     KeyPress [] KeyCode.Escape <- inputEvent
   = Just $ ActionExitEditMode selectionPath
 
   -- Exit edit mode with Space.
   -- Use Shift-Space to enter a space character.
-  | Just tyName <- selectionTyName,
+  | Just (SelectionTipLabeled tyName) <- selectionTip,
     Just TyStr <- HashMap.lookup tyName schemaTypes,
     Just _ <- selectionStrPos,
     KeyPress [] KeyCode.Space <- inputEvent
   = Just $ ActionExitEditMode selectionPath
 
   -- Delete character backward.
-  | Just tyName <- selectionTyName,
+  | Just (SelectionTipLabeled tyName) <- selectionTip,
     Just TyStr <- HashMap.lookup tyName schemaTypes,
     Just _ <- selectionStrPos,
     KeyPress [] KeyCode.Backspace <- inputEvent
   = Just $ ActionDeleteCharBackward selectionPath
 
   -- Delete character forward.
-  | Just tyName <- selectionTyName,
+  | Just (SelectionTipLabeled tyName) <- selectionTip,
     Just TyStr <- HashMap.lookup tyName schemaTypes,
     Just _ <- selectionStrPos,
     KeyPress [] KeyCode.Delete <- inputEvent
   = Just $ ActionDeleteCharForward selectionPath
 
   -- Move string cursor backward.
-  | Just tyName <- selectionTyName,
+  | Just (SelectionTipLabeled tyName) <- selectionTip,
     Just TyStr <- HashMap.lookup tyName schemaTypes,
     Just _ <- selectionStrPos,
     KeyPress [] KeyCode.ArrowLeft <- inputEvent
   = Just $ ActionMoveStrCursorBackward selectionPath
 
   -- Move string cursor forward.
-  | Just tyName <- selectionTyName,
+  | Just (SelectionTipLabeled tyName) <- selectionTip,
     Just TyStr <- HashMap.lookup tyName schemaTypes,
     Just _ <- selectionStrPos,
     KeyPress [] KeyCode.ArrowRight <- inputEvent
   = Just $ ActionMoveStrCursorForward selectionPath
 
   -- Insert letter.
-  | Just tyName <- selectionTyName,
+  | Just (SelectionTipLabeled tyName) <- selectionTip,
     Just TyStr <- HashMap.lookup tyName schemaTypes,
     Just _ <- selectionStrPos,
     KeyPress mods keyCode <- inputEvent,
@@ -1465,18 +1513,25 @@ atPath p =
     Just (ps, p') -> atPathSegment ps . atPath p'
 
 atPathSegment :: PathSegment -> Traversal' Node Node
-atPathSegment (PathSegmentSeq _) =
-  error "TODO (int-index): updatePathRec PathSegmentSeq"
+atPathSegment (PathSegmentSeq i) =
+  \f node ->
+    case node of
+      Node nodeSel (ValueSeq items)
+        | let i' = indexToInt i,
+          Just a <- Seq.lookup i' items
+        -> f a <&> \a' ->
+             let items' = Seq.update i' a' items
+             in Node nodeSel (ValueSeq items')
+      _ -> pure node
 atPathSegment (PathSegmentRec tyName fieldName) =
   \f node ->
     case node of
       Node nodeSel (ValueRec tyName' fields)
         | tyName == tyName',
-          let NodeRecSel recSel = nodeSel,
           Just a <- HashMap.lookup fieldName fields
         -> f a <&> \a' ->
-             let fields' = (HashMap.insert fieldName a' fields)
-             in Node (NodeRecSel recSel) (ValueRec tyName' fields')
+             let fields' = HashMap.insert fieldName a' fields
+             in Node nodeSel (ValueRec tyName' fields')
       _ -> pure node
 
 zoomPathPrefix :: Path -> ReactM Node -> ReactM Node
@@ -1608,8 +1663,11 @@ fromParsedValue pluginInfo = go
       Node (mkNodeSel value) (fmap go value)
     mkNodeSel (ValueStr _ str) =
       NodeStrSel (Text.length str) False
-    mkNodeSel (ValueSeq _) =
-      error "TODO (int-index): mkDefNodeSel ValueSeq"
+    mkNodeSel (ValueSeq items) =
+      NodeSeqSel $
+      if Seq.null items
+      then SeqSel0
+      else SeqSel (intToIndex 0) False
     mkNodeSel (ValueRec tyName _) =
       NodeRecSel $
       case rmmFieldOrder (recMoveMaps HashMap.! tyName) of
