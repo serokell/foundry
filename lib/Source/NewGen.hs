@@ -1137,6 +1137,7 @@ data Action =
   ActionMoveStrCursorBackward Path |
   ActionMoveStrCursorForward Path |
   ActionInsertLetter Path Char |
+  ActionAppendSeqItem Path |
   ActionSelectParent Path |
   ActionSelectChild Path |
   ActionSelectSiblingBackward Path |
@@ -1239,6 +1240,10 @@ getAction
     Just _ <- selectionStrPos,
     KeyPress [] KeyCode.ArrowRight <- inputEvent
   = Just $ ActionMoveStrCursorForward selectionPath
+
+  | KeyPress [] keyCode <- inputEvent,
+    keyLetter ',' keyCode
+  = Just $ ActionAppendSeqItem selectionPath
 
   -- Insert letter.
   | Just (SelectionTipLabeled tyName) <- selectionTip,
@@ -1401,6 +1406,20 @@ applyActionM (ActionMoveStrCursorForward path) =
     let pos' = pos + 1
     put $ Node (NodeStrSel pos' em) (ValueStr tyName str)
 
+applyActionM (ActionAppendSeqItem path) = do
+  path' <- maybeA (pathParent path)
+  zoom (rstNode . atPath path') $ do
+    Node nodeSel (ValueSeq items) <- get
+    let NodeSeqSel seqSel = nodeSel
+    SeqSel i True <- pure seqSel
+    let
+      i' = indexToInt i + 1
+      items' = Seq.insertAt i' Hole items
+      seqSel' = SeqSel (intToIndex i') True
+      nodeSel' = NodeSeqSel seqSel'
+      value' = ValueSeq items'
+    put $ Node nodeSel' value'
+
 applyActionM (ActionInsertLetter path c) =
   zoom (rstNode . atPath path) $ do
     Node nodeSel (ValueStr tyName str) <- get
@@ -1505,7 +1524,9 @@ applyActionM (ActionCommitMotion path) = do
   Just motion <- use rstMotion
   rstMotion .= Nothing
   defaultNodes <- view rctxDefaultNodes
-  let nodes = filterByMotion motion (HashMap.toList defaultNodes)
+  let nodes
+        | Just n <- insertSeqMotion motion = [defaultSeqNode n]
+        | otherwise = filterByMotion motion (HashMap.toList defaultNodes)
   case nodes of
     [n] -> popSwapNode path n
     _ -> return ()
@@ -1589,6 +1610,17 @@ matchMotion (Motion motionStr) (TyName tyName) =
 filterByMotion :: Motion -> [(TyName, a)] -> [a]
 filterByMotion motion =
   List.map snd . List.filter (matchMotion motion . fst)
+
+insertSeqMotion :: Motion -> Maybe Int
+insertSeqMotion (Motion s)
+  | Text.null s = Nothing
+  | Text.all (==',') s = Just (Text.length s)
+  | otherwise = Nothing
+
+defaultSeqNode :: Int -> Node
+defaultSeqNode n =
+  Node (NodeSeqSel (SeqSel (intToIndex 0) True))
+    (ValueSeq (Seq.replicate (n+1) Hole))
 
 indexPred :: Index -> Maybe Index
 indexPred i =
