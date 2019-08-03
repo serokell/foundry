@@ -1029,6 +1029,20 @@ toSeqSelSelf :: SeqSel -> SeqSel
 toSeqSelSelf SeqSel0 = SeqSel0
 toSeqSelSelf (SeqSel i _) = SeqSel i False
 
+toSeqSelChild :: SeqSel -> Maybe SeqSel
+toSeqSelChild SeqSel0 = Nothing
+toSeqSelChild (SeqSel i _) = Just (SeqSel i True)
+
+toNodeSelSelf :: NodeSel -> Maybe NodeSel
+toNodeSelSelf (NodeRecSel recSel) = Just (NodeRecSel (toRecSelSelf recSel))
+toNodeSelSelf (NodeSeqSel seqSel) = Just (NodeSeqSel (toSeqSelSelf seqSel))
+toNodeSelSelf (NodeStrSel _ _) = Nothing
+
+toNodeSelChild :: NodeSel -> Maybe NodeSel
+toNodeSelChild (NodeRecSel recSel) = NodeRecSel <$> toRecSelChild recSel
+toNodeSelChild (NodeSeqSel seqSel) = NodeSeqSel <$> toSeqSelChild seqSel
+toNodeSelChild (NodeStrSel _ _) = Nothing
+
 --------------------------------------------------------------------------------
 ---- Editor - React
 --------------------------------------------------------------------------------
@@ -1402,44 +1416,62 @@ applyActionM (ActionSelectParent path) = do
   rstStackVis .= StackHidden
   path' <- maybeA (pathParent path)
   zoom (rstNode . atPath path') $ do
-    Node nodeSel (ValueRec tyName fields) <- get
-    let NodeRecSel recSel = nodeSel
-    let recSel' = toRecSelSelf recSel
-    put $ Node (NodeRecSel recSel') (ValueRec tyName fields)
+    Node nodeSel value <- get
+    nodeSel' <- maybeA (toNodeSelSelf nodeSel)
+    put $ Node nodeSel' value
 
 applyActionM (ActionSelectChild path) = do
   rstStackVis .= StackHidden
   zoom (rstNode . atPath path) $ do
-    Node nodeSel (ValueRec tyName fields) <- get
-    let NodeRecSel recSel = nodeSel
-    recSel' <- maybeA (toRecSelChild recSel)
-    put $ Node (NodeRecSel recSel') (ValueRec tyName fields)
+    Node nodeSel value <- get
+    nodeSel' <- maybeA (toNodeSelChild nodeSel)
+    put $ Node nodeSel' value
 
 applyActionM (ActionSelectSiblingBackward path) = do
   rstStackVis .= StackHidden
   path' <- maybeA (pathParent path)
   zoom rstNode $ zoomPathPrefix path' $ do
-    Node nodeSel (ValueRec tyName fields) <- get
-    let NodeRecSel recSel = nodeSel
-    RecSel fieldName True <- pure recSel
-    recMoveMaps <- view rctxRecMoveMaps
-    let moveMap = rmmBackward (recMoveMaps HashMap.! tyName)
-    fieldName' <- maybeA (HashMap.lookup fieldName moveMap)
-    let recSel' = RecSel fieldName' True
-    put $ Node (NodeRecSel recSel') (ValueRec tyName fields)
+    Node nodeSel value <- get
+    nodeSel' <- case value of
+      ValueRec tyName _ -> do
+        let NodeRecSel recSel = nodeSel
+        RecSel fieldName True <- pure recSel
+        recMoveMaps <- view rctxRecMoveMaps
+        let moveMap = rmmBackward (recMoveMaps HashMap.! tyName)
+        fieldName' <- maybeA (HashMap.lookup fieldName moveMap)
+        let recSel' = RecSel fieldName' True
+        return (NodeRecSel recSel')
+      ValueSeq _ -> do
+        let NodeSeqSel seqSel = nodeSel
+        SeqSel i True <- pure seqSel
+        i' <- maybeA (indexPred i)
+        let seqSel' = SeqSel i' True
+        return (NodeSeqSel seqSel')
+      _ -> A.empty
+    put $ Node nodeSel' value
 
 applyActionM (ActionSelectSiblingForward path) = do
   rstStackVis .= StackHidden
   path' <- maybeA (pathParent path)
   zoom rstNode $ zoomPathPrefix path' $ do
-    Node nodeSel (ValueRec tyName fields) <- get
-    let NodeRecSel recSel = nodeSel
-    RecSel fieldName True <- pure recSel
-    recMoveMaps <- view rctxRecMoveMaps
-    let moveMap = rmmForward (recMoveMaps HashMap.! tyName)
-    fieldName' <- maybeA (HashMap.lookup fieldName moveMap)
-    let recSel' = RecSel fieldName' True
-    put $ Node (NodeRecSel recSel') (ValueRec tyName fields)
+    Node nodeSel value <- get
+    nodeSel' <- case value of
+      ValueRec tyName _ -> do
+        let NodeRecSel recSel = nodeSel
+        RecSel fieldName True <- pure recSel
+        recMoveMaps <- view rctxRecMoveMaps
+        let moveMap = rmmForward (recMoveMaps HashMap.! tyName)
+        fieldName' <- maybeA (HashMap.lookup fieldName moveMap)
+        let recSel' = RecSel fieldName' True
+        return (NodeRecSel recSel')
+      ValueSeq items -> do
+        let NodeSeqSel seqSel = nodeSel
+        SeqSel i True <- pure seqSel
+        i' <- maybeA (indexSucc items i)
+        let seqSel' = SeqSel i' True
+        return (NodeSeqSel seqSel')
+      _ -> A.empty
+    put $ Node nodeSel' value
 
 applyActionM ActionActivateJumptags = do
   jumptags <- view rctxJumptags
@@ -1557,6 +1589,16 @@ matchMotion (Motion motionStr) (TyName tyName) =
 filterByMotion :: Motion -> [(TyName, a)] -> [a]
 filterByMotion motion =
   List.map snd . List.filter (matchMotion motion . fst)
+
+indexPred :: Index -> Maybe Index
+indexPred i =
+  let i' = indexToInt i in
+  if i' > 0 then Just (intToIndex (i' - 1)) else Nothing
+
+indexSucc :: Seq a -> Index -> Maybe Index
+indexSucc xs i =
+  let i' = indexToInt i + 1 in
+  if i' < Seq.length xs then Just (intToIndex i') else Nothing
 
 mkDefaultNodes :: Schema -> HashMap TyName RecMoveMap -> HashMap TyName Node
 mkDefaultNodes schema recMoveMaps =
