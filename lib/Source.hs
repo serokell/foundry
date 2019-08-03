@@ -39,9 +39,6 @@ createMainWindow pluginInfo esRef = do
   window <- Gtk.windowNew
   _ <- Gtk.on window Gtk.objectDestroy Gtk.mainQuit
 
-  initialStackVis <-
-    view NG.esStackVis <$> readIORef esRef
-
   canvas <- createMainCanvas
 
   -- TODO: PointerMotionHintMask; eventRequestMotions
@@ -53,10 +50,10 @@ createMainWindow pluginInfo esRef = do
   cursorPhaser <- newPhaser 530000 NG.CursorVisible NG.blink $
     \_ -> Gtk.postGUIAsync (Gtk.widgetQueueDraw canvas)
 
-  stackPhaser <- newPhaser 530000 initialStackVis (const NG.StackHidden) $
-    \t -> Gtk.postGUIAsync $ do
+  stackPhaser <- newPhaser 530000 () id $
+    \_ -> Gtk.postGUIAsync $ do
       atomicRunStateIORef' esRef $ do
-        NG.esStackVis .= t
+        NG.esMode %= NG.quitStackMode
       Gtk.widgetQueueDraw canvas
 
   let
@@ -78,7 +75,7 @@ createMainWindow pluginInfo esRef = do
         NG.ReactOk es' -> do
           atomicWriteIORef esRef es'
           Gtk.widgetQueueDraw canvas
-          phaserReset stackPhaser (es ^. NG.esStackVis)
+          phaserReset stackPhaser ()
           return True
 
   void $ Gtk.on canvas Gtk.draw $ do

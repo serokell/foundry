@@ -40,7 +40,6 @@ module Source.NewGen
   offsetZero,
   CursorBlink(..),
   blink,
-  StackVis(..),
   Selection(..),
   Paths(..),
   Ann,
@@ -60,6 +59,8 @@ module Source.NewGen
   ReactResult(..),
 
   -- * Editor
+  Mode(..),
+  quitStackMode,
   EditorState(..),
   initEditorState,
   fromParsedValue,
@@ -68,13 +69,12 @@ module Source.NewGen
   esPrecBordersAlways,
   esWritingDirection,
   esStack,
-  esStackVis,
   esUndo,
   esRedo,
   esRenderUI,
   esPointerPath,
   esJumptags,
-  esActiveJumptags,
+  esMode,
 
   RecMoveMap,
 
@@ -105,6 +105,7 @@ import Data.List.NonEmpty as NonEmpty
 import Data.Foldable as Foldable
 import Data.DList as DList
 import Data.Semigroup
+import Data.Monoid as Monoid
 import Control.Applicative as A
 import Control.Monad
 import Control.Monad.Reader
@@ -149,7 +150,7 @@ data Node = Hole | Node NodeSel (Value Node)
 data NodeSel =
   NodeRecSel RecSel |
   NodeSeqSel SeqSel |
-  NodeStrSel Int Bool   -- True = edit mode
+  NodeStrSel Int
 
 data RecSel =
   -- for records without children
@@ -185,8 +186,6 @@ blink :: CursorBlink -> CursorBlink
 blink = \case
   CursorVisible -> CursorInvisible
   CursorInvisible -> CursorVisible
-
-data StackVis = StackVisible | StackHidden
 
 data SelectionTip =
   SelectionTipLabeled TyName |
@@ -358,7 +357,7 @@ renderHoverBorder Paths{pathsCursor} (Find findZone) =
       outline 2 hoverBorderColor e
     _ -> mempty
 
-renderJumptagLabels :: [(Char, Jumptag)] -> CairoRender DrawCtx
+renderJumptagLabels :: NonEmpty (Char, Jumptag) -> CairoRender DrawCtx
 renderJumptagLabels = foldMap renderJumptagLabel
 
 renderJumptagLabel :: (Char, Jumptag) -> CairoRender DrawCtx
@@ -370,7 +369,7 @@ renderJumptagLabel (c, Jumptag o _) =
   where
     label = Text.toUpper (Text.singleton c)
 
-renderMotion :: Motion -> Paths -> FindZone -> CairoRender DrawCtx
+renderMotion :: Text -> Paths -> FindZone -> CairoRender DrawCtx
 renderMotion motion Paths{pathsSelection} (Find findZone) =
   case findZone (selectionPath pathsSelection) of
     Nothing -> error "renderMotion: no selection"
@@ -381,9 +380,7 @@ renderMotion motion Paths{pathsSelection} (Find findZone) =
       substrate 0 (rect nothing dark1') $
       substrateMargin (outline 2 motionBorderColor . extentsMax e) $
       collageWithMargin (Margin 4 4 4 4) $
-      (punct label :: Collage Ann El)
-  where
-    Motion label = motion
+      (punct motion :: Collage Ann El)
 
 findPathInBox :: Path -> (Offset, Extents) -> FindPath
 findPathInBox p box =
@@ -521,7 +518,20 @@ alwaysSucceed f = f <|> pure ()
 ---- Editor
 --------------------------------------------------------------------------------
 
-data Motion = Motion Text
+data Mode =
+  ModeNormal |
+  ModeStack |
+  ModeJump (NonEmpty (Char, Jumptag)) |
+  ModeMotion Bool Text |
+  ModeEdit
+
+quitStackMode :: Mode -> Mode
+quitStackMode ModeStack = ModeNormal
+quitStackMode mode = mode
+
+isEditMode :: Mode -> Bool
+isEditMode ModeEdit = True
+isEditMode _ = False
 
 data EditorState =
   EditorState
@@ -530,14 +540,12 @@ data EditorState =
       _esPrecBordersAlways :: Bool,
       _esWritingDirection :: WritingDirection,
       _esStack :: [Node],
-      _esStackVis :: StackVis,
       _esUndo :: [Node],
       _esRedo :: [Node],
       _esRenderUI :: CursorBlink -> Cairo.Render (),
       _esPointerPath :: Maybe Path,
       _esJumptags :: [Jumptag],
-      _esActiveJumptags :: [(Char, Jumptag)],
-      _esMotion :: Maybe Motion
+      _esMode :: Mode
     }
 
 initEditorState :: EditorState
@@ -548,14 +556,12 @@ initEditorState =
       _esPrecBordersAlways = False,
       _esWritingDirection = WritingDirectionLTR,
       _esStack = [],
-      _esStackVis = StackHidden,
       _esUndo = [],
       _esRedo = [],
       _esRenderUI = const (pure ()),
       _esPointerPath = Nothing,
       _esJumptags = [],
-      _esActiveJumptags = [],
-      _esMotion = Nothing
+      _esMode = ModeNormal
     }
 
 data LayoutCtx =
@@ -564,6 +570,7 @@ data LayoutCtx =
       _lctxValidationResult :: ValidationResult,
       _lctxViewport :: Extents,
       _lctxPrecBordersAlways :: Bool,
+      _lctxEditMode :: Bool,
       _lctxRecLayouts :: HashMap TyName ALayoutFn,
       _lctxWritingDirection :: WritingDirection
     }
@@ -587,9 +594,7 @@ data ReactState =
   ReactState
     { _rstNode :: Node,
       _rstStack :: [Node],
-      _rstStackVis :: StackVis,
-      _rstActiveJumptags :: [(Char, Jumptag)],
-      _rstMotion :: Maybe Motion
+      _rstMode :: Mode
     }
 
 --------------------------------------------------------------------------------
@@ -634,12 +639,12 @@ redrawUI pluginInfo viewport es =
                                           --            and layoutMainExpr
           _lctxViewport = viewport,
           _lctxPrecBordersAlways = es ^. esPrecBordersAlways,
+          _lctxEditMode = isEditMode (es ^. esMode),
           _lctxRecLayouts = pluginInfoRecLayouts pluginInfo,
           _lctxWritingDirection = es ^. esWritingDirection
         }
     schema = pluginInfoSchema pluginInfo
     pointer = es ^. esPointer
-    activeJumptags = es ^. esActiveJumptags
     infoBarLayout = layoutInfoBar es
     stackLayout = layoutNodeStack schema lctx (es ^. esStack)
     mainLayout = layoutMainExpr schema lctx (es ^. esExpr)
@@ -668,9 +673,15 @@ redrawUI pluginInfo viewport es =
     ((), infoBarRdr) =
       foldCairoCollage offsetZero infoBarLayout
     jumptags = DList.toList jumptags'
-    stackRdr = case es ^. esStackVis of
-      StackHidden -> mempty
-      StackVisible -> stackRdr'
+    stackRdr = case es ^. esMode of
+      ModeStack -> stackRdr'
+      _ -> mempty
+    jumptagsRdr = case es ^. esMode of
+      ModeJump activeJumptags -> renderJumptagLabels activeJumptags
+      _ -> mempty
+    selectionOrMotionRdr = case es ^. esMode of
+      ModeMotion _ s -> renderMotion s paths findZone
+      _ -> renderSelectionBorder paths findZone
     pathsCursor = findPath pointer
     pathsSelection = selectionOfEditorState es
     paths = Paths {pathsCursor, pathsSelection}
@@ -678,11 +689,9 @@ redrawUI pluginInfo viewport es =
       cairoRender
         (backgroundRdr
            <> mainRdr
-           <> (case es ^. esMotion of
-                 Nothing -> renderSelectionBorder paths findZone
-                 Just a -> renderMotion a paths findZone)
+           <> selectionOrMotionRdr
            <> renderHoverBorder paths findZone
-           <> renderJumptagLabels activeJumptags
+           <> jumptagsRdr
            <> stackRdr
            <> barBackgroundRdr
            <> infoBarRdr)
@@ -779,7 +788,8 @@ layoutStr lctx str =
     (\Paths{pathsSelection} ->
      \case
        CursorVisible
-         | selectionPath pathsSelection == path,
+         | lctx ^. lctxEditMode,
+           selectionPath pathsSelection == path,
            Just pos <- selectionStrPos pathsSelection
          ->
            Just (fromIntegral pos)
@@ -931,10 +941,10 @@ selectionOfNode :: Node -> Selection
 selectionOfNode = \case
   Hole -> Selection emptyPath Nothing Nothing
   Node nodeSel (ValueStr tyName _) ->
-    let NodeStrSel pos em = nodeSel
+    let NodeStrSel pos = nodeSel
     in Selection emptyPath
         (Just (SelectionTipLabeled tyName))
-        (if em then Just pos else Nothing)
+        (Just pos)
   Node nodeSel (ValueSeq items) ->
     let NodeSeqSel seqSel = nodeSel in
     case seqSel of
@@ -975,7 +985,7 @@ resetPathNode node =
   where
     resetSel (NodeRecSel recSel) = NodeRecSel (toRecSelSelf recSel)
     resetSel (NodeSeqSel seqSel) = NodeSeqSel (toSeqSelSelf seqSel)
-    resetSel s@(NodeStrSel _ _) = s
+    resetSel s@(NodeStrSel _) = s
 
 updatePathNode :: Path -> Node -> Node
 updatePathNode path node = case node of
@@ -1040,12 +1050,12 @@ toSeqSelChild (SeqSel i _) = Just (SeqSel i True)
 toNodeSelSelf :: NodeSel -> Maybe NodeSel
 toNodeSelSelf (NodeRecSel recSel) = Just (NodeRecSel (toRecSelSelf recSel))
 toNodeSelSelf (NodeSeqSel seqSel) = Just (NodeSeqSel (toSeqSelSelf seqSel))
-toNodeSelSelf (NodeStrSel _ _) = Nothing
+toNodeSelSelf (NodeStrSel _) = Nothing
 
 toNodeSelChild :: NodeSel -> Maybe NodeSel
 toNodeSelChild (NodeRecSel recSel) = NodeRecSel <$> toRecSelChild recSel
 toNodeSelChild (NodeSeqSel seqSel) = NodeSeqSel <$> toSeqSelChild seqSel
-toNodeSelChild (NodeStrSel _ _) = Nothing
+toNodeSelChild (NodeStrSel _) = Nothing
 
 --------------------------------------------------------------------------------
 ---- Editor - React
@@ -1072,6 +1082,7 @@ reactEditorState _ (PointerMotion x y) es = ReactOk $
 reactEditorState _ ButtonPress es
   | Just p <- es ^. esPointerPath
   = ReactOk $ es & esExpr %~ setPathNode p
+                 & esMode .~ ModeNormal
 
 reactEditorState _ (KeyPress [Control] keyCode) es
   | keyLetter 'b' keyCode
@@ -1097,14 +1108,12 @@ reactEditorState _ (KeyPress [Control] keyCode) es
        & esUndo %~ (expr:)
 
 reactEditorState pluginInfo inputEvent es
-  | Just act <- getAction schema wd sel stkVis activeJumptags motion inputEvent,
+  | Just act <- getAction schema wd sel mode inputEvent,
     Just (UndoFlag undoFlag, rst') <- applyAction act rctx rst
   = ReactOk $
     let es' = es & esExpr .~ (rst' ^. rstNode)
                  & esStack .~ (rst' ^. rstStack)
-                 & esStackVis .~ (rst' ^. rstStackVis)
-                 & esActiveJumptags .~ (rst' ^. rstActiveJumptags)
-                 & esMotion .~ (rst' ^. rstMotion)
+                 & esMode .~ (rst' ^. rstMode)
     in if undoFlag then
          es' & esUndo %~ (expr:)
              & esRedo .~ []
@@ -1114,10 +1123,8 @@ reactEditorState pluginInfo inputEvent es
     wd = es ^. esWritingDirection
     sel = selectionOfNode expr
     expr = es ^. esExpr
-    stkVis = es ^. esStackVis
-    activeJumptags = es ^. esActiveJumptags
-    motion = es ^. esMotion
-    rst = ReactState expr (es ^. esStack) stkVis activeJumptags motion
+    mode = es ^. esMode
+    rst = ReactState expr (es ^. esStack) mode
     rctx =
       ReactCtx
         { _rctxSchema = pluginInfoSchema pluginInfo,
@@ -1129,12 +1136,12 @@ reactEditorState pluginInfo inputEvent es
 reactEditorState _ _ _ = UnknownEvent
 
 data Action =
+  ActionEscapeTransientMode |
   ActionDeleteNode Path |
   ActionPushStack Path |
   ActionPopSwapStack Path |
   ActionRotateStack |
   ActionDropStack |
-  ActionExitEditMode Path |
   ActionDeleteCharBackward Path |
   ActionDeleteCharForward Path |
   ActionMoveStrCursorBackward Path |
@@ -1146,9 +1153,8 @@ data Action =
   ActionSelectSiblingBackward Path |
   ActionSelectSiblingForward Path |
   ActionActivateJumptags |
-  ActionDeactivateJumptags |
   ActionJumptagLookup Char |
-  ActionStartMotion |
+  ActionStartMotion Bool |
   ActionAppendMotion Char |
   ActionCommitMotion Path
 
@@ -1156,86 +1162,81 @@ getAction ::
   Schema ->
   WritingDirection ->
   Selection ->
-  StackVis ->
-  [(Char, Jumptag)] ->
-  Maybe Motion ->
+  Mode ->
   InputEvent ->
   Maybe Action
 getAction
     Schema{schemaTypes}
     wd
-    Selection{selectionPath, selectionTip, selectionStrPos}
-    stkVis
-    activeJumptags
-    motion
+    Selection{selectionPath, selectionTip}
+    mode
     inputEvent
 
-  -- Exit jumptag mode.
-  | not (Foldable.null activeJumptags),
-    KeyPress [] KeyCode.Escape <- inputEvent
-  = Just $ ActionDeactivateJumptags
+  -- Escape transient modes (enter normal mode)
+  | KeyPress [] KeyCode.Escape <- inputEvent
+  = Just ActionEscapeTransientMode
 
-  -- Enter motion mode.
-  | Nothing <- motion,
+  -- Enter motion mode from normal mode.
+  | ModeNormal <- mode,
     KeyPress [] KeyCode.Space <- inputEvent
-  = return ActionStartMotion
+  = return (ActionStartMotion False)
+
+  -- Enter motion mode from edit mode.
+  -- Use Shift-Space to enter a space character.
+  | ModeEdit <- mode,
+    KeyPress [] KeyCode.Space <- inputEvent
+  = return (ActionStartMotion True)
 
   -- Append a letter to the motion.
-  | Just _ <- motion,
+  | ModeMotion _ _ <- mode,
     KeyPress mods keyCode <- inputEvent,
     Control `notElem` mods,
     Just c <- keyChar keyCode
   = Just $ ActionAppendMotion c
 
   -- Commit a motion.
-  | Just _ <- motion,
+  | ModeMotion _ _ <- mode,
     KeyRelease _ KeyCode.Space <- inputEvent
   = Just $ ActionCommitMotion selectionPath
 
   -- Jumptag lookup.
-  | not (Foldable.null activeJumptags),
+  | ModeJump _ <- mode,
     KeyPress [] keyCode <- inputEvent,
     Just c <- keyChar keyCode
   = Just $ ActionJumptagLookup c
 
-  -- Exit edit mode.
-  | Just (SelectionTipLabeled tyName) <- selectionTip,
-    Just (TyStr _) <- HashMap.lookup tyName schemaTypes,
-    KeyPress [] KeyCode.Escape <- inputEvent
-  = Just $ ActionExitEditMode selectionPath
-
   -- Delete character backward.
-  | Just (SelectionTipLabeled tyName) <- selectionTip,
+  | ModeEdit <- mode,
+    Just (SelectionTipLabeled tyName) <- selectionTip,
     Just (TyStr _) <- HashMap.lookup tyName schemaTypes,
-    Just _ <- selectionStrPos,
     KeyPress [] KeyCode.Backspace <- inputEvent
   = Just $ ActionDeleteCharBackward selectionPath
 
   -- Delete character forward.
-  | Just (SelectionTipLabeled tyName) <- selectionTip,
+  | ModeEdit <- mode,
+    Just (SelectionTipLabeled tyName) <- selectionTip,
     Just (TyStr _) <- HashMap.lookup tyName schemaTypes,
-    Just _ <- selectionStrPos,
     KeyPress [] KeyCode.Delete <- inputEvent
   = Just $ ActionDeleteCharForward selectionPath
 
   -- Move string cursor backward.
-  | Just (SelectionTipLabeled tyName) <- selectionTip,
+  | ModeEdit <- mode,
+    Just (SelectionTipLabeled tyName) <- selectionTip,
     Just (TyStr _) <- HashMap.lookup tyName schemaTypes,
-    Just _ <- selectionStrPos,
     KeyPress [] KeyCode.ArrowLeft <- inputEvent
   = Just $ ActionMoveStrCursorBackward selectionPath
 
   -- Move string cursor forward.
-  | Just (SelectionTipLabeled tyName) <- selectionTip,
+  | ModeEdit <- mode,
+    Just (SelectionTipLabeled tyName) <- selectionTip,
     Just (TyStr _) <- HashMap.lookup tyName schemaTypes,
-    Just _ <- selectionStrPos,
     KeyPress [] KeyCode.ArrowRight <- inputEvent
   = Just $ ActionMoveStrCursorForward selectionPath
 
   -- Insert letter.
-  | Just (SelectionTipLabeled tyName) <- selectionTip,
+  | ModeEdit <- mode,
+    Just (SelectionTipLabeled tyName) <- selectionTip,
     Just (TyStr _) <- HashMap.lookup tyName schemaTypes,
-    Just _ <- selectionStrPos,
     KeyPress mods keyCode <- inputEvent,
     Control `notElem` mods,
     Just c <- keyChar keyCode
@@ -1247,14 +1248,13 @@ getAction
   = Just $ ActionAppendSeqItem selectionPath
 
   -- Drop a node from the stack.
-  | StackVisible <- stkVis,
+  | ModeStack <- mode,
     KeyPress [] keyCode <- inputEvent,
     keyLetter 'x' keyCode
   = Just ActionDropStack
 
   -- Enter jumptag mode.
-  | Nothing <- selectionStrPos,
-    KeyPress [] keyCode <- inputEvent,
+  | KeyPress [] keyCode <- inputEvent,
     keyLetter 'g' keyCode
   = Just $ ActionActivateJumptags
 
@@ -1311,8 +1311,11 @@ applyAction act rctx rst =
 
 applyActionM :: Action -> ReactM ReactState
 
+applyActionM ActionEscapeTransientMode =
+  rstMode .= ModeNormal
+
 applyActionM (ActionDeleteNode path) = do
-  rstStackVis .= StackVisible
+  rstMode .= ModeStack
   nodes <-
     zoom (rstNode . atPath path) $ do
       node@Node{} <- get
@@ -1323,48 +1326,42 @@ applyActionM (ActionDeleteNode path) = do
   setUndoFlag
 
 applyActionM (ActionPushStack path) = do
-  rstStackVis .= StackVisible
+  rstMode .= ModeStack
   parent <- use rstNode
   let nodes = parent ^.. atPath path
   forM_ nodes $ \node ->
     rstStack %= (node:)
 
 applyActionM (ActionPopSwapStack path) = do
-  rstStackVis .= StackVisible
+  rstMode .= ModeStack
   n:ns <- use rstStack
   rstStack .= ns
   popSwapNode path n
 
 applyActionM ActionRotateStack = do
-  stkVis <- use rstStackVis
-  case stkVis of
-    StackVisible -> rstStack %= rotate
-    StackHidden -> rstStackVis .= StackVisible
+  mode <- use rstMode
+  case mode of
+    ModeStack -> rstStack %= rotate
+    _ -> rstMode .= ModeStack
 
 applyActionM ActionDropStack = do
   rstStack %= List.drop 1
 
-applyActionM (ActionExitEditMode path) =
-  zoom (rstNode . atPath path) $ do
-    Node nodeSel (ValueStr tyName str) <- get
-    let NodeStrSel pos _ = nodeSel
-    put $ Node (NodeStrSel pos False) (ValueStr tyName str)
-
 applyActionM (ActionDeleteCharBackward path) =
   zoom (rstNode . atPath path) $ do
     Node nodeSel (ValueStr tyName str) <- get
-    let NodeStrSel pos em = nodeSel
+    let NodeStrSel pos = nodeSel
     guard (pos > 0)
     let pos' = pos - 1
     let (before, after) = Text.splitAt pos' str
         str' = before <> Text.drop 1 after
-    put $ Node (NodeStrSel pos' em) (ValueStr tyName str')
+    put $ Node (NodeStrSel pos') (ValueStr tyName str')
     setUndoFlag
 
 applyActionM (ActionDeleteCharForward path) =
   zoom (rstNode . atPath path) $ do
     Node nodeSel (ValueStr tyName str) <- get
-    let NodeStrSel pos _ = nodeSel
+    let NodeStrSel pos = nodeSel
     guard (pos < Text.length str)
     let (before, after) = Text.splitAt pos str
         str' = before <> Text.drop 1 after
@@ -1374,18 +1371,18 @@ applyActionM (ActionDeleteCharForward path) =
 applyActionM (ActionMoveStrCursorBackward path) =
   zoom (rstNode . atPath path) $ do
     Node nodeSel (ValueStr tyName str) <- get
-    let NodeStrSel pos em = nodeSel
+    let NodeStrSel pos = nodeSel
     guard (pos > 0)
     let pos' = pos - 1
-    put $ Node (NodeStrSel pos' em) (ValueStr tyName str)
+    put $ Node (NodeStrSel pos') (ValueStr tyName str)
 
 applyActionM (ActionMoveStrCursorForward path) =
   zoom (rstNode . atPath path) $ do
     Node nodeSel (ValueStr tyName str) <- get
-    let NodeStrSel pos em = nodeSel
+    let NodeStrSel pos = nodeSel
     guard (pos < Text.length str)
     let pos' = pos + 1
-    put $ Node (NodeStrSel pos' em) (ValueStr tyName str)
+    put $ Node (NodeStrSel pos') (ValueStr tyName str)
 
 applyActionM (ActionAppendSeqItem path) = do
   path' <- maybeA (pathParent path)
@@ -1404,16 +1401,15 @@ applyActionM (ActionAppendSeqItem path) = do
 applyActionM (ActionInsertLetter path c) =
   zoom (rstNode . atPath path) $ do
     Node nodeSel (ValueStr tyName str) <- get
-    let NodeStrSel pos editMode = nodeSel
-    guard editMode
+    let NodeStrSel pos = nodeSel
     let (before, after) = Text.splitAt pos str
         str' = before <> Text.singleton c <> after
         pos' = pos + 1
-    put $ Node (NodeStrSel pos' editMode) (ValueStr tyName str')
+    put $ Node (NodeStrSel pos') (ValueStr tyName str')
     setUndoFlag
 
 applyActionM (ActionSelectParent path) = do
-  rstStackVis .= StackHidden
+  rstMode %= quitStackMode
   path' <- maybeA (pathParent path)
   zoom (rstNode . atPath path') $ do
     Node nodeSel value <- get
@@ -1421,14 +1417,14 @@ applyActionM (ActionSelectParent path) = do
     put $ Node nodeSel' value
 
 applyActionM (ActionSelectChild path) = do
-  rstStackVis .= StackHidden
+  rstMode %= quitStackMode
   zoom (rstNode . atPath path) $ do
     Node nodeSel value <- get
     nodeSel' <- maybeA (toNodeSelChild nodeSel)
     put $ Node nodeSel' value
 
 applyActionM (ActionSelectSiblingBackward path) = do
-  rstStackVis .= StackHidden
+  rstMode %= quitStackMode
   path' <- maybeA (pathParent path)
   zoom rstNode $ zoomPathPrefix path' $ do
     Node nodeSel value <- get
@@ -1451,7 +1447,7 @@ applyActionM (ActionSelectSiblingBackward path) = do
     put $ Node nodeSel' value
 
 applyActionM (ActionSelectSiblingForward path) = do
-  rstStackVis .= StackHidden
+  rstMode %= quitStackMode
   path' <- maybeA (pathParent path)
   zoom rstNode $ zoomPathPrefix path' $ do
     Node nodeSel value <- get
@@ -1474,45 +1470,41 @@ applyActionM (ActionSelectSiblingForward path) = do
     put $ Node nodeSel' value
 
 applyActionM ActionActivateJumptags = do
-  jumptags <- view rctxJumptags
-  rstActiveJumptags .= List.zip jumptagLabels jumptags
-
-applyActionM ActionDeactivateJumptags = do
-  rstActiveJumptags .= []
+  Just jumptags <- views rctxJumptags nonEmpty
+  rstMode .= ModeJump (NonEmpty.zip jumptagLabels jumptags)
 
 applyActionM (ActionJumptagLookup c) = do
-  activeJumptags <- use rstActiveJumptags
-  let activeJumptags' =
-        List.map (\(_, jt) -> jt) $
-        List.filter (\(c', _) -> c == c') $
-        activeJumptags
+  ModeJump activeJumptags <- use rstMode
+  activeJumptags' <-
+    maybeA $
+    nonEmpty $
+    List.map (\(_, jt) -> jt) $
+    NonEmpty.filter (\(c', _) -> c == c') $
+    activeJumptags
   case activeJumptags' of
-    [] -> A.empty
-    [Jumptag _ path] -> do
+    Jumptag _ path :| [] -> do
       rstNode %= setPathNode path
-      rstActiveJumptags .= []
-    jumptags -> rstActiveJumptags .= List.zip jumptagLabels jumptags
+      rstMode .= ModeNormal
+    jumptags -> rstMode .= ModeJump (NonEmpty.zip jumptagLabels jumptags)
 
-applyActionM ActionStartMotion = do
-  rstMotion .= Just (Motion "")
+applyActionM (ActionStartMotion fromEditMode) =
+  rstMode .= ModeMotion fromEditMode ""
 
 applyActionM (ActionAppendMotion c) = do
   guard (not (Char.isSpace c))
-  Just (Motion s) <- use rstMotion
-  let motion' = Motion (s <> Text.singleton c)
-  rstMotion .= Just motion'
+  ModeMotion fromEditMode s <- use rstMode
+  rstMode .= ModeMotion fromEditMode (s <> Text.singleton c)
 
 applyActionM (ActionCommitMotion path) = do
-  Just motion <- use rstMotion
-  rstMotion .= Nothing
+  ModeMotion fromEditMode motion <- use rstMode
+  rstMode .= ModeNormal
   alwaysSucceed $ case motion of
-    Motion "" -> do
+    "" -> do
       -- Enter/Exit edit mode with Space.
-      -- Use Shift-Space to enter a space character.
-      zoom (rstNode . atPath path) $ do
-        Node nodeSel value@(ValueStr _ _) <- get
-        let NodeStrSel pos em = nodeSel
-        put $ Node (NodeStrSel pos (not em)) value
+      Monoid.First (Just (Node _ (ValueStr _ _))) <-
+        use (rstNode . atPath path . to (Monoid.First . Just))
+      unless fromEditMode $
+        rstMode .= ModeEdit
     (insertSeqMotion -> Just n) ->
       popSwapNode path (defaultSeqNode n)
     _ -> do
@@ -1532,11 +1524,11 @@ popSwapNode path n = do
         Hole -> return []
         Node{} -> return [node]
   forM_ nodes $ \node -> do
-    rstStackVis .= StackVisible
+    rstMode .= ModeStack
     rstStack %= (node:)
 
-jumptagLabels :: [Char]
-jumptagLabels = List.cycle "aoeuhtnspcrjm"
+jumptagLabels :: NonEmpty Char
+jumptagLabels = NonEmpty.fromList (List.cycle "aoeuhtnspcrjm")
     -- Dvorak-friendly, should be configurable.
 
 rotate :: [a] -> [a]
@@ -1584,8 +1576,8 @@ zoomPathPrefix p m =
     Just (ps, p') ->
       zoom (atPathSegment ps) (zoomPathPrefix p' m) <|> m
 
-matchMotion :: Motion -> TyName -> Bool
-matchMotion (Motion motionStr) (TyName tyName) =
+matchMotion :: Text -> TyName -> Bool
+matchMotion motionStr (TyName tyName) =
   let
     tyNameParts =
       List.map (Text.pack . List.map letterToChar . NonEmpty.toList) $
@@ -1597,12 +1589,12 @@ matchMotion (Motion motionStr) (TyName tyName) =
   in
     List.all matchPart (List.zip motionParts tyNameParts)
 
-filterByMotion :: Motion -> [(TyName, a)] -> [a]
+filterByMotion :: Text -> [(TyName, a)] -> [a]
 filterByMotion motion =
   List.map snd . List.filter (matchMotion motion . fst)
 
-insertSeqMotion :: Motion -> Maybe Int
-insertSeqMotion (Motion s)
+insertSeqMotion :: Text -> Maybe Int
+insertSeqMotion s
   | Text.null s = Nothing
   | Text.all (==',') s = Just (Text.length s)
   | otherwise = Nothing
@@ -1628,7 +1620,7 @@ mkDefaultNodes schema recMoveMaps =
   where
     mkDefNode :: TyName -> Ty -> Node
     mkDefNode tyName = \case
-      TyStr _ -> Node (NodeStrSel 0 True) (ValueStr tyName "")
+      TyStr _ -> Node (NodeStrSel 0) (ValueStr tyName "")
       TyRec fieldTys ->
         let
           fields = HashMap.map (const Hole) fieldTys
@@ -1726,7 +1718,7 @@ fromParsedValue pluginInfo = go
     go (ParsedValue value) =
       Node (mkNodeSel value) (fmap go value)
     mkNodeSel (ValueStr _ str) =
-      NodeStrSel (Text.length str) False
+      NodeStrSel (Text.length str)
     mkNodeSel (ValueSeq items) =
       NodeSeqSel $
       if Seq.null items
