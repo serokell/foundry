@@ -8,6 +8,7 @@
 {-# LANGUAGE DeriveFunctor #-}
 {-# LANGUAGE OverloadedStrings #-}
 {-# LANGUAGE RankNTypes #-}
+{-# LANGUAGE ViewPatterns #-}
 {-# LANGUAGE TemplateHaskell #-}
 
 module Source.NewGen
@@ -1130,7 +1131,6 @@ data Action =
   ActionPopSwapStack Path |
   ActionRotateStack |
   ActionDropStack |
-  ActionEnterEditMode Path |
   ActionExitEditMode Path |
   ActionDeleteCharBackward Path |
   ActionDeleteCharForward Path |
@@ -1172,15 +1172,19 @@ getAction
     KeyPress [] KeyCode.Escape <- inputEvent
   = Just $ ActionDeactivateJumptags
 
+  -- Enter motion mode.
+  | Nothing <- motion,
+    KeyPress [] KeyCode.Space <- inputEvent
+  = return ActionStartMotion
+
   -- Append a letter to the motion.
   | Just _ <- motion,
     KeyPress mods keyCode <- inputEvent,
     Control `notElem` mods,
-    keyCode /= KeyCode.Space,
     Just c <- keyChar keyCode
   = Just $ ActionAppendMotion c
 
-  -- Append a letter to the motion.
+  -- Commit a motion.
   | Just _ <- motion,
     KeyRelease _ KeyCode.Space <- inputEvent
   = Just $ ActionCommitMotion selectionPath
@@ -1191,26 +1195,10 @@ getAction
     Just c <- keyChar keyCode
   = Just $ ActionJumptagLookup c
 
-  -- Enter edit mode.
-  | Just (SelectionTipLabeled tyName) <- selectionTip,
-    Just TyStr <- HashMap.lookup tyName schemaTypes,
-    Nothing <- selectionStrPos,
-    KeyPress [] keyCode <- inputEvent,
-    keyLetter 'i' keyCode
-  = Just $ ActionEnterEditMode selectionPath
-
   -- Exit edit mode.
   | Just (SelectionTipLabeled tyName) <- selectionTip,
     Just TyStr <- HashMap.lookup tyName schemaTypes,
     KeyPress [] KeyCode.Escape <- inputEvent
-  = Just $ ActionExitEditMode selectionPath
-
-  -- Exit edit mode with Space.
-  -- Use Shift-Space to enter a space character.
-  | Just (SelectionTipLabeled tyName) <- selectionTip,
-    Just TyStr <- HashMap.lookup tyName schemaTypes,
-    Just _ <- selectionStrPos,
-    KeyPress [] KeyCode.Space <- inputEvent
   = Just $ ActionExitEditMode selectionPath
 
   -- Delete character backward.
@@ -1305,11 +1293,6 @@ getAction
       WritingDirectionLTR -> ActionSelectSiblingForward selectionPath
       WritingDirectionRTL -> ActionSelectSiblingBackward selectionPath
 
-  -- Enter motion mode.
-  | Nothing <- motion,
-    KeyPress [] KeyCode.Space <- inputEvent
-  = return ActionStartMotion
-
   | otherwise
   = Nothing
 
@@ -1356,12 +1339,6 @@ applyActionM ActionRotateStack = do
 
 applyActionM ActionDropStack = do
   rstStack %= List.drop 1
-
-applyActionM (ActionEnterEditMode path) =
-  zoom (rstNode . atPath path) $ do
-    Node nodeSel (ValueStr tyName str) <- get
-    let NodeStrSel pos _ = nodeSel
-    put $ Node (NodeStrSel pos True) (ValueStr tyName str)
 
 applyActionM (ActionExitEditMode path) =
   zoom (rstNode . atPath path) $ do
@@ -1516,6 +1493,7 @@ applyActionM ActionStartMotion = do
   rstMotion .= Just (Motion "")
 
 applyActionM (ActionAppendMotion c) = do
+  guard (not (Char.isSpace c))
   Just (Motion s) <- use rstMotion
   let motion' = Motion (s <> Text.singleton c)
   rstMotion .= Just motion'
@@ -1523,13 +1501,27 @@ applyActionM (ActionAppendMotion c) = do
 applyActionM (ActionCommitMotion path) = do
   Just motion <- use rstMotion
   rstMotion .= Nothing
-  defaultNodes <- view rctxDefaultNodes
-  let nodes
-        | Just n <- insertSeqMotion motion = [defaultSeqNode n]
-        | otherwise = filterByMotion motion (HashMap.toList defaultNodes)
-  case nodes of
-    [n] -> popSwapNode path n
-    _ -> return ()
+  case motion of
+    Motion "" -> do
+      -- Enter/Exit edit mode with Space.
+      -- Use Shift-Space to enter a space character.
+      zoom (rstNode . atPath path) $ do
+        Node nodeSel value <- get
+        case value of
+          ValueStr _ _ -> do
+            let NodeStrSel pos em = nodeSel
+            put $ Node (NodeStrSel pos (not em)) value
+          _ -> return ()
+    (insertSeqMotion -> Just n) ->
+      popSwapNode path (defaultSeqNode n)
+    _ -> do
+      defaultNodes <- view rctxDefaultNodes
+      let nodes
+            | Just n <- insertSeqMotion motion = [defaultSeqNode n]
+            | otherwise = filterByMotion motion (HashMap.toList defaultNodes)
+      case nodes of
+        [n] -> popSwapNode path n
+        _ -> return ()
 
 popSwapNode :: Path -> Node -> ReactM ReactState
 popSwapNode path n = do
