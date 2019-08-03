@@ -1232,10 +1232,6 @@ getAction
     KeyPress [] KeyCode.ArrowRight <- inputEvent
   = Just $ ActionMoveStrCursorForward selectionPath
 
-  | KeyPress [] keyCode <- inputEvent,
-    keyLetter ',' keyCode
-  = Just $ ActionAppendSeqItem selectionPath
-
   -- Insert letter.
   | Just (SelectionTipLabeled tyName) <- selectionTip,
     Just (TyStr _) <- HashMap.lookup tyName schemaTypes,
@@ -1244,6 +1240,11 @@ getAction
     Control `notElem` mods,
     Just c <- keyChar keyCode
   = Just $ ActionInsertLetter selectionPath c
+
+  -- Append a list item.
+  | KeyPress [] keyCode <- inputEvent,
+    keyLetter ',' keyCode
+  = Just $ ActionAppendSeqItem selectionPath
 
   -- Drop a node from the stack.
   | StackVisible <- stkVis,
