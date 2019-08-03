@@ -43,7 +43,7 @@ library
                        -caf-all
 
 executable foundry
-  main-is:             Main.hs
+  main-is:             Foundry.hs
 
   build-depends:       base, unordered-containers, megaparsec, regex-applicative,
                        sdam, foundry
