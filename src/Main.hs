@@ -4,11 +4,15 @@
 
 module Main where
 
+import Control.Monad (void)
 import qualified Data.HashMap.Strict as HashMap
 import Data.HashMap.Strict (HashMap)
 import System.Exit (die)
 import System.Environment (getArgs)
 import Text.Megaparsec as Megaparsec
+import Text.Regex.Applicative as RE
+import Data.Char as Char
+import Data.List as List
 
 import Sdam.Parser (pValue, parse)
 import Source.NewGen
@@ -38,8 +42,8 @@ foundrySchema =
   Schema
     { schemaTypes =
         HashMap.fromList
-          [ ("Nat", TyStr),
-            ("Var", TyStr),
+          [ ("Nat", tyNat),
+            ("Var", tyVar),
             ("IVar", tyIVar),
             ("Lam", tyLam),
             ("Pi", tyPi),
@@ -48,6 +52,28 @@ foundrySchema =
             ("Box", TyRec []) ]
     }
   where
+    tyNat = TyStr (void re)
+      where
+        re = RE.some (RE.psym Char.isDigit)
+    tyVar = TyStr (void re)
+      where
+        re = re_alphavar <|> re_op
+        re_fst =
+          RE.psym $ \c ->
+            Char.isLetter c ||
+            c == '_'
+        re_labelchar =
+          RE.psym $ \c ->
+            Char.isLetter c ||
+            Char.isDigit c ||
+            c == '_'
+        re_opchar =
+          RE.psym $ \c ->
+            c `List.elem` ("!#$%&*+./<=>?@^|-~" :: [Char])
+        re_alphavar =
+          re_fst *> RE.many re_labelchar
+        re_op =
+          RE.some re_opchar
     tyIVar =
       TyRec
         [ ("var", mkTyUnion ["Var"] Nothing),

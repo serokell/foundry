@@ -45,7 +45,7 @@ library
 executable foundry
   main-is:             Main.hs
 
-  build-depends:       base, unordered-containers, megaparsec,
+  build-depends:       base, unordered-containers, megaparsec, regex-applicative,
                        sdam, foundry
 
   hs-source-dirs:      src

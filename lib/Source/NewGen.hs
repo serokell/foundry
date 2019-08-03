@@ -1200,34 +1200,34 @@ getAction
 
   -- Exit edit mode.
   | Just (SelectionTipLabeled tyName) <- selectionTip,
-    Just TyStr <- HashMap.lookup tyName schemaTypes,
+    Just (TyStr _) <- HashMap.lookup tyName schemaTypes,
     KeyPress [] KeyCode.Escape <- inputEvent
   = Just $ ActionExitEditMode selectionPath
 
   -- Delete character backward.
   | Just (SelectionTipLabeled tyName) <- selectionTip,
-    Just TyStr <- HashMap.lookup tyName schemaTypes,
+    Just (TyStr _) <- HashMap.lookup tyName schemaTypes,
     Just _ <- selectionStrPos,
     KeyPress [] KeyCode.Backspace <- inputEvent
   = Just $ ActionDeleteCharBackward selectionPath
 
   -- Delete character forward.
   | Just (SelectionTipLabeled tyName) <- selectionTip,
-    Just TyStr <- HashMap.lookup tyName schemaTypes,
+    Just (TyStr _) <- HashMap.lookup tyName schemaTypes,
     Just _ <- selectionStrPos,
     KeyPress [] KeyCode.Delete <- inputEvent
   = Just $ ActionDeleteCharForward selectionPath
 
   -- Move string cursor backward.
   | Just (SelectionTipLabeled tyName) <- selectionTip,
-    Just TyStr <- HashMap.lookup tyName schemaTypes,
+    Just (TyStr _) <- HashMap.lookup tyName schemaTypes,
     Just _ <- selectionStrPos,
     KeyPress [] KeyCode.ArrowLeft <- inputEvent
   = Just $ ActionMoveStrCursorBackward selectionPath
 
   -- Move string cursor forward.
   | Just (SelectionTipLabeled tyName) <- selectionTip,
-    Just TyStr <- HashMap.lookup tyName schemaTypes,
+    Just (TyStr _) <- HashMap.lookup tyName schemaTypes,
     Just _ <- selectionStrPos,
     KeyPress [] KeyCode.ArrowRight <- inputEvent
   = Just $ ActionMoveStrCursorForward selectionPath
@@ -1238,7 +1238,7 @@ getAction
 
   -- Insert letter.
   | Just (SelectionTipLabeled tyName) <- selectionTip,
-    Just TyStr <- HashMap.lookup tyName schemaTypes,
+    Just (TyStr _) <- HashMap.lookup tyName schemaTypes,
     Just _ <- selectionStrPos,
     KeyPress mods keyCode <- inputEvent,
     Control `notElem` mods,
@@ -1627,7 +1627,7 @@ mkDefaultNodes schema recMoveMaps =
   where
     mkDefNode :: TyName -> Ty -> Node
     mkDefNode tyName = \case
-      TyStr -> Node (NodeStrSel 0 True) (ValueStr tyName "")
+      TyStr _ -> Node (NodeStrSel 0 True) (ValueStr tyName "")
       TyRec fieldTys ->
         let
           fields = HashMap.map (const Hole) fieldTys
