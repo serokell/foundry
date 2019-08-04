@@ -5,7 +5,6 @@
 module Main where
 
 import Control.Monad (void)
-import qualified Data.HashMap.Strict as HashMap
 import Data.HashMap.Strict (HashMap)
 import System.Exit (die)
 import System.Environment (getArgs)
@@ -41,100 +40,107 @@ haskSchema :: Schema
 haskSchema =
   Schema
     { schemaTypes =
-        HashMap.fromList
-          [ ("Mod", tyMod),
-            ("Var", tyVar),
-            ("Str", tyStr),
-            ("Lam", tyLam),
-            ("App", tyApp),
-            ("QVar", tyQVar),
-            ("Sig", tySig),
-            ("Bind", tyBind),
-            ("Data", tyData)
-          ]
+        [
+          "Mod"  ==> tMod,
+          "Var"  ==> tVar,
+          "Str"  ==> tStr,
+          "Lam"  ==> tLam,
+          "App"  ==> tApp,
+          "QVar" ==> tQVar,
+          "Sig"  ==> tSig,
+          "Bind" ==> tBind,
+          "Data" ==> tData
+        ]
     }
   where
-    tyVar = TyStr (void re)
-      where
-        re = re_alphavar <|> re_op
-        re_fst =
-          RE.psym $ \c ->
-            Char.isLetter c ||
-            c == '_'
-        re_labelchar =
-          RE.psym $ \c ->
-            Char.isLetter c ||
-            Char.isDigit c ||
-            c == '_'
-        re_opchar =
-          RE.psym $ \c ->
-            c `List.elem` ("!#$%&*+./<=>?@^|-~" :: [Char])
-        re_alphavar =
-          re_fst *> RE.many re_labelchar
-        re_op =
-          RE.some re_opchar
-    tyStr = TyStr (void (RE.many RE.anySym))
-    tyQVar =
-      TyRec
-        [ ("q", mkTyUnion ["Var"] Nothing),
-          ("v", mkTyUnion ["Var", "QVar"] Nothing) ]
-    tyMod =
-      TyRec
-        [ ("name", mkTyUnion ["Var", "QVar"] Nothing),
-          ("ex", mkTyUnion [] (Just (mkTyUnion ["Var"] Nothing))),
-          ("ds", mkTyUnion [] (Just tyDecl)) ]
-    tyLam =
-      TyRec
-        [ ("v", mkTyUnion ["Var"] Nothing),
-          ("b", tyExpr) ]
-    tyApp =
-      TyRec
-        [ ("f", tyExpr),
-          ("a", tyExpr) ]
-    tySig =
-      TyRec
-        [ ("v", mkTyUnion ["Var"] Nothing),
-          ("t", tyExpr) ]
-    tyBind =
-      TyRec
-        [ ("v", mkTyUnion ["Var"] Nothing),
-          ("b", tyExpr) ]
-    tyData =
-      TyRec
-        [ ("v", mkTyUnion ["Var"] Nothing),
-          ("alts", mkTyUnion [] (Just tyExpr)) ]
-    tyExpr =
-      mkTyUnion
-        [ "Lam",
-          "App",
-          "Str",
-          "Var",
-          "QVar" ]
-        Nothing
-    tyDecl =
-      mkTyUnion
-        [ "Sig",
-          "Bind",
-          "Data" ]
-        Nothing
+    tVar = TyStr (void re) where
+      re = re_alphavar <|> re_op
+      re_fst =
+        RE.psym $ \c ->
+          Char.isLetter c ||
+          c == '_'
+      re_labelchar =
+        RE.psym $ \c ->
+          Char.isLetter c ||
+          Char.isDigit c ||
+          c == '_'
+      re_opchar =
+        RE.psym $ \c ->
+          c `List.elem` ("!#$%&*+./<=>?@^|-~" :: [Char])
+      re_alphavar =
+        re_fst *> RE.many re_labelchar
+      re_op =
+        RE.some re_opchar
+    tStr = TyStr (void (RE.many RE.anySym))
+    tQVar =
+      TyRec [
+        "q" ==> uT "Var",
+        "v" ==> uT "Var" <> uT "QVar"
+      ]
+    tMod =
+      TyRec [
+        "name" ==> uT "Var" <> uT "QVar",
+        "ex"   ==> uSeq (uT "Var"),
+        "ds"   ==> uSeq uDecl
+      ]
+    tLam =
+      TyRec [
+        "v" ==> uT "Var",
+        "b" ==> uExpr
+      ]
+    tApp =
+      TyRec [
+        "f" ==> uExpr,
+        "a" ==> uExpr
+      ]
+    tSig =
+      TyRec [
+        "v" ==> uT "Var",
+        "t" ==> uExpr
+      ]
+    tBind =
+      TyRec [
+        "v" ==> uT "Var",
+        "b" ==> uExpr
+      ]
+    tData =
+      TyRec [
+        "v"    ==> uT "Var",
+        "alts" ==> uSeq uExpr
+      ]
+    uExpr =
+      mconcat [
+        uT "Lam",
+        uT "App",
+        uT "Str",
+        uT "Var",
+        uT "QVar"
+      ]
+    uDecl =
+      mconcat [
+        uT "Sig",
+        uT "Bind",
+        uT "Data"
+      ]
 
 haskRecLayouts :: HashMap TyName ALayoutFn
 haskRecLayouts = recLayouts
   where
-    recLayouts = HashMap.fromList
-      [ ("Lam", recLayoutLam),
-        ("App", recLayoutApp),
-        ("Mod", recLayoutMod),
-        ("QVar", recLayoutQVar),
-        ("Sig", recLayoutSig),
-        ("Bind", recLayoutBind),
-        ("Data", recLayoutData)
+    recLayouts =
+      [
+        "Lam"  ==> recLayoutLam,
+        "App"  ==> recLayoutApp,
+        "Mod"  ==> recLayoutMod,
+        "QVar" ==> recLayoutQVar,
+        "Sig"  ==> recLayoutSig,
+        "Bind" ==> recLayoutBind,
+        "Data" ==> recLayoutData
       ]
     recLayoutQVar =
       field "q" noPrec <> "." <> field "v" precAllowAll
     recLayoutApp =
-     field "f" (precAllow ["App"]) <>
-     field "a" (precAllow ["Var", "QVar"])
+      field "f" (precAllow ["App"]) <>
+      field "a" (precAllow ["Var", "QVar"])
     recLayoutLam =
       jumptag "λ" <> field "v" precAllowAll
       `vsep` field "b" precAllowAll

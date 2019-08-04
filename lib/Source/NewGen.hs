@@ -21,7 +21,6 @@ module Source.NewGen
   Schema(..),
   Ty(..),
   TyUnion(..),
-  mkTyUnion,
 
   -- * Values
   Node(..),
@@ -87,6 +86,11 @@ module Source.NewGen
   PluginInfo,
   mkPluginInfo,
 
+  -- * Schema EDSL
+  uT,
+  uSeq,
+  (==>),
+
   -- * Utils
   inj,
   nothing,
@@ -137,9 +141,6 @@ import Sdam.Core
 import Sdam.Name
 import Sdam.Validator
 import Sdam.Parser
-
-mkTyUnion :: [TyName] -> Maybe TyUnion -> TyUnion
-mkTyUnion xs = TyUnion (HashSet.fromList xs)
 
 --------------------------------------------------------------------------------
 -- Values
@@ -1806,3 +1807,19 @@ fromParsedValue pluginInfo = go
         [] -> RecSel0
         fieldName:_ -> RecSel fieldName (SelSelf (Collapsed False))
     recMoveMaps = pluginInfoRecMoveMaps pluginInfo
+
+
+--------------------------------------------------------------------------------
+---- Schema EDSL
+--------------------------------------------------------------------------------
+
+uT :: TyName -> TyUnion
+uT t = TyUnion (HashSet.singleton t) Nothing
+
+uSeq :: TyUnion -> TyUnion
+uSeq u = TyUnion HashSet.empty (Just u)
+
+(==>) :: a -> b -> (a, b)
+(==>) = (,)
+
+infix 0 ==>

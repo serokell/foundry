@@ -41,15 +41,16 @@ foundrySchema :: Schema
 foundrySchema =
   Schema
     { schemaTypes =
-        HashMap.fromList
-          [ ("Nat", tyNat),
-            ("Var", tyVar),
-            ("IVar", tyIVar),
-            ("Lam", tyLam),
-            ("Pi", tyPi),
-            ("App", tyApp),
-            ("Star", TyRec []),
-            ("Box", TyRec []) ]
+        [
+          "Nat"  ==> tyNat,
+          "Var"  ==> tyVar,
+          "IVar" ==> tyIVar,
+          "Lam"  ==> tyLam,
+          "Pi"   ==> tyPi,
+          "App"  ==> tyApp,
+          "Star" ==> TyRec [],
+          "Box"  ==> TyRec []
+        ]
     }
   where
     tyNat = TyStr (void re)
@@ -75,44 +76,50 @@ foundrySchema =
         re_op =
           RE.some re_opchar
     tyIVar =
-      TyRec
-        [ ("var", mkTyUnion ["Var"] Nothing),
-          ("index", mkTyUnion ["Nat"] Nothing) ]
+      TyRec [
+        "var"   ==> uT "Var",
+        "index" ==> uT "Nat"
+      ]
     tyLam =
-      TyRec
-        [ ("var", mkTyUnion ["Var"] Nothing),
-          ("ty", tyExpr),
-          ("body", tyExpr) ]
+      TyRec [
+        "var"  ==> uT "Var",
+        "ty"   ==> tyExpr,
+        "body" ==> tyExpr
+      ]
     tyPi =
-      TyRec
-        [ ("var", mkTyUnion ["Var"] Nothing),
-          ("ty", tyExpr),
-          ("body", tyExpr) ]
+      TyRec [
+        "var"  ==> uT "Var",
+        "ty"   ==> tyExpr,
+        "body" ==> tyExpr
+      ]
     tyApp =
-      TyRec
-        [ ("fn", tyExpr),
-          ("arg", tyExpr) ]
+      TyRec [
+        "fn"  ==> tyExpr,
+        "arg" ==> tyExpr
+      ]
     tyExpr =
-      mkTyUnion
-        [ "Lam",
-          "Pi",
-          "App",
-          "Star",
-          "Box",
-          "Var",
-          "IVar" ]
-        Nothing
+      mconcat [
+        uT "Lam",
+        uT "Pi",
+        uT "App",
+        uT "Star",
+        uT "Box",
+        uT "Var",
+        uT "IVar"
+      ]
 
 foundryRecLayouts :: HashMap TyName ALayoutFn
 foundryRecLayouts = recLayouts
   where
-    recLayouts = HashMap.fromList
-      [ ("Lam", recLayoutLam),
-        ("Pi", recLayoutPi),
-        ("App", recLayoutApp),
-        ("Star", jumptag "★"),
-        ("Box", jumptag "□"),
-        ("IVar", recLayoutIVar) ]
+    recLayouts =
+      [
+        "Lam"  ==> recLayoutLam,
+        "Pi"   ==> recLayoutPi,
+        "App"  ==> recLayoutApp,
+        "Star" ==> jumptag "★",
+        "Box"  ==> jumptag "□",
+        "IVar" ==> recLayoutIVar
+      ]
     precAll = precAllow (HashMap.keysSet recLayouts)
     precAtoms = ["Star", "Box"]
     prec ss = precAllow (ss <> precAtoms)
