@@ -658,7 +658,7 @@ redrawUI pluginInfo viewport es =
         }
     schema = pluginInfoSchema pluginInfo
     pointer = es ^. esPointer
-    infoBarLayout = layoutInfoBar es
+    (infoBarColor, infoBarLayout) = layoutInfoBar es
     stackLayout = layoutNodeStack schema lctx (es ^. esStack)
     mainLayout = layoutMainExpr schema lctx (es ^. esExpr)
     hOff :: Collage n a -> Integer
@@ -677,7 +677,7 @@ redrawUI pluginInfo viewport es =
       rect nothing dark1 (lctx ^. lctxViewport)
     ((), barBackgroundRdr) =
       foldCairoCollage offsetZero $
-      rect nothing selectionBorderColor $
+      rect nothing (inj infoBarColor) $
       Extents (extentsW (lctx ^. lctxViewport)) (heightOf infoBarLayout)
     ((Find findPath, findZone, jumptags'), mainRdr) =
       foldCairoCollage mainOffset mainLayout
@@ -735,10 +735,17 @@ layoutNodeStack schema lctx nodes =
 layoutInfoBar ::
   Monoid n =>
   EditorState ->
-  Collage n El
+  (Color, Collage n El)
 layoutInfoBar es =
-  mapCollageAnnotation (const mempty) $
-  textWithoutCursor (pprSelection (selectionOfEditorState es))
+  case es ^. esMode of
+    ModeMotion _ s ->
+      (motionBorderColor,
+       mapCollageAnnotation (const mempty) $
+       textWithoutCursor s)
+    _ ->
+      (selectionBorderColor,
+        mapCollageAnnotation (const mempty) $
+        textWithoutCursor (pprSelection (selectionOfEditorState es)))
 
 pprSelection :: Selection -> Text
 pprSelection selection = Text.pack (goPath selectionPath "")
