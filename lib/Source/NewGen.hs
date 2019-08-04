@@ -88,7 +88,8 @@ module Source.NewGen
 
   -- * Schema EDSL
   uT,
-  uSeq,
+  uS,
+  uS',
   (==>),
 
   -- * Utils
@@ -1861,10 +1862,13 @@ fromParsedValue pluginInfo = go
 --------------------------------------------------------------------------------
 
 uT :: TyName -> TyUnion
-uT t = TyUnion (HashSet.singleton t) Nothing
+uT = tyUnionSingleton
 
-uSeq :: TyUnion -> TyUnion
-uSeq u = TyUnion HashSet.empty (Just u)
+uS :: TyUnion -> TyUnion
+uS = tyUnionSequence
+
+uS' :: TyUnion -> TyUnion
+uS' = tyUnionRecursiveSequence
 
 (==>) :: a -> b -> (a, b)
 (==>) = (,)

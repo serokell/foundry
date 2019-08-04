@@ -80,8 +80,8 @@ haskSchema =
     tMod =
       TyRec [
         "name" ==> uT "Var" <> uT "QVar",
-        "ex"   ==> uSeq (uT "Var"),
-        "ds"   ==> uSeq uDecl
+        "ex"   ==> uS' (uT "Var"),
+        "ds"   ==> uS' uDecl
       ]
     tLam =
       TyRec [
@@ -106,7 +106,7 @@ haskSchema =
     tData =
       TyRec [
         "v"    ==> uT "Var",
-        "alts" ==> uSeq uExpr
+        "alts" ==> uS uExpr
       ]
     uExpr =
       mconcat [
