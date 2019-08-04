@@ -156,13 +156,25 @@ data RecSel =
   -- for records without children
   RecSel0 |
   -- for records with children
-  RecSel FieldName Bool   -- True = child selected
+  RecSel FieldName SelStatus
 
 data SeqSel =
   -- for empty sequences
   SeqSel0 |
   -- for non-empty sequences
-  SeqSel Index Bool   -- True = child selected
+  SeqSel Index SelStatus
+
+-- The node can be in one of there states:
+--
+-- * Self-selection, collapsed.
+-- * Self-selection, not collapsed.
+-- * Child selection.
+--
+-- Note that a node with a child selected cannot be collapsed.
+-- This way we can be certain that the selected node is visible.
+data SelStatus = SelSelf Collapsed | SelChild
+
+newtype Collapsed = Collapsed Bool
 
 --------------------------------------------------------------------------------
 ---- Validation
@@ -751,7 +763,20 @@ pprSelection selection = Text.pack (goPath selectionPath "")
 layoutNode :: LayoutCtx -> Node -> PrecPredicate -> (PrecUnenclosed, Collage Ann El)
 layoutNode lctx = \case
   Hole -> \_precPredicate -> layoutHole lctx
-  Node _ value -> layoutValue lctx value
+  Node nodeSel value ->
+    if isNodeCollapsed nodeSel
+    then \_precPredicate -> layoutCollapsed lctx
+    else layoutValue lctx value
+
+layoutCollapsed :: LayoutCtx -> (PrecUnenclosed, Collage Ann El)
+layoutCollapsed lctx =
+  (,) (mempty @PrecUnenclosed) $
+  layoutSel (BorderValid precBorder) path $
+  withJumptag path $
+  punct "…"
+  where
+    precBorder = PrecBorder (lctx ^. lctxPrecBordersAlways)
+    path = buildPath (lctx ^. lctxPath)
 
 layoutHole :: LayoutCtx -> (PrecUnenclosed, Collage Ann El)
 layoutHole lctx =
@@ -950,9 +975,9 @@ selectionOfNode = \case
     case seqSel of
       SeqSel0 ->
         Selection emptyPath (Just SelectionTipSeq) Nothing
-      SeqSel _ False ->
+      SeqSel _ (SelSelf _) ->
         Selection emptyPath (Just SelectionTipSeq) Nothing
-      SeqSel i True ->
+      SeqSel i SelChild ->
         let
           pathSegment = PathSegmentSeq i
           seqItem = Seq.index items (indexToInt i)
@@ -965,9 +990,9 @@ selectionOfNode = \case
     case recSel of
       RecSel0 ->
         Selection emptyPath (Just (SelectionTipLabeled tyName)) Nothing
-      RecSel _ False ->
+      RecSel _ (SelSelf _) ->
         Selection emptyPath (Just (SelectionTipLabeled tyName)) Nothing
-      RecSel fieldName True ->
+      RecSel fieldName SelChild ->
         let
           pathSegment = PathSegmentRec tyName fieldName
           recField = fields HashMap.! fieldName
@@ -1006,7 +1031,7 @@ updatePathNode path node = case node of
             let
               a' = updatePathNode path' a
               items' = Seq.update i' a' items
-              seqSel' = SeqSel i True
+              seqSel' = SeqSel i SelChild
             in
               Node (NodeSeqSel seqSel') (ValueSeq items')
   Node nodeSel (ValueRec tyName fields) ->
@@ -1024,28 +1049,33 @@ updatePathNode path node = case node of
             let
               a' = updatePathNode path' a
               fields' = HashMap.insert fieldName a' fields
-              recSel' = RecSel fieldName True
+              recSel' = RecSel fieldName SelChild
             in
               Node (NodeRecSel recSel') (ValueRec tyName fields')
 
 setPathNode :: Path -> Node -> Node
 setPathNode path node = updatePathNode path (resetPathNode node)
 
+toSelSelf :: SelStatus -> SelStatus
+toSelSelf SelChild = SelSelf (Collapsed False)
+toSelSelf selStatus@(SelSelf _collapsed) = selStatus
+
 toRecSelSelf :: RecSel -> RecSel
 toRecSelSelf RecSel0 = RecSel0
-toRecSelSelf (RecSel fieldName _) = RecSel fieldName False
+toRecSelSelf (RecSel fieldName selStatus) =
+  RecSel fieldName (toSelSelf selStatus)
 
 toRecSelChild :: RecSel -> Maybe RecSel
 toRecSelChild RecSel0 = Nothing
-toRecSelChild (RecSel fieldName _) = Just (RecSel fieldName True)
+toRecSelChild (RecSel fieldName _) = Just (RecSel fieldName SelChild)
 
 toSeqSelSelf :: SeqSel -> SeqSel
 toSeqSelSelf SeqSel0 = SeqSel0
-toSeqSelSelf (SeqSel i _) = SeqSel i False
+toSeqSelSelf (SeqSel i selStatus) = SeqSel i (toSelSelf selStatus)
 
 toSeqSelChild :: SeqSel -> Maybe SeqSel
 toSeqSelChild SeqSel0 = Nothing
-toSeqSelChild (SeqSel i _) = Just (SeqSel i True)
+toSeqSelChild (SeqSel i _) = Just (SeqSel i SelChild)
 
 toNodeSelSelf :: NodeSel -> Maybe NodeSel
 toNodeSelSelf (NodeRecSel recSel) = Just (NodeRecSel (toRecSelSelf recSel))
@@ -1056,6 +1086,32 @@ toNodeSelChild :: NodeSel -> Maybe NodeSel
 toNodeSelChild (NodeRecSel recSel) = NodeRecSel <$> toRecSelChild recSel
 toNodeSelChild (NodeSeqSel seqSel) = NodeSeqSel <$> toSeqSelChild seqSel
 toNodeSelChild (NodeStrSel _) = Nothing
+
+toggleNodeCollapse :: NodeSel -> Maybe NodeSel
+toggleNodeCollapse (NodeRecSel (RecSel fieldName selStatus)) =
+  toggleSelStatusCollapse selStatus <&> \selStatus' ->
+  NodeRecSel (RecSel fieldName selStatus')
+toggleNodeCollapse (NodeSeqSel (SeqSel i selStatus)) =
+  toggleSelStatusCollapse selStatus <&> \selStatus' ->
+  NodeSeqSel (SeqSel i selStatus')
+toggleNodeCollapse _ = Nothing
+
+toggleSelStatusCollapse :: SelStatus -> Maybe SelStatus
+toggleSelStatusCollapse SelChild = Nothing
+toggleSelStatusCollapse (SelSelf collapsed) =
+  Just (SelSelf (toggleCollapsed collapsed))
+
+toggleCollapsed :: Collapsed -> Collapsed
+toggleCollapsed (Collapsed c) = Collapsed (not c)
+
+isNodeCollapsed :: NodeSel -> Bool
+isNodeCollapsed (NodeRecSel (RecSel _ selStatus)) = isSelStatusCollapsed selStatus
+isNodeCollapsed (NodeSeqSel (SeqSel _ selStatus)) = isSelStatusCollapsed selStatus
+isNodeCollapsed _ = False
+
+isSelStatusCollapsed :: SelStatus -> Bool
+isSelStatusCollapsed SelChild = False
+isSelStatusCollapsed (SelSelf (Collapsed c)) = c
 
 --------------------------------------------------------------------------------
 ---- Editor - React
@@ -1156,7 +1212,8 @@ data Action =
   ActionJumptagLookup Char |
   ActionStartMotion Bool |
   ActionAppendMotion Char |
-  ActionCommitMotion Path
+  ActionCommitMotion Path |
+  ActionToggleCollapse Path
 
 getAction ::
   Schema ->
@@ -1241,6 +1298,11 @@ getAction
     Control `notElem` mods,
     Just c <- keyChar keyCode
   = Just $ ActionInsertLetter selectionPath c
+
+  -- Toggle node collapse.
+  | KeyPress [] keyCode <- inputEvent,
+    keyLetter 'c' keyCode
+  = Just $ ActionToggleCollapse selectionPath
 
   -- Append a list item.
   | KeyPress [] keyCode <- inputEvent,
@@ -1389,11 +1451,11 @@ applyActionM (ActionAppendSeqItem path) = do
   zoom (rstNode . atPath path') $ do
     Node nodeSel (ValueSeq items) <- get
     let NodeSeqSel seqSel = nodeSel
-    SeqSel i True <- pure seqSel
+    SeqSel i SelChild <- pure seqSel
     let
       i' = indexToInt i + 1
       items' = Seq.insertAt i' Hole items
-      seqSel' = SeqSel (intToIndex i') True
+      seqSel' = SeqSel (intToIndex i') SelChild
       nodeSel' = NodeSeqSel seqSel'
       value' = ValueSeq items'
     put $ Node nodeSel' value'
@@ -1423,6 +1485,13 @@ applyActionM (ActionSelectChild path) = do
     nodeSel' <- maybeA (toNodeSelChild nodeSel)
     put $ Node nodeSel' value
 
+applyActionM (ActionToggleCollapse path) = do
+  rstMode %= quitStackMode
+  zoom (rstNode . atPath path) $ do
+    Node nodeSel value <- get
+    nodeSel' <- maybeA (toggleNodeCollapse nodeSel)
+    put $ Node nodeSel' value
+
 applyActionM (ActionSelectSiblingBackward path) = do
   rstMode %= quitStackMode
   path' <- maybeA (pathParent path)
@@ -1431,17 +1500,17 @@ applyActionM (ActionSelectSiblingBackward path) = do
     nodeSel' <- case value of
       ValueRec tyName _ -> do
         let NodeRecSel recSel = nodeSel
-        RecSel fieldName True <- pure recSel
+        RecSel fieldName SelChild <- pure recSel
         recMoveMaps <- view rctxRecMoveMaps
         let moveMap = rmmBackward (recMoveMaps HashMap.! tyName)
         fieldName' <- maybeA (HashMap.lookup fieldName moveMap)
-        let recSel' = RecSel fieldName' True
+        let recSel' = RecSel fieldName' SelChild
         return (NodeRecSel recSel')
       ValueSeq _ -> do
         let NodeSeqSel seqSel = nodeSel
-        SeqSel i True <- pure seqSel
+        SeqSel i SelChild <- pure seqSel
         i' <- maybeA (indexPred i)
-        let seqSel' = SeqSel i' True
+        let seqSel' = SeqSel i' SelChild
         return (NodeSeqSel seqSel')
       _ -> A.empty
     put $ Node nodeSel' value
@@ -1454,17 +1523,17 @@ applyActionM (ActionSelectSiblingForward path) = do
     nodeSel' <- case value of
       ValueRec tyName _ -> do
         let NodeRecSel recSel = nodeSel
-        RecSel fieldName True <- pure recSel
+        RecSel fieldName SelChild <- pure recSel
         recMoveMaps <- view rctxRecMoveMaps
         let moveMap = rmmForward (recMoveMaps HashMap.! tyName)
         fieldName' <- maybeA (HashMap.lookup fieldName moveMap)
-        let recSel' = RecSel fieldName' True
+        let recSel' = RecSel fieldName' SelChild
         return (NodeRecSel recSel')
       ValueSeq items -> do
         let NodeSeqSel seqSel = nodeSel
-        SeqSel i True <- pure seqSel
+        SeqSel i SelChild <- pure seqSel
         i' <- maybeA (indexSucc items i)
-        let seqSel' = SeqSel i' True
+        let seqSel' = SeqSel i' SelChild
         return (NodeSeqSel seqSel')
       _ -> A.empty
     put $ Node nodeSel' value
@@ -1608,7 +1677,7 @@ defaultSeqNode :: Int -> Node
 defaultSeqNode 0 =
   Node (NodeSeqSel SeqSel0) (ValueSeq Seq.empty)
 defaultSeqNode n =
-  Node (NodeSeqSel (SeqSel (intToIndex 0) True))
+  Node (NodeSeqSel (SeqSel (intToIndex 0) SelChild))
     (ValueSeq (Seq.replicate n Hole))
 
 indexPred :: Index -> Maybe Index
@@ -1635,7 +1704,7 @@ mkDefaultNodes schema recMoveMaps =
           recSel =
             case rmmFieldOrder recMoveMap of
               [] -> RecSel0
-              fieldName:_ -> RecSel fieldName True
+              fieldName:_ -> RecSel fieldName SelChild
         in
           Node (NodeRecSel recSel) (ValueRec tyName fields)
 
@@ -1730,10 +1799,10 @@ fromParsedValue pluginInfo = go
       NodeSeqSel $
       if Seq.null items
       then SeqSel0
-      else SeqSel (intToIndex 0) False
+      else SeqSel (intToIndex 0) (SelSelf (Collapsed False))
     mkNodeSel (ValueRec tyName _) =
       NodeRecSel $
       case rmmFieldOrder (recMoveMaps HashMap.! tyName) of
         [] -> RecSel0
-        fieldName:_ -> RecSel fieldName False
+        fieldName:_ -> RecSel fieldName (SelSelf (Collapsed False))
     recMoveMaps = pluginInfoRecMoveMaps pluginInfo
