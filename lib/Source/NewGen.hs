@@ -382,19 +382,6 @@ renderJumptagLabel (c, Jumptag o _) =
   where
     label = Text.toUpper (Text.singleton c)
 
-renderMotion :: Text -> Paths -> FindZone -> CairoRender DrawCtx
-renderMotion motion Paths{pathsSelection} (Find findZone) =
-  case findZone (selectionPath pathsSelection) of
-    Nothing -> error "renderMotion: no selection"
-    Just (o, e) ->
-      getNoAnn $
-      foldCairoCollage o $
-      mapCollageAnnotation (const mempty) $
-      substrate 0 (rect nothing dark1') $
-      substrateMargin (outline 2 motionBorderColor . extentsMax e) $
-      collageWithMargin (Margin 4 4 4 4) $
-      (punct motion :: Collage Ann El)
-
 findPathInBox :: Path -> (Offset, Extents) -> FindPath
 findPathInBox p box =
   Find $ \point ->
@@ -531,11 +518,15 @@ alwaysSucceed f = f <|> pure ()
 ---- Editor
 --------------------------------------------------------------------------------
 
+data MotionAction =
+  MotionNoOp |
+  MotionPopSwap Node
+
 data Mode =
   ModeNormal |
   ModeStack |
   ModeJump (NonEmpty (Char, Jumptag)) |
-  ModeMotion Bool Text |
+  ModeMotion Bool Text MotionAction |
   ModeEdit
 
 quitStackMode :: Mode -> Mode
@@ -658,7 +649,7 @@ redrawUI pluginInfo viewport es =
         }
     schema = pluginInfoSchema pluginInfo
     pointer = es ^. esPointer
-    (infoBarColor, infoBarLayout) = layoutInfoBar es
+    infoBarLayout = layoutInfoBar lctx es
     stackLayout = layoutNodeStack schema lctx (es ^. esStack)
     mainLayout = layoutMainExpr schema lctx (es ^. esExpr)
     hOff :: Collage n a -> Integer
@@ -675,10 +666,6 @@ redrawUI pluginInfo viewport es =
     ((), backgroundRdr) =
       foldCairoCollage offsetZero $
       rect nothing dark1 (lctx ^. lctxViewport)
-    ((), barBackgroundRdr) =
-      foldCairoCollage offsetZero $
-      rect nothing (inj infoBarColor) $
-      Extents (extentsW (lctx ^. lctxViewport)) (heightOf infoBarLayout)
     ((Find findPath, findZone, jumptags'), mainRdr) =
       foldCairoCollage mainOffset mainLayout
     ((), stackRdr') =
@@ -693,7 +680,7 @@ redrawUI pluginInfo viewport es =
       ModeJump activeJumptags -> renderJumptagLabels activeJumptags
       _ -> mempty
     selectionOrMotionRdr = case es ^. esMode of
-      ModeMotion _ s -> renderMotion s paths findZone
+      ModeMotion _ _ action -> renderMotion lctx action paths findZone
       _ -> renderSelectionBorder paths findZone
     pathsCursor = findPath pointer
     pathsSelection = selectionOfEditorState es
@@ -706,9 +693,36 @@ redrawUI pluginInfo viewport es =
            <> renderHoverBorder paths findZone
            <> jumptagsRdr
            <> stackRdr
-           <> barBackgroundRdr
            <> infoBarRdr)
         (withDrawCtx paths cursorBlink)
+
+renderMotion ::
+  LayoutCtx ->
+  MotionAction ->
+  Paths ->
+  FindZone ->
+  CairoRender DrawCtx
+renderMotion lctx action Paths{pathsSelection} (Find findZone) =
+  case findZone (selectionPath pathsSelection) of
+    Nothing -> error "renderMotion: no selection"
+    Just (o, e) ->
+      getNoAnn $
+      foldCairoCollage o $
+      mapCollageAnnotation (const mempty) $
+      motionPreview e
+  where
+    motionPreview :: Extents -> Collage Ann El
+    motionPreview e =
+      case action of
+        MotionNoOp ->
+          substrateMargin (outline 2 motionBorderColor . extentsMax e) $
+          rect nothing nothing e
+        MotionPopSwap n ->
+          substrate 0 (rect nothing dark1') $
+          substrateMargin (outline 2 motionBorderColor . extentsMax e) $
+          collageWithMargin (Margin 4 4 4 4) $
+          snd (layoutNode lctx' n precAllowAll)
+    lctx' = lctx{ _lctxValidationResult = mempty }
 
 layoutMainExpr ::
   Schema ->
@@ -734,18 +748,23 @@ layoutNodeStack schema lctx nodes =
 
 layoutInfoBar ::
   Monoid n =>
+  LayoutCtx ->
   EditorState ->
-  (Color, Collage n El)
-layoutInfoBar es =
+  Collage n El
+layoutInfoBar lctx es =
   case es ^. esMode of
-    ModeMotion _ s ->
-      (motionBorderColor,
-       mapCollageAnnotation (const mempty) $
-       textWithoutCursor s)
+    ModeMotion _ s _ ->
+      mapCollageAnnotation (const mempty) $
+      substrate 0 (rect nothing motionBorderColor . extentsMax e) $
+      textWithoutCursor s
     _ ->
-      (selectionBorderColor,
-        mapCollageAnnotation (const mempty) $
-        textWithoutCursor (pprSelection (selectionOfEditorState es)))
+      mapCollageAnnotation (const mempty) $
+      substrate 0 (rect nothing selectionBorderColor . extentsMax e) $
+      textWithoutCursor (pprSelection (selectionOfEditorState es))
+  where
+    e = Extents
+      { extentsW = extentsW (lctx ^. lctxViewport),
+        extentsH = 15 }
 
 pprSelection :: Selection -> Text
 pprSelection selection = Text.pack (goPath selectionPath "")
@@ -1246,6 +1265,11 @@ getAction
     KeyPress [] KeyCode.Space <- inputEvent
   = return (ActionStartMotion False)
 
+  -- Enter motion mode from stack mode.
+  | ModeStack <- mode,
+    KeyPress [] KeyCode.Space <- inputEvent
+  = return (ActionStartMotion False)
+
   -- Enter motion mode from edit mode.
   -- Use Shift-Space to enter a space character.
   | ModeEdit <- mode,
@@ -1253,14 +1277,14 @@ getAction
   = return (ActionStartMotion True)
 
   -- Append a letter to the motion.
-  | ModeMotion _ _ <- mode,
+  | ModeMotion _ _ _ <- mode,
     KeyPress mods keyCode <- inputEvent,
     Control `notElem` mods,
     Just c <- keyChar keyCode
   = Just $ ActionAppendMotion c
 
   -- Commit a motion.
-  | ModeMotion _ _ <- mode,
+  | ModeMotion _ _ _ <- mode,
     KeyRelease _ KeyCode.Space <- inputEvent
   = Just $ ActionCommitMotion selectionPath
 
@@ -1564,34 +1588,50 @@ applyActionM (ActionJumptagLookup c) = do
       rstMode .= ModeNormal
     jumptags -> rstMode .= ModeJump (NonEmpty.zip jumptagLabels jumptags)
 
-applyActionM (ActionStartMotion fromEditMode) =
-  rstMode .= ModeMotion fromEditMode ""
+applyActionM (ActionStartMotion fromEditMode) = do
+  rctx <- ask
+  rstMode .= mkModeMotion rctx fromEditMode ""
 
 applyActionM (ActionAppendMotion c) = do
   guard (not (Char.isSpace c))
-  ModeMotion fromEditMode s <- use rstMode
-  rstMode .= ModeMotion fromEditMode (s <> Text.singleton c)
+  ModeMotion fromEditMode s _ <- use rstMode
+  rctx <- ask
+  rstMode .= mkModeMotion rctx fromEditMode (s <> Text.singleton c)
 
 applyActionM (ActionCommitMotion path) = do
-  ModeMotion fromEditMode motion <- use rstMode
+  ModeMotion fromEditMode _ action <- use rstMode
   rstMode .= ModeNormal
-  alwaysSucceed $ case motion of
-    "" -> do
+  alwaysSucceed $ case action of
+    MotionNoOp -> do
       -- Enter/Exit edit mode with Space.
       Monoid.First (Just (Node _ (ValueStr _ _))) <-
         use (rstNode . atPath path . to (Monoid.First . Just))
       unless fromEditMode $
         rstMode .= ModeEdit
-    (insertSeqMotion -> Just n) ->
-      popSwapNode path (defaultSeqNode n)
-    _ -> do
-      defaultNodes <- view rctxDefaultNodes
-      let nodes = filterByMotion motion (HashMap.toList defaultNodes)
-      [node] <- pure nodes
+    MotionPopSwap node -> do
       popSwapNode path node
       case node of
         Node _ (ValueStr _ _) -> rstMode .= ModeEdit
         _ -> return ()
+
+parseMotionAction :: ReactCtx -> Text -> MotionAction
+parseMotionAction rctx motion =
+  case motion of
+    "" -> MotionNoOp
+    (insertSeqMotion -> Just n) ->
+      MotionPopSwap (defaultSeqNode n)
+    _ ->
+      let
+        defaultNodes = rctx ^. rctxDefaultNodes
+        nodes = filterByMotion motion (HashMap.toList defaultNodes)
+      in
+        case nodes of
+          [node] -> MotionPopSwap node
+          _ -> MotionNoOp
+
+mkModeMotion :: ReactCtx -> Bool -> Text -> Mode
+mkModeMotion rctx fromEditMode motion =
+  ModeMotion fromEditMode motion (parseMotionAction rctx motion)
 
 popSwapNode :: Path -> Node -> ReactM ReactState
 popSwapNode path n = do
