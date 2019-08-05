@@ -124,13 +124,13 @@ foundryRecLayouts = recLayouts
     precAtoms = ["Star", "Box"]
     prec ss = precAllow (ss <> precAtoms)
     recLayoutApp =
-     field "fn" (prec ["App"]) <>
-     field "arg" (prec [])
+     field "fn" (prec ["App"]) "function" <>
+     field "arg" (prec []) "argument"
     recLayoutLam =
-      jumptag "λ" <> field "var" noPrec <> ":" <> field "ty" precAll
-      `vsep` field "body" precAll
+      jumptag "λ" <> field "var" noPrec "variable" <> ":" <> field "ty" precAll "type"
+      `vsep` field "body" precAll "body"
     recLayoutPi =
-      jumptag "Π" <> field "var" noPrec <> ":" <> field "ty" precAll
-      `vsep` field "body" precAll
+      jumptag "Π" <> field "var" noPrec "variable" <> ":" <> field "ty" precAll "type"
+      `vsep` field "body" precAll "body"
     recLayoutIVar =
-      field "var" noPrec <> jumptag "@" <> field "index" noPrec
+      field "var" noPrec "variable" <> jumptag "@" <> field "index" noPrec "index"

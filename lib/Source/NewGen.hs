@@ -111,6 +111,7 @@ import Data.Foldable as Foldable
 import Data.DList as DList
 import Data.Semigroup
 import Data.Monoid as Monoid
+import Data.Maybe
 import Control.Applicative as A
 import Control.Monad
 import Control.Monad.Reader
@@ -254,7 +255,7 @@ infixr 1 `vsep`
 
 class (IsString a, Semigroup a) => Layout a where
   vsep :: a -> a -> a
-  field :: FieldName -> PrecPredicate -> a
+  field :: FieldName -> PrecPredicate -> Text -> a
   jumptag :: a -> a
 
 noPrec :: PrecPredicate
@@ -300,13 +301,16 @@ instance Layout RecLayoutFn where
       in
         (,) (aUnenclosed <> bUnenclosed) $
         a' `f` line light1 maxWidth `f` b'
-  field fieldName precPredicate =
+  field fieldName precPredicate _ =
     RecLayoutFn $ \_ m _ ->
       (m HashMap.! fieldName) precPredicate
   jumptag (RecLayoutFn a) =
     RecLayoutFn $ \path m wd ->
       let (aUnenclosed, a') = a path m wd
       in  (aUnenclosed, withJumptag path a')
+
+getRecLayoutFn :: ALayoutFn -> RecLayoutFn
+getRecLayoutFn (ALayoutFn recLayoutFn) = recLayoutFn
 
 withJumptag :: Path -> Collage Ann El -> Collage Ann El
 withJumptag path =
@@ -326,8 +330,8 @@ instance Semigroup ALayoutFn where
 instance Layout ALayoutFn where
   ALayoutFn a `vsep` ALayoutFn b =
     ALayoutFn (a `vsep` b)
-  field fieldName precPredicate =
-    ALayoutFn (field fieldName precPredicate)
+  field fieldName precPredicate placeholder =
+    ALayoutFn (field fieldName precPredicate placeholder)
   jumptag (ALayoutFn a) = ALayoutFn (jumptag a)
 
 newtype Find a b = Find (a -> Maybe b)
@@ -577,6 +581,7 @@ data LayoutCtx =
       _lctxPrecBordersAlways :: Bool,
       _lctxEditMode :: Bool,
       _lctxRecLayouts :: HashMap TyName ALayoutFn,
+      _lctxPlaceholder :: Maybe Text,
       _lctxWritingDirection :: WritingDirection
     }
 
@@ -646,6 +651,7 @@ redrawUI pluginInfo viewport es =
           _lctxPrecBordersAlways = es ^. esPrecBordersAlways,
           _lctxEditMode = isEditMode (es ^. esMode),
           _lctxRecLayouts = pluginInfoRecLayouts pluginInfo,
+          _lctxPlaceholder = Nothing,
           _lctxWritingDirection = es ^. esWritingDirection
         }
     schema = pluginInfoSchema pluginInfo
@@ -811,8 +817,9 @@ layoutHole lctx =
   (,) (mempty @PrecUnenclosed) $
   layoutSel (BorderValid precBorder) path $
   withJumptag path $
-  punct "_"
+  hole (fromMaybe "" (lctx ^. lctxPlaceholder))
   where
+    hole t = textline dark2 ubuntuFont ("_" <> t) nothing
     precBorder = PrecBorder (lctx ^. lctxPrecBordersAlways)
     path = buildPath (lctx ^. lctxPath)
 
@@ -853,10 +860,11 @@ layoutStr lctx str =
       PrecBorder (Text.any Char.isSpace str)
     path = buildPath (lctx ^. lctxPath)
 
-lctxDescent :: PathSegment -> LayoutCtx -> LayoutCtx
-lctxDescent pathSegment lctx =
+lctxDescent :: PathSegment -> Maybe Text -> LayoutCtx -> LayoutCtx
+lctxDescent pathSegment placeholder lctx =
   lctx & lctxPath %~ (<> mkPathBuilder pathSegment)
        & lctxValidationResult %~ pathTrieLookup pathSegment
+       & lctxPlaceholder .~ placeholder
 
 layoutRec ::
   LayoutCtx ->
@@ -870,15 +878,18 @@ layoutRec lctx tyName fields precPredicate =
   collage
   where
     layoutFields :: RecLayoutFn
-    layoutFields =
+    fieldPlaceholder :: FieldName -> Maybe Text
+    (layoutFields, fieldPlaceholder) =
       case HashMap.lookup tyName (lctx ^. lctxRecLayouts) of
-        Nothing -> fromString (show tyName)
-        Just (ALayoutFn fn) -> fn
+        Nothing -> (fromString (show tyName), mempty)
+        Just fn -> (getRecLayoutFn fn, getFieldPlaceholder fn)
     drawnFields :: HashMap FieldName (PrecPredicate -> (PrecUnenclosed, Collage Ann El))
     drawnFields =
       HashMap.mapWithKey
         (\fieldName node ->
-          let lctx' = lctxDescent (PathSegmentRec tyName fieldName) lctx
+          let lctx' = lctxDescent (PathSegmentRec tyName fieldName)
+                                  (fieldPlaceholder fieldName)
+                                  lctx
           in layoutNode lctx' node)
         fields
     (precUnenclosed, collage) =
@@ -904,7 +915,7 @@ layoutSeq lctx items precPredicate =
     drawnItems =
       List.zipWith
         (\i node ->
-          let lctx' = lctxDescent (PathSegmentSeq i) lctx
+          let lctx' = lctxDescent (PathSegmentSeq i) (indexPlaceholder i) lctx
           in layoutNode lctx' node)
         (List.map intToIndex [0..])
         (Foldable.toList items)
@@ -1786,7 +1797,7 @@ instance Semigroup VisualFieldList where
 instance Layout VisualFieldList where
   VisualFieldList a `vsep` VisualFieldList b =
     VisualFieldList (a <> b)
-  field fieldName _ = VisualFieldList [fieldName]
+  field fieldName _ _ = VisualFieldList [fieldName]
   jumptag = id
 
 sortByVisualOrder :: ALayoutFn -> [FieldName]
@@ -1794,6 +1805,32 @@ sortByVisualOrder recLayoutFn = sortedFields
   where
     sortedFields :: [FieldName]
     ALayoutFn (VisualFieldList sortedFields) = recLayoutFn
+
+newtype FieldPlaceholders = FieldPlaceholders (HashMap FieldName Text)
+
+instance IsString FieldPlaceholders where
+  fromString _ = mempty
+
+instance Semigroup FieldPlaceholders where
+  FieldPlaceholders a <> FieldPlaceholders b =
+    FieldPlaceholders (a <> b)
+
+instance Monoid FieldPlaceholders where
+  mempty = FieldPlaceholders HashMap.empty
+
+instance Layout FieldPlaceholders where
+  FieldPlaceholders a `vsep` FieldPlaceholders b =
+    FieldPlaceholders (a <> b)
+  field fieldName _ placeholder = FieldPlaceholders (HashMap.singleton fieldName placeholder)
+  jumptag = id
+
+getFieldPlaceholder :: ALayoutFn -> FieldName -> Maybe Text
+getFieldPlaceholder (ALayoutFn (FieldPlaceholders m)) k =
+  HashMap.lookup k m
+
+indexPlaceholder :: Index -> Maybe Text
+indexPlaceholder i =
+  Just (Text.pack (show (indexToInt i)))
 
 --------------------------------------------------------------------------------
 ---- Plugin

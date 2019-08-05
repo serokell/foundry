@@ -137,19 +137,19 @@ haskRecLayouts = recLayouts
         "Data" ==> recLayoutData
       ]
     recLayoutQVar =
-      field "q" noPrec <> "." <> field "v" precAllowAll
+      field "q" noPrec "q" <> "." <> field "v" precAllowAll "v"
     recLayoutApp =
-      field "f" (precAllow ["App"]) <>
-      field "a" (precAllow ["Var", "QVar"])
+      field "f" (precAllow ["App"]) "function" <>
+      field "a" (precAllow ["Var", "QVar"]) "argument"
     recLayoutLam =
-      jumptag "λ" <> field "v" precAllowAll
-      `vsep` field "b" precAllowAll
+      jumptag "λ" <> field "v" precAllowAll "variable"
+      `vsep` field "b" precAllowAll "body"
     recLayoutMod =
-      jumptag "module" <> field "name" (precAllow ["Var", "QVar"]) <> field "ex" precAllowAll
-      `vsep` field "ds" precAllowAll
+      jumptag "module" <> field "name" (precAllow ["Var", "QVar"]) "name" <> field "ex" precAllowAll "export"
+      `vsep` field "ds" precAllowAll "declarations"
     recLayoutSig =
-      field "v" noPrec <> jumptag "::" <> field "t" precAllowAll
+      field "v" noPrec "variable" <> jumptag "::" <> field "t" precAllowAll "type"
     recLayoutBind =
-      field "v" noPrec <> jumptag "=" <> field "b" precAllowAll
+      field "v" noPrec "variable" <> jumptag "=" <> field "b" precAllowAll "body"
     recLayoutData =
-      jumptag "data" <> field "v" noPrec <> "=" <> field "alts" precAllowAll
+      jumptag "data" <> field "v" noPrec "name" <> "=" <> field "alts" precAllowAll "alternatives"
