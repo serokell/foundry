@@ -41,6 +41,7 @@ haskSchema =
   Schema
     { schemaTypes =
         [
+          "All" ==> TyDefnRec [],
           "Mod"  ==> TyDefnRec ["name", "ex", "ds"],
           "Var"  ==> TyDefnStr,
           "Str"  ==> TyDefnStr,
@@ -48,9 +49,12 @@ haskSchema =
           "App"  ==> TyDefnRec ["f", "a"],
           "QVar" ==> TyDefnRec ["q", "v"],
           "Sig"  ==> TyDefnRec ["v", "t"],
+          "AsPat" ==> TyDefnRec ["alias", "p"],
           "Bind" ==> TyDefnRec ["v", "b"],
           "Data" ==> TyDefnRec ["v", "alts"],
-          "As" ==> TyDefnRec ["alias", "p"]
+          "Import" ==> TyDefnRec ["module", "e"],
+          "Qualified" ==> TyDefnRec ["entities"],
+          "AsMod" ==> TyDefnRec ["module", "alias"]
         ],
       schemaRoot = tMod
     }
@@ -85,11 +89,14 @@ haskSchema =
         "q" ==> tVar,
         "v" ==> tVar <> tQVar
       ]
+    tAll =
+      uT "All" $
+      TyInstRec []
     tMod =
       uT "Mod" $
       TyInstRec [
         "name" ==> tVar <> tQVar,
-        "ex"   ==> uS' tVar,
+        "ex"   ==> tAll <> uS' tVar,
         "ds"   ==> uS' tDecl
       ]
     tLam =
@@ -152,8 +159,25 @@ haskSchema =
         "v"    ==> tVar,
         "alts" ==> uS tExpr
       ]
+    tImport =
+      uT "Import" $
+      TyInstRec [
+        "module" ==> tVar <> tQVar <> tAsMod,
+        "e" ==> tAll <> uS' tVar <> tQualified
+      ]
+    tAsMod =
+      uT "AsMod" $
+      TyInstRec [
+        "module" ==> tVar <> tQVar,
+        "alias" ==> tVar <> tQVar
+      ]
+    tQualified =
+      uT "Qualified" $
+      TyInstRec [
+        "entities" ==> tAll <> uS' tVar
+      ]
     tAsPat =
-      uT "As" $
+      uT "AsPat" $
       TyInstRec [
         "alias" ==> tVar,
         "p" ==> tPat
@@ -188,7 +212,8 @@ haskSchema =
       mconcat [
         tDeclSig,
         tBind,
-        tData
+        tData,
+        tImport
       ]
 
 haskRecLayouts :: HashMap TyName ALayoutFn
@@ -196,15 +221,20 @@ haskRecLayouts = recLayouts
   where
     recLayouts =
       [
+        "All"  ==> recLayoutAll,
         "Lam"  ==> recLayoutLam,
         "App"  ==> recLayoutApp,
         "Mod"  ==> recLayoutMod,
         "QVar" ==> recLayoutQVar,
         "Sig"  ==> recLayoutSig,
+        "AsPat" ==> recLayoutAsPat,
         "Bind" ==> recLayoutBind,
         "Data" ==> recLayoutData,
-        "As"   ==> recLayoutAs
+        "Import" ==> recLayoutImport,
+        "Qualified" ==> recLayoutQualified,
+        "AsMod" ==> recLayoutAsMod
       ]
+    recLayoutAll = jumptag "∗"
     recLayoutQVar =
       field "q" noPrec "q" <> "." <> field "v" precAllowAll "v"
     recLayoutApp =
@@ -214,13 +244,19 @@ haskRecLayouts = recLayouts
       jumptag "λ" <> field "v" precAllowAll "variable"
       `vsep` field "b" precAllowAll "body"
     recLayoutMod =
-      jumptag "module" <> field "name" (precAllow ["Var", "QVar"]) "name" <> field "ex" precAllowAll "export"
+      jumptag "module" <> field "name" (precAllow ["Var", "QVar"]) "name" <> "exports" <> field "ex" precAllowAll "entities"
       `vsep` field "ds" precAllowAll "declarations"
     recLayoutSig =
       field "v" noPrec "variable" <> jumptag "::" <> field "t" precAllowAll "type"
+    recLayoutAsPat =
+      field "alias" noPrec "alias" <> jumptag "@" <> field "p" noPrec "pattern"
     recLayoutBind =
       field "v" noPrec "variable" <> jumptag "=" <> field "b" precAllowAll "body"
     recLayoutData =
       jumptag "data" <> field "v" noPrec "name" <> "=" <> field "alts" precAllowAll "alternatives"
-    recLayoutAs =
-      field "alias" noPrec "alias" <> jumptag "@" <> field "p" noPrec "pattern"
+    recLayoutImport =
+      jumptag "from" <> field "module" (precAllow ["Var", "QVar", "AsMod"]) "module" <> "import" <> field "e" precAllowAll "entities"
+    recLayoutQualified =
+      jumptag "qualified" <> field "entities" (precAllow ["Var"]) "entities"
+    recLayoutAsMod =
+      field "module" noPrec "module" <> jumptag "as" <> field "alias" noPrec "alias"

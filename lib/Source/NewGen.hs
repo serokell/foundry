@@ -788,7 +788,7 @@ pprSelection selection = Text.pack (goPath selectionPath "")
     goTip Nothing = ('_':)
     goTip (Just (SelectionTipLabeled tyName)) =
       (tyNameStr tyName++) . goStrPos selectionStrPos
-    goTip (Just SelectionTipSeq) = ('∗':)
+    goTip (Just SelectionTipSeq) = ("[]"++)
     goPathSegment ps =
       case ps of
         PathSegmentRec tyName fieldName ->
