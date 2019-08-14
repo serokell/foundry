@@ -1247,6 +1247,7 @@ data Action =
   ActionMoveStrCursorForward Path |
   ActionInsertLetter Path Char |
   ActionAppendSeqItem Path |
+  ActionMergeSeqItem Path |
   ActionSelectParent Path |
   ActionSelectChild Path |
   ActionSelectSiblingBackward Path |
@@ -1356,6 +1357,11 @@ getAction
   | KeyPress [] keyCode <- inputEvent,
     keyLetter ',' keyCode
   = Just $ ActionAppendSeqItem selectionPath
+
+  -- Merge a sequence with the parent sequence.
+  | KeyPress [] keyCode <- inputEvent,
+    keyLetter 'm' keyCode
+  = Just $ ActionMergeSeqItem selectionPath
 
   -- Drop a node from the stack.
   | ModeStack <- mode,
@@ -1504,6 +1510,32 @@ applyActionM (ActionAppendSeqItem path) = do
       i' = indexToInt i + 1
       items' = Seq.insertAt i' Hole items
       seqSel' = SeqSel (intToIndex i') SelChild
+      nodeSel' = NodeSeqSel seqSel'
+      value' = ValueSeq items'
+    put $ Node nodeSel' value'
+
+applyActionM (ActionMergeSeqItem path) = do
+  path' <- maybeA (pathParent path)
+  zoom (rstNode . atPath path') $ do
+    Node nodeSel (ValueSeq items) <- get
+    let NodeSeqSel seqSel = nodeSel
+    SeqSel i SelChild <- pure seqSel
+    let (preItems, midItems) = Seq.splitAt (indexToInt i) items
+    (subItems, postItems) <-
+      maybeA $ case Seq.viewl midItems of
+        Seq.EmptyL -> Nothing
+        subNode Seq.:< postItems ->
+          case subNode of
+            Hole -> Just (Seq.empty, postItems)
+            Node _ (ValueSeq subItems) -> Just (subItems, postItems)
+            _ -> Nothing
+    let
+      postItems' = subItems <> postItems
+      items' = preItems <> postItems'
+      seqSel'
+        | Seq.null items' = SeqSel0
+        | Seq.null postItems' = SeqSel (intToIndex (Seq.length items' - 1)) SelChild
+        | otherwise = SeqSel (intToIndex (Seq.length preItems)) SelChild
       nodeSel' = NodeSeqSel seqSel'
       value' = ValueSeq items'
     put $ Node nodeSel' value'
