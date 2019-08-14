@@ -42,21 +42,26 @@ foundrySchema =
   Schema
     { schemaTypes =
         [
-          "Nat"  ==> tyNat,
-          "Var"  ==> tyVar,
-          "IVar" ==> tyIVar,
-          "Lam"  ==> tyLam,
-          "Pi"   ==> tyPi,
-          "App"  ==> tyApp,
-          "Star" ==> TyRec [],
-          "Box"  ==> TyRec []
-        ]
+          "Nat"  ==> TyDefnStr,
+          "Var"  ==> TyDefnStr,
+          "IVar" ==> TyDefnRec ["var", "index"],
+          "Lam"  ==> TyDefnRec ["var", "ty", "body"],
+          "Pi"   ==> TyDefnRec ["var", "ty", "body"],
+          "App"  ==> TyDefnRec ["fn", "arg"],
+          "Star" ==> TyDefnRec [],
+          "Box"  ==> TyDefnRec []
+        ],
+      schemaRoot = tExpr
     }
   where
-    tyNat = TyStr (void re)
+    tNat =
+        uT "Nat" $
+        TyInstStr (void re)
       where
         re = RE.some (RE.psym Char.isDigit)
-    tyVar = TyStr (void re)
+    tVar =
+        uT "Var" $
+        TyInstStr (void re)
       where
         re = re_alphavar <|> re_op
         re_fst =
@@ -75,37 +80,47 @@ foundrySchema =
           re_fst *> RE.many re_labelchar
         re_op =
           RE.some re_opchar
-    tyIVar =
-      TyRec [
-        "var"   ==> uT "Var",
-        "index" ==> uT "Nat"
+    tIVar =
+      uT "IVar" $
+      TyInstRec [
+        "var"   ==> tVar,
+        "index" ==> tNat
       ]
-    tyLam =
-      TyRec [
-        "var"  ==> uT "Var",
-        "ty"   ==> tyExpr,
-        "body" ==> tyExpr
+    tLam =
+      uT "Lam" $
+      TyInstRec [
+        "var"  ==> tVar,
+        "ty"   ==> tExpr,
+        "body" ==> tExpr
       ]
-    tyPi =
-      TyRec [
-        "var"  ==> uT "Var",
-        "ty"   ==> tyExpr,
-        "body" ==> tyExpr
+    tPi =
+      uT "Pi" $
+      TyInstRec [
+        "var"  ==> tVar,
+        "ty"   ==> tExpr,
+        "body" ==> tExpr
       ]
-    tyApp =
-      TyRec [
-        "fn"  ==> tyExpr,
-        "arg" ==> tyExpr
+    tApp =
+      uT "App" $
+      TyInstRec [
+        "fn"  ==> tExpr,
+        "arg" ==> tExpr
       ]
-    tyExpr =
+    tStar =
+      uT "Star" $
+      TyInstRec []
+    tBox =
+      uT "Box" $
+      TyInstRec []
+    tExpr =
       mconcat [
-        uT "Lam",
-        uT "Pi",
-        uT "App",
-        uT "Star",
-        uT "Box",
-        uT "Var",
-        uT "IVar"
+        tLam,
+        tPi,
+        tApp,
+        tStar,
+        tBox,
+        tVar,
+        tIVar
       ]
 
 foundryRecLayouts :: HashMap TyName ALayoutFn

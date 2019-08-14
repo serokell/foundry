@@ -19,7 +19,8 @@ module Source.NewGen
 
   -- * Types
   Schema(..),
-  Ty(..),
+  TyDefn(..),
+  TyInst(..),
   TyUnion(..),
 
   -- * Values
@@ -525,6 +526,7 @@ alwaysSucceed f = f <|> pure ()
 
 data MotionAction =
   MotionNoOp |
+  MotionToggleEditMode |
   MotionPopSwap Node
 
 data Mode =
@@ -645,8 +647,7 @@ redrawUI pluginInfo viewport es =
     lctx =
       LayoutCtx
         { _lctxPath = mempty @PathBuilder,
-          _lctxValidationResult = mempty, -- initialized in layoutNodeStack
-                                          --            and layoutMainExpr
+          _lctxValidationResult = mempty,
           _lctxViewport = viewport,
           _lctxPrecBordersAlways = es ^. esPrecBordersAlways,
           _lctxEditMode = isEditMode (es ^. esMode),
@@ -657,7 +658,7 @@ redrawUI pluginInfo viewport es =
     schema = pluginInfoSchema pluginInfo
     pointer = es ^. esPointer
     infoBarLayout = layoutInfoBar lctx es
-    stackLayout = layoutNodeStack schema lctx (es ^. esStack)
+    stackLayout = layoutNodeStack lctx (es ^. esStack)
     mainLayout = layoutMainExpr schema lctx (es ^. esExpr)
     hOff :: Collage n a -> Integer
     hOff c =
@@ -724,6 +725,9 @@ renderMotion lctx action Paths{pathsSelection} (Find findZone) =
         MotionNoOp ->
           substrateMargin (outline 2 motionBorderColor . extentsMax e) $
           rect nothing nothing e
+        MotionToggleEditMode ->
+          substrateMargin (outline 2 motionBorderColor . extentsMax e) $
+          rect nothing nothing e
         MotionPopSwap n ->
           substrate 0 (rect nothing dark1') $
           substrateMargin (outline 2 motionBorderColor . extentsMax e) $
@@ -741,16 +745,16 @@ layoutMainExpr schema lctx expr = collage
     lctx' n = lctx{ _lctxValidationResult = validateNode schema n }
     (_, collage) = layoutNode (lctx' expr) expr precAllowAll
 
-layoutNodeStack :: Monoid n => Schema -> LayoutCtx -> [Node] -> Collage n El
-layoutNodeStack schema lctx nodes =
+layoutNodeStack :: Monoid n => LayoutCtx -> [Node] -> Collage n El
+layoutNodeStack lctx nodes =
   mapCollageAnnotation (const mempty) $
   substrate 0 backgroundRect $
   substrate 4 (outline 2 stackBorderColor) $
   case nodes of
     [] -> punct "end of stack"
-    n:_ -> snd (layoutNode (lctx' n) n precAllowAll)
+    n:_ -> snd (layoutNode lctx' n precAllowAll)
   where
-    lctx' n = lctx{ _lctxValidationResult = validateNode schema n }
+    lctx' = lctx{ _lctxValidationResult = mempty }
     backgroundRect = rect nothing dark1'
 
 layoutInfoBar ::
@@ -1309,35 +1313,35 @@ getAction
   -- Delete character backward.
   | ModeEdit <- mode,
     Just (SelectionTipLabeled tyName) <- selectionTip,
-    Just (TyStr _) <- HashMap.lookup tyName schemaTypes,
+    Just TyDefnStr <- HashMap.lookup tyName schemaTypes,
     KeyPress [] KeyCode.Backspace <- inputEvent
   = Just $ ActionDeleteCharBackward selectionPath
 
   -- Delete character forward.
   | ModeEdit <- mode,
     Just (SelectionTipLabeled tyName) <- selectionTip,
-    Just (TyStr _) <- HashMap.lookup tyName schemaTypes,
+    Just TyDefnStr <- HashMap.lookup tyName schemaTypes,
     KeyPress [] KeyCode.Delete <- inputEvent
   = Just $ ActionDeleteCharForward selectionPath
 
   -- Move string cursor backward.
   | ModeEdit <- mode,
     Just (SelectionTipLabeled tyName) <- selectionTip,
-    Just (TyStr _) <- HashMap.lookup tyName schemaTypes,
+    Just TyDefnStr <- HashMap.lookup tyName schemaTypes,
     KeyPress [] KeyCode.ArrowLeft <- inputEvent
   = Just $ ActionMoveStrCursorBackward selectionPath
 
   -- Move string cursor forward.
   | ModeEdit <- mode,
     Just (SelectionTipLabeled tyName) <- selectionTip,
-    Just (TyStr _) <- HashMap.lookup tyName schemaTypes,
+    Just TyDefnStr <- HashMap.lookup tyName schemaTypes,
     KeyPress [] KeyCode.ArrowRight <- inputEvent
   = Just $ ActionMoveStrCursorForward selectionPath
 
   -- Insert letter.
   | ModeEdit <- mode,
     Just (SelectionTipLabeled tyName) <- selectionTip,
-    Just (TyStr _) <- HashMap.lookup tyName schemaTypes,
+    Just TyDefnStr <- HashMap.lookup tyName schemaTypes,
     KeyPress mods keyCode <- inputEvent,
     Control `notElem` mods,
     Just c <- keyChar keyCode
@@ -1614,7 +1618,8 @@ applyActionM (ActionCommitMotion path) = do
   ModeMotion fromEditMode _ action <- use rstMode
   rstMode .= ModeNormal
   alwaysSucceed $ case action of
-    MotionNoOp -> do
+    MotionNoOp -> return ()
+    MotionToggleEditMode -> do
       -- Enter/Exit edit mode with Space.
       Monoid.First (Just (Node _ (ValueStr _ _))) <-
         use (rstNode . atPath path . to (Monoid.First . Just))
@@ -1629,7 +1634,7 @@ applyActionM (ActionCommitMotion path) = do
 parseMotionAction :: ReactCtx -> Text -> MotionAction
 parseMotionAction rctx motion =
   case motion of
-    "" -> MotionNoOp
+    "" -> MotionToggleEditMode
     (insertSeqMotion -> Just n) ->
       MotionPopSwap (defaultSeqNode n)
     _ ->
@@ -1754,12 +1759,12 @@ mkDefaultNodes :: Schema -> HashMap TyName RecMoveMap -> HashMap TyName Node
 mkDefaultNodes schema recMoveMaps =
   HashMap.mapWithKey mkDefNode (schemaTypes schema)
   where
-    mkDefNode :: TyName -> Ty -> Node
+    mkDefNode :: TyName -> TyDefn -> Node
     mkDefNode tyName = \case
-      TyStr _ -> Node (NodeStrSel 0) (ValueStr tyName "")
-      TyRec fieldTys ->
+      TyDefnStr -> Node (NodeStrSel 0) (ValueStr tyName "")
+      TyDefnRec fieldNames ->
         let
-          fields = HashMap.map (const Hole) fieldTys
+          fields = HashMap.map (const Hole) (HashSet.toMap fieldNames)
           recMoveMap = recMoveMaps HashMap.! tyName
           recSel =
             case rmmFieldOrder recMoveMap of
@@ -1898,7 +1903,7 @@ fromParsedValue pluginInfo = go
 ---- Schema EDSL
 --------------------------------------------------------------------------------
 
-uT :: TyName -> TyUnion
+uT :: TyName -> TyInst -> TyUnion
 uT = tyUnionSingleton
 
 uS :: TyUnion -> TyUnion

@@ -41,86 +41,154 @@ haskSchema =
   Schema
     { schemaTypes =
         [
-          "Mod"  ==> tMod,
-          "Var"  ==> tVar,
-          "Str"  ==> tStr,
-          "Lam"  ==> tLam,
-          "App"  ==> tApp,
-          "QVar" ==> tQVar,
-          "Sig"  ==> tSig,
-          "Bind" ==> tBind,
-          "Data" ==> tData
-        ]
+          "Mod"  ==> TyDefnRec ["name", "ex", "ds"],
+          "Var"  ==> TyDefnStr,
+          "Str"  ==> TyDefnStr,
+          "Lam"  ==> TyDefnRec ["v", "b"],
+          "App"  ==> TyDefnRec ["f", "a"],
+          "QVar" ==> TyDefnRec ["q", "v"],
+          "Sig"  ==> TyDefnRec ["v", "t"],
+          "Bind" ==> TyDefnRec ["v", "b"],
+          "Data" ==> TyDefnRec ["v", "alts"],
+          "As" ==> TyDefnRec ["alias", "p"]
+        ],
+      schemaRoot = tMod
     }
   where
-    tVar = TyStr (void re) where
-      re = re_alphavar <|> re_op
-      re_fst =
-        RE.psym $ \c ->
-          Char.isLetter c ||
-          c == '_'
-      re_labelchar =
-        RE.psym $ \c ->
-          Char.isLetter c ||
-          Char.isDigit c ||
-          c == '_'
-      re_opchar =
-        RE.psym $ \c ->
-          c `List.elem` ("!#$%&*+./<=>?@^|-~" :: [Char])
-      re_alphavar =
-        re_fst *> RE.many re_labelchar
-      re_op =
-        RE.some re_opchar
-    tStr = TyStr (void (RE.many RE.anySym))
+    tVar =
+        uT "Var" $
+        TyInstStr (void re)
+      where
+        re = re_alphavar <|> re_op
+        re_fst =
+          RE.psym $ \c ->
+            Char.isLetter c ||
+            c == '_'
+        re_labelchar =
+          RE.psym $ \c ->
+            Char.isLetter c ||
+            Char.isDigit c ||
+            c == '_'
+        re_opchar =
+          RE.psym $ \c ->
+            c `List.elem` ("!#$%&*+./<=>?@^|-~" :: [Char])
+        re_alphavar =
+          re_fst *> RE.many re_labelchar
+        re_op =
+          RE.some re_opchar
+    tStr =
+      uT "Str" $
+      TyInstStr (void (RE.many RE.anySym))
     tQVar =
-      TyRec [
-        "q" ==> uT "Var",
-        "v" ==> uT "Var" <> uT "QVar"
+      uT "QVar" $
+      TyInstRec [
+        "q" ==> tVar,
+        "v" ==> tVar <> tQVar
       ]
     tMod =
-      TyRec [
-        "name" ==> uT "Var" <> uT "QVar",
-        "ex"   ==> uS' (uT "Var"),
-        "ds"   ==> uS' uDecl
+      uT "Mod" $
+      TyInstRec [
+        "name" ==> tVar <> tQVar,
+        "ex"   ==> uS' tVar,
+        "ds"   ==> uS' tDecl
       ]
     tLam =
-      TyRec [
-        "v" ==> uT "Var",
-        "b" ==> uExpr
+      uT "Lam" $
+      TyInstRec [
+        "v" ==> tVar,
+        "b" ==> tExpr
       ]
-    tApp =
-      TyRec [
-        "f" ==> uExpr,
-        "a" ==> uExpr
+    tExprApp =
+      uT "App" $
+      TyInstRec [
+        "f" ==> tExpr,
+        "a" ==> tExpr
       ]
-    tSig =
-      TyRec [
-        "v" ==> uT "Var",
-        "t" ==> uExpr
+    tPatApp =
+      uT "App" $
+      TyInstRec [
+        "f" ==> tPat,
+        "a" ==> tPat
+      ]
+    tTypeApp =
+      uT "App" $
+      TyInstRec [
+        "f" ==> tType,
+        "a" ==> tType
+      ]
+    tDeclSig =
+      uT "Sig" $
+      TyInstRec [
+        "v" ==> tVar <> uS tVar,
+        "t" ==> tType
+      ]
+    tExprSig =
+      uT "Sig" $
+      TyInstRec [
+        "v" ==> tExpr,
+        "t" ==> tType
+      ]
+    tPatSig =
+      uT "Sig" $
+      TyInstRec [
+        "v" ==> tPat,
+        "t" ==> tType
+      ]
+    tTypeSig =
+      uT "Sig" $
+      TyInstRec [
+        "v" ==> tType,
+        "t" ==> tKind
       ]
     tBind =
-      TyRec [
-        "v" ==> uT "Var",
-        "b" ==> uExpr
+      uT "Bind" $
+      TyInstRec [
+        "v" ==> tPat,
+        "b" ==> tExpr
       ]
     tData =
-      TyRec [
-        "v"    ==> uT "Var",
-        "alts" ==> uS uExpr
+      uT "Data" $
+      TyInstRec [
+        "v"    ==> tVar,
+        "alts" ==> uS tExpr
       ]
-    uExpr =
-      mconcat [
-        uT "Lam",
-        uT "App",
-        uT "Str",
-        uT "Var",
-        uT "QVar"
+    tAsPat =
+      uT "As" $
+      TyInstRec [
+        "alias" ==> tVar,
+        "p" ==> tPat
       ]
-    uDecl =
+    tExpr =
       mconcat [
-        uT "Sig",
-        uT "Bind",
-        uT "Data"
+        tLam,
+        tExprApp,
+        tStr,
+        tVar,
+        tQVar,
+        tExprSig
+      ]
+    tKind = tType
+    tType =
+      mconcat [
+        tVar,
+        tQVar,
+        tTypeApp,
+        tTypeSig
+        -- tForall
+      ]
+    tPat =
+      mconcat [
+        tVar,
+        tQVar,
+        tPatApp,
+        tPatSig,
+        tAsPat
+      ]
+    tDecl =
+      mconcat [
+        tDeclSig,
+        tBind,
+        tData
       ]
 
 haskRecLayouts :: HashMap TyName ALayoutFn
@@ -134,7 +202,8 @@ haskRecLayouts = recLayouts
         "QVar" ==> recLayoutQVar,
         "Sig"  ==> recLayoutSig,
         "Bind" ==> recLayoutBind,
-        "Data" ==> recLayoutData
+        "Data" ==> recLayoutData,
+        "As"   ==> recLayoutAs
       ]
     recLayoutQVar =
       field "q" noPrec "q" <> "." <> field "v" precAllowAll "v"
@@ -153,3 +222,5 @@ haskRecLayouts = recLayouts
       field "v" noPrec "variable" <> jumptag "=" <> field "b" precAllowAll "body"
     recLayoutData =
       jumptag "data" <> field "v" noPrec "name" <> "=" <> field "alts" precAllowAll "alternatives"
+    recLayoutAs =
+      field "alias" noPrec "alias" <> jumptag "@" <> field "p" noPrec "pattern"
