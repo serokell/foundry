@@ -23,3 +23,9 @@ source-repository-package
   type: git
   location: https://github.com/int-index/sdam
   tag: 9e79a6f589921a8a0e05119dcf5711af2dddbca2
+
+source-repository-package
+  type: git
+  location: https://github.com/taqenoqo/gtk2hs
+  tag: bb39f8402c4e2f8a2972b4f8f91efa3f720b2d23
+  subdir: gtk

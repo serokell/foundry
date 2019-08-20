@@ -32,6 +32,7 @@ jobs:
     - script: |
         export PATH="$HOME/.cabal/bin:$HOME/.ghcup/bin:$PATH"
         export PKG_CONFIG_PATH=/usr/local/opt/libffi/lib/pkgconfig:$PKG_CONFIG_PATH
+        cat cabal.project.macos >> cabal.project.local
         cabal v2-update
         cabal v2-build
         cabal v2-exec which foundry

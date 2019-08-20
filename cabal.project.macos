@@ -1,0 +1,2 @@
+constraints:
+  gtk3 +have-quartz-gtk
