@@ -41,26 +41,26 @@ haskSchema =
   Schema
     { schemaTypes =
         [
-          "All" ==> TyDefnRec [],
-          "Mod"  ==> TyDefnRec ["name", "ex", "ds"],
-          "Var"  ==> TyDefnStr,
-          "Str"  ==> TyDefnStr,
-          "Lam"  ==> TyDefnRec ["v", "b"],
-          "App"  ==> TyDefnRec ["f", "a"],
-          "QVar" ==> TyDefnRec ["q", "v"],
-          "Sig"  ==> TyDefnRec ["v", "t"],
-          "AsPat" ==> TyDefnRec ["alias", "p"],
-          "Bind" ==> TyDefnRec ["v", "b"],
-          "Data" ==> TyDefnRec ["v", "alts"],
-          "Import" ==> TyDefnRec ["module", "e"],
-          "Qualified" ==> TyDefnRec ["entities"],
-          "AsMod" ==> TyDefnRec ["module", "alias"]
+          "all"        ==> TyDefnRec [],
+          "module"     ==> TyDefnRec ["name", "ex", "ds"],
+          "v"          ==> TyDefnStr,
+          "str"        ==> TyDefnStr,
+          "lam"        ==> TyDefnRec ["v", "b"],
+          "a"          ==> TyDefnRec ["f", "a"],
+          "qv"         ==> TyDefnRec ["q", "v"],
+          "sig"        ==> TyDefnRec ["v", "t"],
+          "as-pat"     ==> TyDefnRec ["alias", "p"],
+          "bind"       ==> TyDefnRec ["v", "b"],
+          "data"       ==> TyDefnRec ["v", "alts"],
+          "import"     ==> TyDefnRec ["module", "e"],
+          "qualified"  ==> TyDefnRec ["entities"],
+          "as-mod"     ==> TyDefnRec ["module", "alias"]
         ],
       schemaRoot = tMod
     }
   where
     tVar =
-        uT "Var" $
+        uT "v" $
         TyInstStr (void re)
       where
         re = re_alphavar <|> re_op
@@ -81,103 +81,103 @@ haskSchema =
         re_op =
           RE.some re_opchar
     tStr =
-      uT "Str" $
+      uT "str" $
       TyInstStr (void (RE.many RE.anySym))
     tQVar =
-      uT "QVar" $
+      uT "qv" $
       TyInstRec [
         "q" ==> tVar,
         "v" ==> tVar <> tQVar
       ]
     tAll =
-      uT "All" $
+      uT "all" $
       TyInstRec []
     tMod =
-      uT "Mod" $
+      uT "module" $
       TyInstRec [
         "name" ==> tVar <> tQVar,
         "ex"   ==> tAll <> uS' tVar,
         "ds"   ==> uS' tDecl
       ]
     tLam =
-      uT "Lam" $
+      uT "lam" $
       TyInstRec [
         "v" ==> tVar,
         "b" ==> tExpr
       ]
     tExprApp =
-      uT "App" $
+      uT "a" $
       TyInstRec [
         "f" ==> tExpr,
         "a" ==> tExpr
       ]
     tPatApp =
-      uT "App" $
+      uT "a" $
       TyInstRec [
         "f" ==> tPat,
         "a" ==> tPat
       ]
     tTypeApp =
-      uT "App" $
+      uT "a" $
       TyInstRec [
         "f" ==> tType,
         "a" ==> tType
       ]
     tDeclSig =
-      uT "Sig" $
+      uT "sig" $
       TyInstRec [
         "v" ==> tVar <> uS tVar,
         "t" ==> tType
       ]
     tExprSig =
-      uT "Sig" $
+      uT "sig" $
       TyInstRec [
         "v" ==> tExpr,
         "t" ==> tType
       ]
     tPatSig =
-      uT "Sig" $
+      uT "sig" $
       TyInstRec [
         "v" ==> tPat,
         "t" ==> tType
       ]
     tTypeSig =
-      uT "Sig" $
+      uT "sig" $
       TyInstRec [
         "v" ==> tType,
         "t" ==> tKind
       ]
     tBind =
-      uT "Bind" $
+      uT "bind" $
       TyInstRec [
         "v" ==> tPat,
         "b" ==> tExpr
       ]
     tData =
-      uT "Data" $
+      uT "data" $
       TyInstRec [
         "v"    ==> tVar,
         "alts" ==> uS tExpr
       ]
     tImport =
-      uT "Import" $
+      uT "import" $
       TyInstRec [
         "module" ==> tVar <> tQVar <> tAsMod,
         "e" ==> tAll <> uS' tVar <> tQualified
       ]
     tAsMod =
-      uT "AsMod" $
+      uT "as-mod" $
       TyInstRec [
         "module" ==> tVar <> tQVar,
         "alias" ==> tVar <> tQVar
       ]
     tQualified =
-      uT "Qualified" $
+      uT "qualified" $
       TyInstRec [
         "entities" ==> tAll <> uS' tVar
       ]
     tAsPat =
-      uT "AsPat" $
+      uT "as-pat" $
       TyInstRec [
         "alias" ==> tVar,
         "p" ==> tPat
@@ -221,30 +221,30 @@ haskRecLayouts = recLayouts
   where
     recLayouts =
       [
-        "All"  ==> recLayoutAll,
-        "Lam"  ==> recLayoutLam,
-        "App"  ==> recLayoutApp,
-        "Mod"  ==> recLayoutMod,
-        "QVar" ==> recLayoutQVar,
-        "Sig"  ==> recLayoutSig,
-        "AsPat" ==> recLayoutAsPat,
-        "Bind" ==> recLayoutBind,
-        "Data" ==> recLayoutData,
-        "Import" ==> recLayoutImport,
-        "Qualified" ==> recLayoutQualified,
-        "AsMod" ==> recLayoutAsMod
+        "all"         ==> recLayoutAll,
+        "lam"         ==> recLayoutLam,
+        "a"           ==> recLayoutApp,
+        "module"      ==> recLayoutMod,
+        "qv"          ==> recLayoutQVar,
+        "sig"         ==> recLayoutSig,
+        "as-pat"      ==> recLayoutAsPat,
+        "bind"        ==> recLayoutBind,
+        "data"        ==> recLayoutData,
+        "import"      ==> recLayoutImport,
+        "qualified"   ==> recLayoutQualified,
+        "as-mod"      ==> recLayoutAsMod
       ]
     recLayoutAll = jumptag "∗"
     recLayoutQVar =
       field "q" noPrec "q" <> "." <> field "v" precAllowAll "v"
     recLayoutApp =
-      field "f" (precAllow ["App"]) "function" <>
-      field "a" (precAllow ["Var", "QVar"]) "argument"
+      field "f" (precAllow ["a"]) "function" <>
+      field "a" (precAllow ["v", "qv"]) "argument"
     recLayoutLam =
       jumptag "λ" <> field "v" precAllowAll "variable"
       `vsep` field "b" precAllowAll "body"
     recLayoutMod =
-      jumptag "module" <> field "name" (precAllow ["Var", "QVar"]) "name" <> "exports" <> field "ex" precAllowAll "entities"
+      jumptag "module" <> field "name" (precAllow ["v", "qv"]) "name" <> "exports" <> field "ex" precAllowAll "entities"
       `vsep` field "ds" precAllowAll "declarations"
     recLayoutSig =
       field "v" noPrec "variable" <> jumptag "::" <> field "t" precAllowAll "type"
@@ -255,8 +255,8 @@ haskRecLayouts = recLayouts
     recLayoutData =
       jumptag "data" <> field "v" noPrec "name" <> "=" <> field "alts" precAllowAll "alternatives"
     recLayoutImport =
-      jumptag "from" <> field "module" (precAllow ["Var", "QVar", "AsMod"]) "module" <> "import" <> field "e" precAllowAll "entities"
+      jumptag "from" <> field "module" (precAllow ["v", "qv", "as-mod"]) "module" <> "import" <> field "e" precAllowAll "entities"
     recLayoutQualified =
-      jumptag "qualified" <> field "entities" (precAllow ["Var"]) "entities"
+      jumptag "qualified" <> field "entities" (precAllow ["v"]) "entities"
     recLayoutAsMod =
       field "module" noPrec "module" <> jumptag "as" <> field "alias" noPrec "alias"

@@ -43,34 +43,34 @@ convertExpr = \case
 
 convertConst :: M.Const -> RenderValue
 convertConst = \case
-  M.Star -> mkRecValue "Star" []
-  M.Box -> mkRecValue "Box" []
+  M.Star -> mkRecValue "star" []
+  M.Box -> mkRecValue "box" []
 
 convertVar :: M.Var -> RenderValue
 convertVar = \case
-  M.V t 0 -> mkStrValue "Var" (Text.Lazy.toStrict t)
+  M.V t 0 -> mkStrValue "v" (Text.Lazy.toStrict t)
   M.V t n ->
-    mkRecValue "IVar"
-      [ ("var", mkStrValue "Var" (Text.Lazy.toStrict t)),
-        ("index", mkStrValue "Nat" (Text.pack (show n))) ]
+    mkRecValue "iv"
+      [ ("var", mkStrValue "v" (Text.Lazy.toStrict t)),
+        ("index", mkStrValue "nat" (Text.pack (show n))) ]
 
 convertLam :: Text.Lazy.Text -> M.Expr Void -> M.Expr Void -> RenderValue
 convertLam x _A b =
-  mkRecValue "Lam"
-    [ ("var", mkStrValue "Var" (Text.Lazy.toStrict x)),
+  mkRecValue "lam"
+    [ ("var", mkStrValue "v" (Text.Lazy.toStrict x)),
       ("ty", convertExpr _A),
       ("body", convertExpr b) ]
 
 convertPi :: Text.Lazy.Text -> M.Expr Void -> M.Expr Void -> RenderValue
 convertPi x _A _B =
-  mkRecValue "Pi"
-    [ ("var", mkStrValue "Var" (Text.Lazy.toStrict x)),
+  mkRecValue "pi"
+    [ ("var", mkStrValue "v" (Text.Lazy.toStrict x)),
       ("ty", convertExpr _A),
       ("body", convertExpr _B) ]
 
 convertApp :: M.Expr Void -> M.Expr Void -> RenderValue
 convertApp f a =
-  mkRecValue "App"
+  mkRecValue "a"
     [ ("fn", convertExpr f),
       ("arg", convertExpr a) ]
 

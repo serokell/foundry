@@ -141,7 +141,6 @@ import Source.Input
 import qualified Source.Input.KeyCode as KeyCode
 
 import Sdam.Core
-import Sdam.Name
 import Sdam.Validator
 import Sdam.Parser
 
@@ -1746,17 +1745,15 @@ zoomPathPrefix p m =
       zoom (atPathSegment ps) (zoomPathPrefix p' m) <|> m
 
 matchMotion :: Text -> TyName -> Bool
-matchMotion motionStr (TyName tyName) =
-  let
-    tyNameParts =
-      List.map (Text.pack . List.map letterToChar . NonEmpty.toList) $
-      NonEmpty.toList (nameParts tyName)
-    motionParts = Text.splitOn "-" motionStr
-    matchPart (motionPart, tyNamePart) =
-      not (Text.null motionPart) &&
-      (Text.isPrefixOf `on` Text.toCaseFold) motionPart tyNamePart
-  in
-    List.all matchPart (List.zip motionParts tyNameParts)
+matchMotion motionStr tyName =
+    ((==) `on` Text.toCaseFold) tyNameStr' motionStr
+    -- Why not 'isPrefixOf'? It causes two issues:
+    --
+    -- 1. Need disambiguation between "aa" and "aab"
+    -- 2. Adding a new syntactic construct would affect editing experience and
+    --    thus discourage innovation.
+  where
+    tyNameStr' = Text.pack (tyNameStr tyName)
 
 filterByMotion :: Text -> [(TyName, a)] -> [a]
 filterByMotion motion =

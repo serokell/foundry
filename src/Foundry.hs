@@ -42,25 +42,25 @@ foundrySchema =
   Schema
     { schemaTypes =
         [
-          "Nat"  ==> TyDefnStr,
-          "Var"  ==> TyDefnStr,
-          "IVar" ==> TyDefnRec ["var", "index"],
-          "Lam"  ==> TyDefnRec ["var", "ty", "body"],
-          "Pi"   ==> TyDefnRec ["var", "ty", "body"],
-          "App"  ==> TyDefnRec ["fn", "arg"],
-          "Star" ==> TyDefnRec [],
-          "Box"  ==> TyDefnRec []
+          "nat"  ==> TyDefnStr,
+          "v"    ==> TyDefnStr,                         -- variable
+          "iv"   ==> TyDefnRec ["var", "index"],        -- indexed variable
+          "lam"  ==> TyDefnRec ["var", "ty", "body"],
+          "pi"   ==> TyDefnRec ["var", "ty", "body"],
+          "a"    ==> TyDefnRec ["fn", "arg"],           -- function application
+          "star" ==> TyDefnRec [],
+          "box"  ==> TyDefnRec []
         ],
       schemaRoot = tExpr
     }
   where
     tNat =
-        uT "Nat" $
+        uT "nat" $
         TyInstStr (void re)
       where
         re = RE.some (RE.psym Char.isDigit)
     tVar =
-        uT "Var" $
+        uT "v" $
         TyInstStr (void re)
       where
         re = re_alphavar <|> re_op
@@ -81,36 +81,36 @@ foundrySchema =
         re_op =
           RE.some re_opchar
     tIVar =
-      uT "IVar" $
+      uT "iv" $
       TyInstRec [
         "var"   ==> tVar,
         "index" ==> tNat
       ]
     tLam =
-      uT "Lam" $
+      uT "lam" $
       TyInstRec [
         "var"  ==> tVar,
         "ty"   ==> tExpr,
         "body" ==> tExpr
       ]
     tPi =
-      uT "Pi" $
+      uT "pi" $
       TyInstRec [
         "var"  ==> tVar,
         "ty"   ==> tExpr,
         "body" ==> tExpr
       ]
     tApp =
-      uT "App" $
+      uT "a" $
       TyInstRec [
         "fn"  ==> tExpr,
         "arg" ==> tExpr
       ]
     tStar =
-      uT "Star" $
+      uT "star" $
       TyInstRec []
     tBox =
-      uT "Box" $
+      uT "box" $
       TyInstRec []
     tExpr =
       mconcat [
@@ -128,18 +128,18 @@ foundryRecLayouts = recLayouts
   where
     recLayouts =
       [
-        "Lam"  ==> recLayoutLam,
-        "Pi"   ==> recLayoutPi,
-        "App"  ==> recLayoutApp,
-        "Star" ==> jumptag "★",
-        "Box"  ==> jumptag "□",
-        "IVar" ==> recLayoutIVar
+        "lam"  ==> recLayoutLam,
+        "pi"   ==> recLayoutPi,
+        "a"    ==> recLayoutApp,
+        "star" ==> jumptag "★",
+        "box"  ==> jumptag "□",
+        "iv"   ==> recLayoutIVar
       ]
     precAll = precAllow (HashMap.keysSet recLayouts)
-    precAtoms = ["Star", "Box"]
+    precAtoms = ["star", "box"]
     prec ss = precAllow (ss <> precAtoms)
     recLayoutApp =
-     field "fn" (prec ["App"]) "function" <>
+     field "fn" (prec ["a"]) "function" <>
      field "arg" (prec []) "argument"
     recLayoutLam =
       jumptag "λ" <> field "var" noPrec "variable" <> ":" <> field "ty" precAll "type"
