@@ -1286,11 +1286,16 @@ getAction
     KeyPress [] KeyCode.Space <- inputEvent
   = return (ActionStartMotion False)
 
-  -- Enter motion mode from edit mode.
+  -- Quit from edit mode with a Space.
   -- Use Shift-Space to enter a space character.
   | ModeEdit <- mode,
     KeyPress [] KeyCode.Space <- inputEvent
-  = return (ActionStartMotion True)
+  = return ActionEscapeTransientMode
+
+  -- Commit a motion.
+  | ModeMotion _ _ _ <- mode,
+    KeyPress [] KeyCode.Space <- inputEvent
+  = Just $ ActionCommitMotion selectionPath
 
   -- Append a letter to the motion.
   | ModeMotion _ _ _ <- mode,
@@ -1298,11 +1303,6 @@ getAction
     Control `notElem` mods,
     Just c <- keyChar keyCode
   = Just $ ActionAppendMotion c
-
-  -- Commit a motion.
-  | ModeMotion _ _ _ <- mode,
-    KeyRelease _ KeyCode.Space <- inputEvent
-  = Just $ ActionCommitMotion selectionPath
 
   -- Jumptag lookup.
   | ModeJump _ <- mode,

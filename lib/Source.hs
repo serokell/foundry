@@ -92,12 +92,6 @@ createMainWindow pluginInfo esRef = do
       phaserReset cursorPhaser NG.CursorVisible
       handleInputEvent event
 
-  void $ Gtk.on canvas Gtk.keyReleaseEvent $ do
-    modifier <- Gtk.eventModifier
-    keyVal <- Gtk.eventKeyVal
-    let event = KeyRelease (modifier >>= gtkMod) keyVal
-    liftIO $ handleInputEvent event
-
   void $ Gtk.on canvas Gtk.motionNotifyEvent $ do
     (x, y) <- Gtk.eventCoordinates
     let (x', y') = (round x, round y)
