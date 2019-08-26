@@ -1512,6 +1512,7 @@ applyActionM (ActionAppendSeqItem path) = do
       nodeSel' = NodeSeqSel seqSel'
       value' = ValueSeq items'
     put $ Node nodeSel' value'
+    setUndoFlag
 
 applyActionM (ActionMergeSeqItem path) = do
   path' <- maybeA (pathParent path)
@@ -1538,6 +1539,7 @@ applyActionM (ActionMergeSeqItem path) = do
       nodeSel' = NodeSeqSel seqSel'
       value' = ValueSeq items'
     put $ Node nodeSel' value'
+    setUndoFlag
 
 applyActionM (ActionInsertLetter path c) =
   zoom (rstNode . atPath path) $ do
