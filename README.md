@@ -22,6 +22,6 @@ Implementation status:
 ```
 $ nix-shell --pure
 $ cabal v2-build morte-to-sdam
-$ morte-to-sdam "./expr.morte" > expr.sd
+$ cabal v2-run -v0 -- morte-to-sdam "./expr.morte" > expr.sd
 $ cabal v2-run -- foundry expr.sd
 ```
