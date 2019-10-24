@@ -1,12 +1,13 @@
 module Source.Input
-    ( Modifier(..)
-    , KeyCode
-    , keyChar
-    , InputEvent(..)
-    ) where
+  ( Modifier (..),
+    KeyCode,
+    keyChar,
+    InputEvent (..),
+  )
+where
 
-import qualified Graphics.UI.Gtk as Gtk
 import Data.Word
+import qualified Graphics.UI.Gtk as Gtk
 
 data Modifier = Control | Shift | Alt
   deriving (Eq, Show)
