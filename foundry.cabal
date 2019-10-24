@@ -69,6 +69,7 @@ executable hask
   default-language:    Haskell2010
 
   ghc-options:         -Wall -threaded -O2
+                       -Wno-missing-signatures
   ghc-prof-options:    -fprof-auto
                        -rtsopts
                        -auto-all
@@ -78,6 +79,15 @@ executable morte-to-sdam
   main-is:             MorteToSdam.hs
   build-depends:       base, text, unordered-containers,
                        morte, sdam
+  hs-source-dirs:      src
+  default-language:    Haskell2010
+  ghc-options:         -Wall -threaded -O2
+
+executable haskell-to-sdam
+  main-is:             HaskellToSdam.hs
+  build-depends:       base, text, containers, unordered-containers,
+                       split,
+                       ghc-lib-parser, sdam
   hs-source-dirs:      src
   default-language:    Haskell2010
   ghc-options:         -Wall -threaded -O2

@@ -36,31 +36,62 @@ haskPlugin =
       _pluginRecLayouts = haskRecLayouts
     }
 
+ty_all = "all"
+ty_module = "module"
+ty_v = "v"
+ty_str = "str"
+ty_lam = "lam"
+ty_a = "a"
+ty_qv = "qv"
+ty_sig = "sig"
+ty_as_pat = "as-pat"
+ty_bind = "bind"
+ty_data = "data"
+ty_import = "import"
+ty_qualified = "qualified"
+ty_as_mod = "as-mod"
+
+fld_name = "name"
+fld_ex = "ex"
+fld_ds = "ds"
+fld_v = "v"
+fld_b = "b"
+fld_f = "f"
+fld_a = "a"
+fld_q = "q"
+fld_t = "t"
+fld_alias = "alias"
+fld_p = "p"
+fld_alts = "alts"
+fld_module = "module"
+fld_e = "e"
+fld_entities = "entities"
+
 haskSchema :: Schema
 haskSchema =
   Schema
     { schemaTypes =
         [
-          "all"        ==> TyDefnRec [],
-          "module"     ==> TyDefnRec ["name", "ex", "ds"],
-          "v"          ==> TyDefnStr,
-          "str"        ==> TyDefnStr,
-          "lam"        ==> TyDefnRec ["v", "b"],
-          "a"          ==> TyDefnRec ["f", "a"],
-          "qv"         ==> TyDefnRec ["q", "v"],
-          "sig"        ==> TyDefnRec ["v", "t"],
-          "as-pat"     ==> TyDefnRec ["alias", "p"],
-          "bind"       ==> TyDefnRec ["v", "b"],
-          "data"       ==> TyDefnRec ["v", "alts"],
-          "import"     ==> TyDefnRec ["module", "e"],
-          "qualified"  ==> TyDefnRec ["entities"],
-          "as-mod"     ==> TyDefnRec ["module", "alias"]
+          ty_all        ==> TyDefnRec [],
+          ty_module     ==> TyDefnRec [fld_name, fld_ex, fld_ds],
+          ty_v          ==> TyDefnStr,
+          ty_str        ==> TyDefnStr,
+          ty_lam        ==> TyDefnRec [fld_v, fld_b],
+          ty_a          ==> TyDefnRec [fld_f, fld_a],
+          ty_qv         ==> TyDefnRec [fld_q, fld_v],
+          ty_sig        ==> TyDefnRec [fld_v, fld_t],
+          ty_as_pat     ==> TyDefnRec [fld_alias, fld_p],
+          ty_bind       ==> TyDefnRec [fld_v, fld_b],
+          ty_data       ==> TyDefnRec [fld_v, fld_alts],
+          ty_import     ==> TyDefnRec [fld_module, fld_e],
+          ty_qualified  ==> TyDefnRec [fld_entities],
+          ty_as_mod     ==> TyDefnRec [fld_module, fld_alias]
         ],
       schemaRoot = tMod
     }
   where
     tVar =
-        uT "v" $
+        uT ty_v $
         TyInstStr (void re)
       where
         re = re_alphavar <|> re_op
@@ -81,106 +112,106 @@ haskSchema =
         re_op =
           RE.some re_opchar
     tStr =
-      uT "str" $
+      uT ty_str $
       TyInstStr (void (RE.many RE.anySym))
     tQVar =
-      uT "qv" $
+      uT ty_qv $
       TyInstRec [
-        "q" ==> tVar,
-        "v" ==> tVar <> tQVar
+        fld_q ==> tVar,
+        fld_v ==> tVar <> tQVar
       ]
     tAll =
-      uT "all" $
+      uT ty_all $
       TyInstRec []
     tMod =
-      uT "module" $
+      uT ty_module $
       TyInstRec [
-        "name" ==> tVar <> tQVar,
-        "ex"   ==> tAll <> uS' tVar,
-        "ds"   ==> uS' tDecl
+        fld_name ==> tVar <> tQVar,
+        fld_ex   ==> tAll <> uS' tVar,
+        fld_ds   ==> uS' tDecl
       ]
     tLam =
-      uT "lam" $
+      uT ty_lam $
       TyInstRec [
-        "v" ==> tVar,
-        "b" ==> tExpr
+        fld_v ==> tVar,
+        fld_b ==> tExpr
       ]
     tExprApp =
-      uT "a" $
+      uT ty_a $
       TyInstRec [
-        "f" ==> tExpr,
-        "a" ==> tExpr
+        fld_f ==> tExpr,
+        fld_a ==> tExpr
       ]
     tPatApp =
-      uT "a" $
+      uT ty_a $
       TyInstRec [
-        "f" ==> tPat,
-        "a" ==> tPat
+        fld_f ==> tPat,
+        fld_a ==> tPat
       ]
     tTypeApp =
-      uT "a" $
+      uT ty_a $
       TyInstRec [
-        "f" ==> tType,
-        "a" ==> tType
+        fld_f ==> tType,
+        fld_a ==> tType
       ]
     tDeclSig =
-      uT "sig" $
+      uT ty_sig $
       TyInstRec [
-        "v" ==> tVar <> uS tVar,
-        "t" ==> tType
+        fld_v ==> tVar <> uS tVar,
+        fld_t ==> tType
       ]
     tExprSig =
-      uT "sig" $
+      uT ty_sig $
       TyInstRec [
-        "v" ==> tExpr,
-        "t" ==> tType
+        fld_v ==> tExpr,
+        fld_t ==> tType
       ]
     tPatSig =
-      uT "sig" $
+      uT ty_sig $
       TyInstRec [
-        "v" ==> tPat,
-        "t" ==> tType
+        fld_v ==> tPat,
+        fld_t ==> tType
       ]
     tTypeSig =
-      uT "sig" $
+      uT ty_sig $
       TyInstRec [
-        "v" ==> tType,
-        "t" ==> tKind
+        fld_v ==> tType,
+        fld_t ==> tKind
       ]
     tBind =
-      uT "bind" $
+      uT ty_bind $
       TyInstRec [
-        "v" ==> tPat,
-        "b" ==> tExpr
+        fld_v ==> tPat,
+        fld_b ==> tExpr
       ]
     tData =
-      uT "data" $
+      uT ty_data $
       TyInstRec [
-        "v"    ==> tVar,
-        "alts" ==> uS tExpr
+        fld_v    ==> tVar,
+        fld_alts ==> uS tExpr
       ]
     tImport =
-      uT "import" $
+      uT ty_import $
       TyInstRec [
-        "module" ==> tVar <> tQVar <> tAsMod,
-        "e" ==> tAll <> uS' tVar <> tQualified
+        fld_module ==> tVar <> tQVar <> tAsMod,
+        fld_e ==> tAll <> uS' tVar <> tQualified
       ]
     tAsMod =
-      uT "as-mod" $
+      uT ty_as_mod $
       TyInstRec [
-        "module" ==> tVar <> tQVar,
-        "alias" ==> tVar <> tQVar
+        fld_module ==> tVar <> tQVar,
+        fld_alias ==> tVar <> tQVar
       ]
     tQualified =
-      uT "qualified" $
+      uT ty_qualified $
       TyInstRec [
-        "entities" ==> tAll <> uS' tVar
+        fld_entities ==> tAll <> uS' tVar
       ]
     tAsPat =
-      uT "as-pat" $
+      uT ty_as_pat $
       TyInstRec [
-        "alias" ==> tVar,
-        "p" ==> tPat
+        fld_alias ==> tVar,
+        fld_p ==> tPat
       ]
     tExpr =
       mconcat [
@@ -221,42 +252,49 @@ haskRecLayouts = recLayouts
   where
     recLayouts =
       [
-        "all"         ==> recLayoutAll,
-        "lam"         ==> recLayoutLam,
-        "a"           ==> recLayoutApp,
-        "module"      ==> recLayoutMod,
-        "qv"          ==> recLayoutQVar,
-        "sig"         ==> recLayoutSig,
-        "as-pat"      ==> recLayoutAsPat,
-        "bind"        ==> recLayoutBind,
-        "data"        ==> recLayoutData,
-        "import"      ==> recLayoutImport,
-        "qualified"   ==> recLayoutQualified,
-        "as-mod"      ==> recLayoutAsMod
+        ty_all         ==> recLayoutAll,
+        ty_lam         ==> recLayoutLam,
+        ty_a           ==> recLayoutApp,
+        ty_module      ==> recLayoutMod,
+        ty_qv          ==> recLayoutQVar,
+        ty_sig         ==> recLayoutSig,
+        ty_as_pat      ==> recLayoutAsPat,
+        ty_bind        ==> recLayoutBind,
+        ty_data        ==> recLayoutData,
+        ty_import      ==> recLayoutImport,
+        ty_qualified   ==> recLayoutQualified,
+        ty_as_mod      ==> recLayoutAsMod
       ]
     recLayoutAll = jumptag "∗"
     recLayoutQVar =
-      field "q" noPrec "q" <> "." <> field "v" precAllowAll "v"
+      field fld_q noPrec "q" <> "." <> field fld_v precAllowAll "v"
     recLayoutApp =
-      field "f" (precAllow ["a"]) "function" <>
-      field "a" (precAllow ["v", "qv"]) "argument"
+      field fld_f (precAllow ["a"]) "function" <>
+      field fld_a (precAllow ["v", "qv"]) "argument"
     recLayoutLam =
-      jumptag "λ" <> field "v" precAllowAll "variable"
-      `vsep` field "b" precAllowAll "body"
+      jumptag "λ" <> field fld_v precAllowAll "variable"
+      `vsep` field fld_b precAllowAll "body"
     recLayoutMod =
-      jumptag "module" <> field "name" (precAllow ["v", "qv"]) "name" <> "exports" <> field "ex" precAllowAll "entities"
-      `vsep` field "ds" precAllowAll "declarations"
+      jumptag "module" <> field fld_name (precAllow ["v", "qv"]) "name" <>
+      "exports" <> field fld_ex precAllowAll "entities"
+      `vsep` field fld_ds precAllowAll "declarations"
     recLayoutSig =
-      field "v" noPrec "variable" <> jumptag "::" <> field "t" precAllowAll "type"
+      field fld_v noPrec "variable" <> jumptag "::" <>
+      field fld_t precAllowAll "type"
     recLayoutAsPat =
-      field "alias" noPrec "alias" <> jumptag "@" <> field "p" noPrec "pattern"
+      field fld_alias noPrec "alias" <> jumptag "@" <>
+      field fld_p noPrec "pattern"
     recLayoutBind =
-      field "v" noPrec "variable" <> jumptag "=" <> field "b" precAllowAll "body"
+      field fld_v noPrec "variable" <> jumptag "=" <>
+      field fld_b precAllowAll "body"
     recLayoutData =
-      jumptag "data" <> field "v" noPrec "name" <> "=" <> field "alts" precAllowAll "alternatives"
+      jumptag "data" <> field fld_v noPrec "name" <> "=" <>
+      field fld_alts precAllowAll "alternatives"
     recLayoutImport =
-      jumptag "from" <> field "module" (precAllow ["v", "qv", "as-mod"]) "module" <> "import" <> field "e" precAllowAll "entities"
+      jumptag "from" <> field fld_module (precAllow ["v", "qv", "as-mod"]) "module" <>
+      "import" <> field fld_e precAllowAll "entities"
     recLayoutQualified =
-      jumptag "qualified" <> field "entities" (precAllow ["v"]) "entities"
+      jumptag "qualified" <> field fld_entities (precAllow ["v"]) "entities"
     recLayoutAsMod =
-      field "module" noPrec "module" <> jumptag "as" <> field "alias" noPrec "alias"
+      field fld_module noPrec "module" <> jumptag "as" <>
+      field fld_alias noPrec "alias"
