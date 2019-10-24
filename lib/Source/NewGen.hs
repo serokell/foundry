@@ -653,7 +653,8 @@ redrawUI ::
   EditorState ->
   EditorState
 redrawUI pluginInfo viewport es =
-  es & esRenderUI .~ renderUI
+  es
+    & esRenderUI .~ renderUI
     & esPointerPath .~ pathsCursor
     & esJumptags .~ jumptags
   where
@@ -886,7 +887,8 @@ layoutStr lctx str =
 
 lctxDescent :: PathSegment -> Maybe Text -> LayoutCtx -> LayoutCtx
 lctxDescent pathSegment placeholder lctx =
-  lctx & lctxPath %~ (<> mkPathBuilder pathSegment)
+  lctx
+    & lctxPath %~ (<> mkPathBuilder pathSegment)
     & lctxValidationResult %~ pathTrieLookup pathSegment
     & lctxPlaceholder .~ placeholder
 
@@ -1196,7 +1198,8 @@ reactEditorState _ (PointerMotion x y) es =
 reactEditorState _ ButtonPress es
   | Just p <- es ^. esPointerPath =
     ReactOk $
-      es & esExpr %~ setPathNode p
+      es
+        & esExpr %~ setPathNode p
         & esMode .~ ModeNormal
 reactEditorState _ (KeyPress [Control] keyCode) es
   | keyLetter 'b' keyCode =
@@ -1210,14 +1213,16 @@ reactEditorState _ (KeyPress [Control] keyCode) es
     (u : us) <- es ^. esUndo,
     let expr = es ^. esExpr =
     ReactOk $
-      es & esExpr .~ u
+      es
+        & esExpr .~ u
         & esUndo .~ us
         & esRedo %~ (expr :)
   | keyLetter 'r' keyCode,
     (r : rs) <- es ^. esRedo,
     let expr = es ^. esExpr =
     ReactOk $
-      es & esExpr .~ r
+      es
+        & esExpr .~ r
         & esRedo .~ rs
         & esUndo %~ (expr :)
 reactEditorState pluginInfo inputEvent es
@@ -1225,7 +1230,8 @@ reactEditorState pluginInfo inputEvent es
     Just (UndoFlag undoFlag, rst') <- applyAction act rctx rst =
     ReactOk $
       let es' =
-            es & esExpr .~ (rst' ^. rstNode)
+            es
+              & esExpr .~ (rst' ^. rstNode)
               & esStack .~ (rst' ^. rstStack)
               & esMode .~ (rst' ^. rstMode)
        in if undoFlag
