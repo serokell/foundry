@@ -4,14 +4,15 @@ jobs:
       vmImage: 'ubuntu-16.04'
     steps:
     - script: |
-        sudo add-apt-repository ppa:hvr/ghc
-        sudo apt-get update
-        sudo apt-get install ghc-8.6.5 cabal-install-2.4 libgtk-3-dev
-        sudo update-alternatives --config opt-ghc
-        sudo update-alternatives --config opt-cabal
+        sudo apt-get install libgtk-3-dev
+        mkdir -p $HOME/.ghcup/bin && curl https://raw.githubusercontent.com/haskell/ghcup/master/ghcup > $HOME/.ghcup/bin/ghcup && chmod +x $HOME/.ghcup/bin/ghcup
+        export PATH="$HOME/.cabal/bin:$HOME/.ghcup/bin:$PATH"
+        ghcup install 8.6.5
+        ghcup set 8.6.5
+        ghcup install-cabal
       displayName: 'Prepare system'
     - script: |
-        export PATH=/opt/ghc/bin:$HOME/.cabal/bin:$PATH
+        export PATH="$HOME/.cabal/bin:$HOME/.ghcup/bin:$PATH"
         cabal v2-update
         cabal v2-build
         cabal v2-exec which foundry
