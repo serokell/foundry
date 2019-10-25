@@ -1,6 +1,6 @@
 # Godsmen Foundry
 
-[![Build Status](https://dev.azure.com/int-index/Personal/_apis/build/status/int-index.foundry?branchName=master)](https://dev.azure.com/int-index/Personal/_build/latest?definitionId=1&branchName=master)
+[![Build Status](https://dev.azure.com/int-index/Personal/_apis/build/status/serokell.foundry?branchName=master)](https://dev.azure.com/int-index/Personal/_build/latest?definitionId=3&branchName=master)
 
 Godsmen Foundry is a Morte IDE based on Source.
 
