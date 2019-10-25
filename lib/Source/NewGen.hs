@@ -539,10 +539,14 @@ data MotionAction
   | MotionToggleEditMode
   | MotionPopSwap Node
 
+data JumpAction
+  = JumpSelect
+  | JumpCopyTo Path
+
 data Mode
   = ModeNormal
   | ModeStack
-  | ModeJump (NonEmpty (Char, Jumptag))
+  | ModeJump (NonEmpty (Char, Jumptag)) JumpAction
   | ModeMotion Bool Text MotionAction
   | ModeEdit
 
@@ -599,8 +603,7 @@ data LayoutCtx
 
 data ReactCtx
   = ReactCtx
-      { _rctxSchema :: Schema,
-        _rctxDefaultNodes :: HashMap TyName Node,
+      { _rctxDefaultNodes :: HashMap TyName Node,
         _rctxRecMoveMaps :: HashMap TyName RecMoveMap,
         _rctxJumptags :: [Jumptag]
       }
@@ -703,7 +706,7 @@ redrawUI pluginInfo viewport es =
       ModeStack -> stackRdr'
       _ -> mempty
     jumptagsRdr = case es ^. esMode of
-      ModeJump activeJumptags -> renderJumptagLabels activeJumptags
+      ModeJump activeJumptags _ -> renderJumptagLabels activeJumptags
       _ -> mempty
     selectionOrMotionRdr = case es ^. esMode of
       ModeMotion _ _ action -> renderMotion lctx action paths findZone
@@ -1191,10 +1194,20 @@ instance Monoid UndoFlag where
 
 data ReactResult a = UnknownEvent | ReactOk a
 
-reactEditorState :: PluginInfo -> InputEvent -> EditorState -> ReactResult EditorState
+reactEditorState ::
+  PluginInfo ->
+  InputEvent ->
+  EditorState ->
+  ReactResult EditorState
 reactEditorState _ (PointerMotion x y) es =
   ReactOk $
     es & esPointer .~ Offset (fromIntegral x) (fromIntegral y)
+reactEditorState pluginInfo ButtonPress es
+  | Just p <- es ^. esPointerPath,
+    ModeJump _ jumpAction <- es ^. esMode,
+    let act = commitJumpAction p jumpAction,
+    Just es' <- runReactM_EditorState pluginInfo act es =
+    ReactOk es'
 reactEditorState _ ButtonPress es
   | Just p <- es ^. esPointerPath =
     ReactOk $
@@ -1226,34 +1239,51 @@ reactEditorState _ (KeyPress [Control] keyCode) es
         & esRedo .~ rs
         & esUndo %~ (expr :)
 reactEditorState pluginInfo inputEvent es
-  | Just act <- getAction schema wd sel mode inputEvent,
-    Just (UndoFlag undoFlag, rst') <- applyAction act rctx rst =
-    ReactOk $
-      let es' =
-            es
+  | Just act <-
+      getAction
+        (pluginInfoSchema pluginInfo)
+        (es ^. esWritingDirection)
+        (selectionOfNode (es ^. esExpr))
+        (es ^. esMode)
+        inputEvent,
+    Just es' <- runReactM_EditorState pluginInfo (applyActionM act) es =
+    ReactOk es'
+reactEditorState _ _ _ = UnknownEvent
+
+runReactM_EditorState ::
+  PluginInfo ->
+  ReactM ReactState ->
+  EditorState ->
+  Maybe EditorState
+runReactM_EditorState pluginInfo act editorState =
+  case runReactM_ReactState act rctx rst of
+    Nothing -> Nothing
+    Just (UndoFlag undoFlag, rst') ->
+      let editorState' =
+            editorState
               & esExpr .~ (rst' ^. rstNode)
               & esStack .~ (rst' ^. rstStack)
               & esMode .~ (rst' ^. rstMode)
-       in if undoFlag
-            then
-              es' & esUndo %~ (expr :)
-                & esRedo .~ []
-            else es'
+       in Just $
+            if undoFlag
+              then
+                editorState'
+                  & esUndo %~ ((editorState ^. esExpr) :)
+                  & esRedo .~ []
+              else editorState'
   where
-    schema = rctx ^. rctxSchema
-    wd = es ^. esWritingDirection
-    sel = selectionOfNode expr
-    expr = es ^. esExpr
-    mode = es ^. esMode
-    rst = ReactState expr (es ^. esStack) mode
+    rst =
+      ReactState
+        { _rstNode = editorState ^. esExpr,
+          _rstStack = editorState ^. esStack,
+          _rstMode = editorState ^. esMode
+        }
     rctx =
       ReactCtx
-        { _rctxSchema = pluginInfoSchema pluginInfo,
-          _rctxDefaultNodes = pluginInfoDefaultNodes pluginInfo,
+        { _rctxDefaultNodes = pluginInfoDefaultNodes pluginInfo,
           _rctxRecMoveMaps = pluginInfoRecMoveMaps pluginInfo,
-          _rctxJumptags = es ^. esJumptags
+          _rctxJumptags = editorState ^. esJumptags
         }
-reactEditorState _ _ _ = UnknownEvent
 
 data Action
   = ActionEscapeTransientMode
@@ -1273,7 +1303,7 @@ data Action
   | ActionSelectChild Path
   | ActionSelectSiblingBackward Path
   | ActionSelectSiblingForward Path
-  | ActionActivateJumptags
+  | ActionActivateJumptags JumpAction
   | ActionJumptagLookup Char
   | ActionStartMotion Bool
   | ActionAppendMotion Char
@@ -1320,7 +1350,7 @@ getAction
       Just c <- keyChar keyCode =
       Just $ ActionAppendMotion c
     -- Jumptag lookup.
-    | ModeJump _ <- mode,
+    | ModeJump _ _ <- mode,
       KeyPress [] keyCode <- inputEvent,
       Just c <- keyChar keyCode =
       Just $ ActionJumptagLookup c
@@ -1373,10 +1403,14 @@ getAction
       KeyPress [] keyCode <- inputEvent,
       keyLetter 'x' keyCode =
       Just ActionDropStack
-    -- Enter jumptag mode.
+    -- Enter jumptag mode to select a node.
     | KeyPress [] keyCode <- inputEvent,
       keyLetter 'g' keyCode =
-      Just $ ActionActivateJumptags
+      Just $ ActionActivateJumptags JumpSelect
+    -- Enter jumptag mode to copy a node.
+    | KeyPress [Shift] keyCode <- inputEvent,
+      keyLetter 'Y' keyCode =
+      Just $ ActionActivateJumptags (JumpCopyTo selectionPath)
     -- Delete node.
     | keyCodeLetter KeyCode.Delete 'x' inputEvent =
       Just $ ActionDeleteNode selectionPath
@@ -1413,12 +1447,12 @@ getAction
 
 type ReactM s = WriterT UndoFlag (ReaderT ReactCtx (StateT s Maybe)) ()
 
-applyAction :: Action -> ReactCtx -> ReactState -> Maybe (UndoFlag, ReactState)
-applyAction act rctx rst =
+runReactM_ReactState :: ReactM ReactState -> ReactCtx -> ReactState -> Maybe (UndoFlag, ReactState)
+runReactM_ReactState act rctx rst =
   flip runStateT rst
     $ flip runReaderT rctx
     $ execWriterT
-    $ applyActionM act
+    $ act
 
 applyActionM :: Action -> ReactM ReactState
 applyActionM ActionEscapeTransientMode =
@@ -1594,11 +1628,11 @@ applyActionM (ActionSelectSiblingForward path) = do
         return (NodeSeqSel seqSel')
       _ -> A.empty
     put $ Node nodeSel' value
-applyActionM ActionActivateJumptags = do
+applyActionM (ActionActivateJumptags jumpAction) = do
   Just jumptags <- views rctxJumptags nonEmpty
-  rstMode .= ModeJump (NonEmpty.zip jumptagLabels jumptags)
+  rstMode .= ModeJump (NonEmpty.zip jumptagLabels jumptags) jumpAction
 applyActionM (ActionJumptagLookup c) = do
-  ModeJump activeJumptags <- use rstMode
+  ModeJump activeJumptags jumpAction <- use rstMode
   activeJumptags' <-
     maybeA
       $ nonEmpty
@@ -1606,10 +1640,8 @@ applyActionM (ActionJumptagLookup c) = do
       $ NonEmpty.filter (\(c', _) -> c == c')
       $ activeJumptags
   case activeJumptags' of
-    Jumptag _ path :| [] -> do
-      rstNode %= setPathNode path
-      rstMode .= ModeNormal
-    jumptags -> rstMode .= ModeJump (NonEmpty.zip jumptagLabels jumptags)
+    Jumptag _ path :| [] -> commitJumpAction path jumpAction
+    jumptags -> rstMode .= ModeJump (NonEmpty.zip jumptagLabels jumptags) jumpAction
 applyActionM (ActionStartMotion fromEditMode) = do
   rctx <- ask
   rstMode .= mkModeMotion rctx fromEditMode ""
@@ -1634,6 +1666,20 @@ applyActionM (ActionCommitMotion path) = do
       case node of
         Node _ (ValueStr _ _) -> rstMode .= ModeEdit
         _ -> return ()
+
+commitJumpAction :: Path -> JumpAction -> ReactM ReactState
+commitJumpAction path jumpAction = do
+  alwaysSucceed $
+    case jumpAction of
+      JumpSelect -> do
+        rstNode %= setPathNode path
+      JumpCopyTo destinationPath -> do
+        Just sourceNode@Node {} <- uses rstNode (preview (atPath path))
+        zoom (rstNode . atPath destinationPath) $ do
+          Hole <- get
+          setUndoFlag
+          put sourceNode
+  rstMode .= ModeNormal
 
 parseMotionAction :: ReactCtx -> Text -> MotionAction
 parseMotionAction rctx motion =
@@ -1662,7 +1708,7 @@ popSwapNode path n = do
       case node of
         Hole -> return []
         Node {} -> return [node]
-  forM_ nodes $ \node -> do
+  for_ nodes $ \node -> do
     rstMode .= ModeStack
     rstStack %= (node :)
 
