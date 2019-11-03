@@ -1,4 +1,10 @@
-{ pkgs ? import <nixpkgs> {},
+let
+
+  nixpkgsPin = import ./nix/nixpkgs-pin.nix;
+
+in
+
+{ pkgs ? import (builtins.fetchTarball nixpkgsPin) {},
   hc ? "ghc865"
 }:
 
