@@ -20,9 +20,7 @@ Implementation status:
 ## Getting Started
 
 ```
-$ nix-shell
-$ cabal v2-update
-$ cabal v2-build morte-to-sdam
-$ cabal v2-run -v0 -- morte-to-sdam "./expr.morte" > expr.sd
-$ cabal v2-run -- foundry expr.sd
+$ nix-build
+$ result/bin/morte-to-sdam "./expr.morte" > expr.sd
+$ result/bin/foundry expr.sd
 ```
