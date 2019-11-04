@@ -70,7 +70,7 @@ pkgs.stdenv.mkDerivation rec {
   src = ./.;
   buildCommand = ''
     mkdir -p $out/bin $out/home
-    cp -r $src/foundry.cabal $src/lib $src/src .
+    cp -r $src/foundry.cabal $src/src .
     HOME=$out/home \
       cabal --offline --config-file /dev/null v2-install \
         --builddir=$out/dist \

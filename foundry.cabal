@@ -3,6 +3,19 @@ name:                foundry
 version:             0.1.0.0
 build-type:          Simple
 
+library source-layout
+  exposed-modules:     Source.Layout
+  build-depends:       base >=4.7, unordered-containers,
+                       hashable, text,
+                       sdam
+  hs-source-dirs:      src/layout
+  default-language:    Haskell2010
+  default-extensions:  RankNTypes
+  ghc-options:         -Wall -O2
+  ghc-prof-options:    -fprof-auto
+                       -auto-all
+                       -caf-all
+
 library
 
   exposed-modules:     Source
@@ -32,11 +45,36 @@ library
                ,       slay-combinators
                ,       slay-cairo
                ,       sdam
+               ,       source-layout
 
-  hs-source-dirs:      lib
+  hs-source-dirs:      src/driver
 
   default-language:    Haskell2010
 
+  ghc-options:         -Wall -O2
+  ghc-prof-options:    -fprof-auto
+                       -auto-all
+                       -caf-all
+
+library source-language-haskell
+  exposed-modules:     Source.Language.Haskell
+  build-depends:       base >=4.7, regex-applicative,
+                       unordered-containers,
+                       sdam, source-layout
+  hs-source-dirs:      src/lang/haskell
+  default-language:    Haskell2010
+  ghc-options:         -Wall -O2
+  ghc-prof-options:    -fprof-auto
+                       -auto-all
+                       -caf-all
+
+library source-language-morte
+  exposed-modules:     Source.Language.Morte
+  build-depends:       base >=4.7, regex-applicative,
+                       unordered-containers,
+                       sdam, source-layout
+  hs-source-dirs:      src/lang/morte
+  default-language:    Haskell2010
   ghc-options:         -Wall -O2
   ghc-prof-options:    -fprof-auto
                        -auto-all
@@ -46,9 +84,9 @@ executable foundry
   main-is:             Foundry.hs
 
   build-depends:       base, unordered-containers, megaparsec, regex-applicative,
-                       sdam, foundry
+                       sdam, source-language-morte, source-language-haskell, foundry
 
-  hs-source-dirs:      src
+  hs-source-dirs:      src/bin
 
   default-language:    Haskell2010
 
@@ -62,14 +100,14 @@ executable hask
   main-is:             Hask.hs
 
   build-depends:       base, unordered-containers, megaparsec, regex-applicative,
-                       sdam, foundry
+                       sdam, source-language-haskell, foundry
 
-  hs-source-dirs:      src
+  hs-source-dirs:      src/bin
 
   default-language:    Haskell2010
 
   ghc-options:         -Wall -threaded -O2
-                       -Wno-missing-signatures
+
   ghc-prof-options:    -fprof-auto
                        -rtsopts
                        -auto-all
@@ -78,8 +116,8 @@ executable hask
 executable morte-to-sdam
   main-is:             MorteToSdam.hs
   build-depends:       base, text, unordered-containers,
-                       morte, sdam
-  hs-source-dirs:      src
+                       morte, sdam, source-language-morte
+  hs-source-dirs:      src/bin
   default-language:    Haskell2010
   ghc-options:         -Wall -threaded -O2
 
@@ -87,7 +125,7 @@ executable haskell-to-sdam
   main-is:             HaskellToSdam.hs
   build-depends:       base, text, containers, unordered-containers,
                        split,
-                       ghc-lib-parser, sdam
-  hs-source-dirs:      src
+                       ghc-lib-parser, sdam, source-language-haskell
+  hs-source-dirs:      src/bin
   default-language:    Haskell2010
   ghc-options:         -Wall -threaded -O2

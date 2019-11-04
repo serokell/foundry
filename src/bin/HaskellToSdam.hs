@@ -1,7 +1,6 @@
 {-# LANGUAGE LambdaCase #-}
 {-# LANGUAGE NamedFieldPuns #-}
 {-# LANGUAGE OverloadedLists #-}
-{-# LANGUAGE OverloadedStrings #-}
 
 module Main where
 
@@ -22,6 +21,7 @@ import qualified Parser as GHC
 import qualified RdrName as GHC
 import Sdam.Core
 import Sdam.Printer
+import Source.Language.Haskell
 import qualified SrcLoc as GHC
 import qualified StringBuffer as GHC
 import System.Environment (getArgs)
@@ -41,18 +41,18 @@ main = do
 convertModule :: GHC.HsModule GhcPs -> RenderValue
 convertModule GHC.HsModule {GHC.hsmodName, GHC.hsmodExports, GHC.hsmodDecls} =
   mkRecValue
-    "module"
-    [ ( "name",
+    ty_module
+    [ ( fld_name,
         case hsmodName of
-          Nothing -> mkStrValue "v" "Main"
+          Nothing -> mkStrValue ty_v (Text.pack "Main")
           Just name -> convertModuleName (GHC.unLoc name)
       ),
-      ( "ex",
+      ( fld_ex,
         case hsmodExports of
-          Nothing -> mkRecValue "all" []
+          Nothing -> mkRecValue ty_all []
           Just ex -> convertExports (GHC.unLoc ex)
       ),
-      ("ds", mkSeqValue (convertDecl . GHC.unLoc) hsmodDecls)
+      (fld_ds, mkSeqValue (convertDecl . GHC.unLoc) hsmodDecls)
     ]
 
 convertModuleName :: GHC.ModuleName -> RenderValue
@@ -61,12 +61,12 @@ convertModuleName modname =
     [] -> error "convertModuleName: empty list"
     s : ss -> toQVs s ss
   where
-    toQVs s [] = mkStrValue "v" (Text.pack s)
+    toQVs s [] = mkStrValue ty_v (Text.pack s)
     toQVs q (s : ss) =
       mkRecValue
-        "qv"
-        [ ("q", mkStrValue "v" (Text.pack q)),
-          ("v", toQVs s ss)
+        ty_qv
+        [ (fld_q, mkStrValue ty_v (Text.pack q)),
+          (fld_v, toQVs s ss)
         ]
 
 convertExports :: [GHC.LIE GhcPs] -> RenderValue
@@ -94,14 +94,14 @@ convertFunBind _ _ = error "TODO: convertFunBind"
 convertMatch :: GHC.IdP GhcPs -> GHC.Match GhcPs (GHC.LHsExpr GhcPs) -> RenderValue
 convertMatch name GHC.Match {GHC.m_pats, GHC.m_grhss} =
   mkRecValue
-    "bind"
-    [ ("v", toApps name m_pats),
-      ("b", convertGRHSs m_grhss)
+    ty_bind
+    [ (fld_v, toApps name m_pats),
+      (fld_b, convertGRHSs m_grhss)
     ]
   where
     toApps n ps =
       foldl
-        (\f p -> mkRecValue "a" [("f", f), ("a", p)])
+        (\f p -> mkRecValue ty_a [(fld_f, f), (fld_a, p)])
         (convertName n)
         (map convertPat ps)
 convertMatch _ _ = error "TODO: convertMatch"
@@ -121,35 +121,35 @@ convertGRHS _ = error "TODO: convertGRHS"
 convertTypeSig :: [GHC.IdP GhcPs] -> GHC.HsType GhcPs -> RenderValue
 convertTypeSig names ty =
   mkRecValue
-    "sig"
-    [ ("v", mkSeqValue convertName names),
-      ("t", convertType ty)
+    ty_sig
+    [ (fld_v, mkSeqValue convertName names),
+      (fld_t, convertType ty)
     ]
 
 convertName :: GHC.IdP GhcPs -> RenderValue
 convertName name =
-  mkStrValue "v" (Text.pack (GHC.occNameString (GHC.rdrNameOcc name)))
+  mkStrValue ty_v (Text.pack (GHC.occNameString (GHC.rdrNameOcc name)))
 
 convertType :: GHC.HsType GhcPs -> RenderValue
 convertType (GHC.HsTyVar _ _ name) = convertName (GHC.unLoc name)
 convertType (GHC.HsAppTy _ t1 t2) =
   mkRecValue
-    "a"
-    [ ("f", convertType (GHC.unLoc t1)),
-      ("a", convertType (GHC.unLoc t2))
+    ty_a
+    [ (fld_f, convertType (GHC.unLoc t1)),
+      (fld_a, convertType (GHC.unLoc t2))
     ]
 convertType (GHC.HsTupleTy _ GHC.HsBoxedOrConstraintTuple []) =
   -- TODO: Unit representation
-  mkStrValue "v" "Unit"
+  mkStrValue ty_v (Text.pack "Unit")
 convertType _ = error "TODO: convertType"
 
 convertExpr :: GHC.HsExpr GhcPs -> RenderValue
 convertExpr (GHC.HsVar _ name) = convertName (GHC.unLoc name)
 convertExpr (GHC.HsApp _ e1 e2) =
   mkRecValue
-    "a"
-    [ ("f", convertExpr (GHC.unLoc e1)),
-      ("a", convertExpr (GHC.unLoc e2))
+    ty_a
+    [ (fld_f, convertExpr (GHC.unLoc e1)),
+      (fld_a, convertExpr (GHC.unLoc e2))
     ]
 convertExpr (GHC.HsLit _ lit) =
   convertLit lit
@@ -157,7 +157,7 @@ convertExpr _ = error "TODO: convertExpr"
 
 convertLit :: GHC.HsLit GhcPs -> RenderValue
 convertLit (GHC.HsString _ s) =
-  mkStrValue "str" (Text.pack (GHC.unpackFS s))
+  mkStrValue ty_str (Text.pack (GHC.unpackFS s))
 convertLit _ = error "TODO: convertLit"
 
 mkRecValue :: TyName -> [(FieldName, RenderValue)] -> RenderValue

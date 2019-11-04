@@ -7,16 +7,16 @@ dev/build:
 	cabal v2-build
 
 dev/watch:
-	watchman-make -p '*.cabal' 'lib/**/*.hs' 'src/**/*.hs' -t dev/build
+	watchman-make -p '*.cabal' 'src/**/*.hs' -t dev/build
 
 dev/run:
 	cabal v2-run -- foundry "./expr.morte"
 
 fmt:
-	ormolu -c --mode inplace `find lib src -name "*.hs"`
+	ormolu -c --mode inplace `find src -name "*.hs"`
 
 tags:
-	fast-tags -R lib src
+	fast-tags -R src
 
 clean:
 	cabal v2-clean
