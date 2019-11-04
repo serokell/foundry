@@ -1,6 +1,5 @@
 {-# LANGUAGE LambdaCase #-}
 {-# LANGUAGE OverloadedLists #-}
-{-# LANGUAGE OverloadedStrings #-}
 
 module Main where
 
@@ -15,6 +14,7 @@ import qualified Morte.Import as M.I
 import qualified Morte.Parser as M.P
 import Sdam.Core
 import Sdam.Printer
+import Source.Language.Morte
 import System.Environment (getArgs)
 import System.Exit (die)
 
@@ -40,43 +40,43 @@ convertExpr = \case
 
 convertConst :: M.Const -> RenderValue
 convertConst = \case
-  M.Star -> mkRecValue "star" []
-  M.Box -> mkRecValue "box" []
+  M.Star -> mkRecValue ty_star []
+  M.Box -> mkRecValue ty_box []
 
 convertVar :: M.Var -> RenderValue
 convertVar = \case
-  M.V t 0 -> mkStrValue "v" (Text.Lazy.toStrict t)
+  M.V t 0 -> mkStrValue ty_v (Text.Lazy.toStrict t)
   M.V t n ->
     mkRecValue
-      "iv"
-      [ ("var", mkStrValue "v" (Text.Lazy.toStrict t)),
-        ("index", mkStrValue "nat" (Text.pack (show n)))
+      ty_iv
+      [ (fld_var, mkStrValue ty_v (Text.Lazy.toStrict t)),
+        (fld_index, mkStrValue ty_nat (Text.pack (show n)))
       ]
 
 convertLam :: Text.Lazy.Text -> M.Expr Void -> M.Expr Void -> RenderValue
 convertLam x _A b =
   mkRecValue
-    "lam"
-    [ ("var", mkStrValue "v" (Text.Lazy.toStrict x)),
-      ("ty", convertExpr _A),
-      ("body", convertExpr b)
+    ty_lam
+    [ (fld_var, mkStrValue ty_v (Text.Lazy.toStrict x)),
+      (fld_ty, convertExpr _A),
+      (fld_body, convertExpr b)
     ]
 
 convertPi :: Text.Lazy.Text -> M.Expr Void -> M.Expr Void -> RenderValue
 convertPi x _A _B =
   mkRecValue
-    "pi"
-    [ ("var", mkStrValue "v" (Text.Lazy.toStrict x)),
-      ("ty", convertExpr _A),
-      ("body", convertExpr _B)
+    ty_pi
+    [ (fld_var, mkStrValue ty_v (Text.Lazy.toStrict x)),
+      (fld_ty, convertExpr _A),
+      (fld_body, convertExpr _B)
     ]
 
 convertApp :: M.Expr Void -> M.Expr Void -> RenderValue
 convertApp f a =
   mkRecValue
-    "a"
-    [ ("fn", convertExpr f),
-      ("arg", convertExpr a)
+    ty_a
+    [ (fld_fn, convertExpr f),
+      (fld_arg, convertExpr a)
     ]
 
 mkRecValue :: TyName -> [(FieldName, RenderValue)] -> RenderValue

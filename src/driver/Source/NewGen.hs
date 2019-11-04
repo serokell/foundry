@@ -107,9 +107,7 @@ import Data.Foldable as Foldable
 import Data.Function (on)
 import Data.HashMap.Strict (HashMap)
 import qualified Data.HashMap.Strict as HashMap
-import Data.HashSet (HashSet)
 import qualified Data.HashSet as HashSet
-import Data.Hashable (Hashable)
 import Data.List as List
 import Data.List.NonEmpty as NonEmpty
 import Data.Maybe
@@ -134,6 +132,7 @@ import Slay.Combinators
 import Slay.Core
 import Source.Input
 import qualified Source.Input.KeyCode as KeyCode
+import Source.Layout
 
 --------------------------------------------------------------------------------
 -- Values
@@ -250,19 +249,6 @@ rightOf (Extents vacantWidth _) collage =
 
 data WritingDirection = WritingDirectionLTR | WritingDirectionRTL
 
-infixr 1 `vsep`
-
-class (IsString a, Semigroup a) => Layout a where
-
-  vsep :: a -> a -> a
-
-  field :: FieldName -> PrecPredicate -> Text -> a
-
-  jumptag :: a -> a
-
-noPrec :: PrecPredicate
-noPrec = PrecPredicate (const (PrecBorder True))
-
 newtype RecLayoutFn
   = RecLayoutFn
       { appRecLayoutFn ::
@@ -318,25 +304,6 @@ withJumptag path =
   collageAnnotate (\o -> (mempty, mempty, pathJumptag o))
   where
     pathJumptag offset = DList.singleton (Jumptag offset path)
-
-newtype ALayoutFn = ALayoutFn (forall a. Layout a => a)
-
-instance IsString ALayoutFn where
-  fromString s = ALayoutFn (fromString s)
-
-instance Semigroup ALayoutFn where
-  ALayoutFn a <> ALayoutFn b =
-    ALayoutFn (a <> b)
-
-instance Layout ALayoutFn where
-
-  ALayoutFn a `vsep` ALayoutFn b =
-    ALayoutFn (a `vsep` b)
-
-  field fieldName precPredicate placeholder =
-    ALayoutFn (field fieldName precPredicate placeholder)
-
-  jumptag (ALayoutFn a) = ALayoutFn (jumptag a)
 
 newtype Find a b = Find (a -> Maybe b)
 
@@ -450,50 +417,6 @@ ubuntuFont = Font "Ubuntu" 12 FontWeightNormal
 
 ubuntuMonoFont :: Font
 ubuntuMonoFont = Font "Ubuntu Mono" 12 FontWeightNormal
-
--- | Is a precedence border needed?
-newtype PrecBorder = PrecBorder Bool
-
-instance Semigroup PrecBorder where
-  PrecBorder a <> PrecBorder b = PrecBorder (a || b)
-
-instance Monoid PrecBorder where
-  mempty = PrecBorder False
-
--- | Layouts not enclosed by a precedence border.
-newtype PrecUnenclosed = PrecUnenclosed (HashSet TyName)
-
-instance Semigroup PrecUnenclosed where
-  PrecUnenclosed a <> PrecUnenclosed b =
-    PrecUnenclosed (HashSet.union a b)
-
-instance Monoid PrecUnenclosed where
-  mempty = PrecUnenclosed HashSet.empty
-
-addUnenclosed :: TyName -> PrecUnenclosed -> PrecUnenclosed
-addUnenclosed tyName (PrecUnenclosed s) =
-  PrecUnenclosed (HashSet.insert tyName s)
-
-guardUnenclosed :: PrecBorder -> PrecUnenclosed -> PrecUnenclosed
-guardUnenclosed (PrecBorder True) = const mempty
-guardUnenclosed (PrecBorder False) = id
-
-newtype PrecPredicate
-  = PrecPredicate {appPrecPredicate :: PrecUnenclosed -> PrecBorder}
-
-precAllow :: HashSet TyName -> PrecPredicate
-precAllow allowed =
-  PrecPredicate $ \(PrecUnenclosed unenclosed) ->
-    PrecBorder $
-      -- Need a border unless all of unenclosed layouts are allowed.
-      not (unenclosed `hashSet_isSubsetOf` allowed)
-
-precAllowAll :: PrecPredicate
-precAllowAll = PrecPredicate (const (PrecBorder False))
-
-hashSet_isSubsetOf :: (Eq a, Hashable a) => HashSet a -> HashSet a -> Bool
-hashSet_isSubsetOf sub sup =
-  all (\k -> HashSet.member k sup) sub
 
 lrtbMargin :: Margin -> LRTB Natural
 lrtbMargin (Margin l r t b) = lrtb l r t b
