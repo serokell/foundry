@@ -26,3 +26,6 @@ MAlonzo
 
 # Sdam
 *.sd
+
+# Nix
+result

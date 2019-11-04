@@ -20,7 +20,7 @@ jobs:
         echo $FILES
         ormolu -c --mode check $FILES
       displayName: 'Check formatting'
-  - job: Linux
+  - job: Ubuntu
     pool:
       vmImage: 'ubuntu-16.04'
     steps:
