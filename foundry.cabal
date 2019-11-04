@@ -129,3 +129,13 @@ executable haskell-to-sdam
   hs-source-dirs:      src/bin
   default-language:    Haskell2010
   ghc-options:         -Wall -threaded -O2
+
+executable sdam-to-svg
+  main-is:             SdamToSvg.hs
+  build-depends:       base, megaparsec, cairo, filepath,
+                       slay-core, sdam, foundry,
+                       source-language-haskell,
+                       source-language-morte
+  hs-source-dirs:      src/bin
+  default-language:    Haskell2010
+  ghc-options:         -Wall -threaded -O2

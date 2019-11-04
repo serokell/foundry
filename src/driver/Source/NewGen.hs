@@ -52,6 +52,14 @@ module Source.NewGen
     noPrec,
     ALayoutFn (..),
     WritingDirection (..),
+    LayoutCtx (..),
+
+    -- * Draw (ext)
+    layoutNodeStandalone,
+    foldCairoCollage,
+    getNoAnn,
+    withDefaultDrawCtx,
+    cairoRender,
 
     -- * React
     ReactResult (..),
@@ -221,6 +229,10 @@ instance Inj p a => Inj p (DrawCtx a) where
 
 withDrawCtx :: Paths -> CursorBlink -> DrawCtx a -> a
 withDrawCtx paths curBlink (DrawCtx f) = f paths curBlink
+
+withDefaultDrawCtx :: DrawCtx a -> a
+withDefaultDrawCtx (DrawCtx f) =
+  f (Paths Nothing (Selection emptyPath Nothing Nothing)) CursorInvisible
 
 textline ::
   Inj (CairoElement DrawCtx) a =>
@@ -698,6 +710,16 @@ layoutNodeStack lctx nodes =
     $ case nodes of
       [] -> punct "end of stack"
       n : _ -> snd (layoutNode lctx' n precAllowAll)
+  where
+    lctx' = lctx {_lctxValidationResult = mempty}
+    backgroundRect = rect nothing dark1'
+
+layoutNodeStandalone :: Monoid n => LayoutCtx -> Node -> Collage n El
+layoutNodeStandalone lctx node =
+  mapCollageAnnotation (const mempty)
+    $ substrate 0 backgroundRect
+    $ substrate 4 (outline 2 stackBorderColor)
+    $ snd (layoutNode lctx' node precAllowAll)
   where
     lctx' = lctx {_lctxValidationResult = mempty}
     backgroundRect = rect nothing dark1'
