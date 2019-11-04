@@ -15,13 +15,29 @@ Implementation status:
 * [ ] local storage
 * [ ] browsing Sigil
 
-[sigil.place/tutorial/morte/1.2/even](http://sigil.place/tutorial/morte/1.2/even)
-![Rendering Morte](https://pbs.twimg.com/media/CMuX9DxUcAAZSYh.png:large)
+[sigil.place/tutorial/morte/1.7.1/even](http://sigil.place/tutorial/morte/1.7.1/even)
+![Rendering Morte](examples/expr.svg)
 
 ## Getting Started
 
 ```
 $ nix-build
-$ result/bin/morte-to-sdam "./expr.morte" > expr.sd
+$ result/bin/morte-to-sdam "./examples/expr.morte" > expr.sd
+$ result/bin/sdam-to-svg --morte expr.sd
 $ result/bin/foundry expr.sd
+```
+
+## Tooling
+
+```
+$ nix-shell -p haskellPackages.fast-tags haskellPackages.ormolu
+$ make tags
+$ make fmt
+```
+
+## SVG Optimization
+
+```
+$ nix-shell -p nodePackages.svgo
+$ svgo expr.svg
 ```

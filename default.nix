@@ -75,7 +75,7 @@ pkgs.stdenv.mkDerivation rec {
       cabal --offline --config-file /dev/null v2-install \
         --builddir=$out/dist \
         --installdir=$out/bin \
-        exe:foundry exe:morte-to-sdam exe:hask exe:haskell-to-sdam
+        exe:foundry exe:morte-to-sdam exe:hask exe:haskell-to-sdam exe:sdam-to-svg
   '';
   buildInputs = [
     (haskellPackages.ghcWithPackages haskell_inputs)
