@@ -33,40 +33,40 @@ haskellRecLayouts = recLayouts
         ty_qualified ==> recLayoutQualified,
         ty_as_mod ==> recLayoutAsMod
       ]
-    recLayoutAll = jumptag "∗"
+    recLayoutAll = "∗"
     recLayoutQVar =
       field fld_q noPrec "q" <> "." <> field fld_v precAllowAll "v"
     recLayoutApp =
       field fld_f (precAllow [ty_a]) "function"
         <> field fld_a (precAllow [ty_v, ty_qv]) "argument"
     recLayoutLam =
-      jumptag "λ" <> field fld_v precAllowAll "variable"
+      "λ" <> field fld_v precAllowAll "variable"
         `vsep` field fld_b precAllowAll "body"
     recLayoutMod =
-      jumptag "module" <> field fld_name (precAllow ["v", "qv"]) "name"
+      "module" <> field fld_name (precAllow ["v", "qv"]) "name"
         <> "exports"
         <> field fld_ex precAllowAll "entities"
         `vsep` field fld_ds precAllowAll "declarations"
     recLayoutSig =
-      field fld_v noPrec "variable" <> jumptag "::"
+      field fld_v noPrec "variable" <> "::"
         <> field fld_t precAllowAll "type"
     recLayoutAsPat =
-      field fld_alias noPrec "alias" <> jumptag "@"
+      field fld_alias noPrec "alias" <> "@"
         <> field fld_p noPrec "pattern"
     recLayoutBind =
-      field fld_v noPrec "variable" <> jumptag "="
+      field fld_v noPrec "variable" <> "="
         <> field fld_b precAllowAll "body"
     recLayoutData =
-      jumptag "data" <> field fld_v noPrec "name" <> "="
+      "data" <> field fld_v noPrec "name" <> "="
         <> field fld_alts precAllowAll "alternatives"
     recLayoutImport =
-      jumptag "from" <> field fld_module (precAllow [ty_v, ty_qv, ty_as_mod]) "module"
+      "from" <> field fld_module (precAllow [ty_v, ty_qv, ty_as_mod]) "module"
         <> "import"
         <> field fld_e precAllowAll "entities"
     recLayoutQualified =
-      jumptag "qualified" <> field fld_entities (precAllow [ty_v]) "entities"
+      "qualified" <> field fld_entities (precAllow [ty_v]) "entities"
     recLayoutAsMod =
-      field fld_module noPrec "module" <> jumptag "as"
+      field fld_module noPrec "module" <> "as"
         <> field fld_alias noPrec "alias"
 
 --------------------------------------------------------------------------------

@@ -58,8 +58,6 @@ class (IsString a, Semigroup a) => Layout a where
 
   field :: FieldName -> PrecPredicate -> Text -> a
 
-  jumptag :: a -> a
-
 infixr 1 `vsep`
 
 noPrec :: PrecPredicate
@@ -81,5 +79,3 @@ instance Layout ALayoutFn where
 
   field fieldName precPredicate placeholder =
     ALayoutFn (field fieldName precPredicate placeholder)
-
-  jumptag (ALayoutFn a) = ALayoutFn (jumptag a)
