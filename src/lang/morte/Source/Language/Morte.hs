@@ -24,8 +24,8 @@ morteRecLayouts = recLayouts
       [ ty_lam ==> recLayoutLam,
         ty_pi ==> recLayoutPi,
         ty_a ==> recLayoutApp,
-        ty_star ==> jumptag "★",
-        ty_box ==> jumptag "□",
+        ty_star ==> "★",
+        ty_box ==> "□",
         ty_iv ==> recLayoutIVar
       ]
     precAll = precAllow (HashMap.keysSet recLayouts)
@@ -35,13 +35,13 @@ morteRecLayouts = recLayouts
       field fld_fn (prec [ty_a]) "function"
         <> field fld_arg (prec []) "argument"
     recLayoutLam =
-      jumptag "λ" <> field fld_var noPrec "variable" <> ":" <> field fld_ty precAll "type"
+      "λ" <> field fld_var noPrec "variable" <> ":" <> field fld_ty precAll "type"
         `vsep` field "body" precAll "body"
     recLayoutPi =
-      jumptag "Π" <> field fld_var noPrec "variable" <> ":" <> field fld_ty precAll "type"
+      "Π" <> field fld_var noPrec "variable" <> ":" <> field fld_ty precAll "type"
         `vsep` field "body" precAll "body"
     recLayoutIVar =
-      field fld_var noPrec "variable" <> jumptag "@" <> field fld_index noPrec "index"
+      field fld_var noPrec "variable" <> "@" <> field fld_index noPrec "index"
 
 --------------------------------------------------------------------------------
 ---- Schema

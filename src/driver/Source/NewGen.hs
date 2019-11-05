@@ -48,7 +48,7 @@ module Source.NewGen
     PrecPredicate,
     precAllow,
     precAllowAll,
-    Layout (vsep, field, jumptag),
+    Layout (vsep, field),
     noPrec,
     ALayoutFn (..),
     WritingDirection (..),
@@ -197,6 +197,11 @@ validateNode schema node = validate schema (toValidationValue node)
 ---- Drawing
 --------------------------------------------------------------------------------
 
+jumptagLabels :: NonEmpty Char
+jumptagLabels =
+  -- Dvorak-friendly, should be configurable.
+  NonEmpty.fromList "aoeuhtnspcrjm"
+
 data CursorBlink = CursorVisible | CursorInvisible
 
 blink :: CursorBlink -> CursorBlink
@@ -272,8 +277,11 @@ newtype RecLayoutFn
 
 instance IsString RecLayoutFn where
   fromString s =
-    RecLayoutFn $ \_ _ _ ->
-      (mempty, punct (fromString s))
+    RecLayoutFn $ \path _ _ ->
+      (mempty, if jumptagFits then layoutWithJumptag path a else a)
+    where
+      a = punct (fromString s)
+      jumptagFits = widthOf a >= jumptagLabelMaxWidth
 
 instance Semigroup RecLayoutFn where
   RecLayoutFn a <> RecLayoutFn b =
@@ -303,16 +311,11 @@ instance Layout RecLayoutFn where
     RecLayoutFn $ \_ m _ ->
       (m HashMap.! fieldName) precPredicate
 
-  jumptag (RecLayoutFn a) =
-    RecLayoutFn $ \path m wd ->
-      let (aUnenclosed, a') = a path m wd
-       in (aUnenclosed, withJumptag path a')
-
 getRecLayoutFn :: ALayoutFn -> RecLayoutFn
 getRecLayoutFn (ALayoutFn recLayoutFn) = recLayoutFn
 
-withJumptag :: Path -> Collage Ann El -> Collage Ann El
-withJumptag path =
+layoutWithJumptag :: Path -> Collage Ann El -> Collage Ann El
+layoutWithJumptag path =
   collageAnnotate (\o -> (mempty, mempty, pathJumptag o))
   where
     pathJumptag offset = DList.singleton (Jumptag offset path)
@@ -365,12 +368,19 @@ renderJumptagLabels = foldMap renderJumptagLabel
 
 renderJumptagLabel :: (Char, Jumptag) -> CairoRender DrawCtx
 renderJumptagLabel (c, Jumptag o _) =
-  getNoAnn
-    $ foldCairoCollage o
-    $ substrate 1 (rect nothing dark2)
-    $ textline (rgb 255 127 80) ubuntuMonoFont label nothing
+  getNoAnn $ foldCairoCollage o $ layoutJumptagLabel c
+
+layoutJumptagLabel :: Monoid n => Char -> Collage n El
+layoutJumptagLabel c =
+  substrate 1 (rect nothing dark2) $
+    textline (rgb 255 127 80) ubuntuMonoFont label nothing
   where
     label = Text.toUpper (Text.singleton c)
+
+jumptagLabelMaxWidth :: Natural
+jumptagLabelMaxWidth =
+  maximum @NonEmpty $
+    fmap (widthOf . layoutJumptagLabel @()) jumptagLabels
 
 findPathInBox :: Path -> (Offset, Extents) -> FindPath
 findPathInBox p box =
@@ -778,7 +788,7 @@ layoutCollapsed :: LayoutCtx -> (PrecUnenclosed, Collage Ann El)
 layoutCollapsed lctx =
   (,) (mempty @PrecUnenclosed)
     $ layoutSel (BorderValid precBorder) path
-    $ withJumptag path
+    $ layoutWithJumptag path
     $ punct "…"
   where
     precBorder = PrecBorder (lctx ^. lctxPrecBordersAlways)
@@ -788,7 +798,7 @@ layoutHole :: LayoutCtx -> (PrecUnenclosed, Collage Ann El)
 layoutHole lctx =
   (,) (mempty @PrecUnenclosed)
     $ layoutSel (BorderValid precBorder) path
-    $ withJumptag path
+    $ layoutWithJumptag path
     $ hole (fromMaybe "" (lctx ^. lctxPlaceholder))
   where
     hole t = textline dark2 ubuntuFont ("_" <> t) nothing
@@ -815,7 +825,7 @@ layoutStr ::
 layoutStr lctx str =
   (,) (mempty @PrecUnenclosed)
     $ layoutSel (toBorder lctx precBorder) path
-    $ withJumptag path
+    $ layoutWithJumptag path
     $ textWithCursor
       str
       ( \Paths {pathsSelection} ->
@@ -915,7 +925,7 @@ layoutSeqItems ::
   (PrecUnenclosed, Collage Ann El)
 layoutSeqItems path xs =
   case nonEmpty xs of
-    Nothing -> \_wd -> (mempty, withJumptag path (punct "∅"))
+    Nothing -> \_wd -> (mempty, layoutWithJumptag path (punct "∅"))
     Just xs' -> layoutSeqItems' xs'
 
 layoutSeqItems' ::
@@ -1575,7 +1585,7 @@ applyActionM (ActionSelectSiblingForward path) = do
     put $ Node nodeSel' value
 applyActionM (ActionActivateJumptags jumpAction) = do
   Just jumptags <- views rctxJumptags nonEmpty
-  rstMode .= ModeJump (NonEmpty.zip jumptagLabels jumptags) jumpAction
+  rstMode .= ModeJump (withJumptagLabels jumptags) jumpAction
 applyActionM (ActionJumptagLookup c) = do
   ModeJump activeJumptags jumpAction <- use rstMode
   activeJumptags' <-
@@ -1586,7 +1596,7 @@ applyActionM (ActionJumptagLookup c) = do
       $ activeJumptags
   case activeJumptags' of
     Jumptag _ path :| [] -> commitJumpAction path jumpAction
-    jumptags -> rstMode .= ModeJump (NonEmpty.zip jumptagLabels jumptags) jumpAction
+    jumptags -> rstMode .= ModeJump (withJumptagLabels jumptags) jumpAction
 applyActionM (ActionStartMotion fromEditMode) = do
   rctx <- ask
   rstMode .= mkModeMotion rctx fromEditMode ""
@@ -1611,6 +1621,9 @@ applyActionM (ActionCommitMotion path) = do
       case node of
         Node _ (ValueStr _ _) -> rstMode .= ModeEdit
         _ -> return ()
+
+withJumptagLabels :: NonEmpty b -> NonEmpty (Char, b)
+withJumptagLabels = NonEmpty.zip (NonEmpty.cycle jumptagLabels)
 
 commitJumpAction :: Path -> JumpAction -> ReactM ReactState
 commitJumpAction path jumpAction = do
@@ -1656,11 +1669,6 @@ popSwapNode path n = do
   for_ nodes $ \node -> do
     rstMode .= ModeStack
     rstStack %= (node :)
-
-jumptagLabels :: NonEmpty Char
-jumptagLabels = NonEmpty.fromList (List.cycle "aoeuhtnspcrjm")
-
--- Dvorak-friendly, should be configurable.
 
 rotate :: [a] -> [a]
 rotate [] = []
@@ -1799,8 +1807,6 @@ instance Layout VisualFieldList where
 
   field fieldName _ _ = VisualFieldList [fieldName]
 
-  jumptag = id
-
 sortByVisualOrder :: ALayoutFn -> [FieldName]
 sortByVisualOrder recLayoutFn = sortedFields
   where
@@ -1825,8 +1831,6 @@ instance Layout FieldPlaceholders where
     FieldPlaceholders (a <> b)
 
   field fieldName _ placeholder = FieldPlaceholders (HashMap.singleton fieldName placeholder)
-
-  jumptag = id
 
 getFieldPlaceholder :: ALayoutFn -> FieldName -> Maybe Text
 getFieldPlaceholder (ALayoutFn (FieldPlaceholders m)) k =
