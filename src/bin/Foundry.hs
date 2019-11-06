@@ -7,7 +7,6 @@ module Main where
 import Sdam.Parser (pValue, parse)
 import Source
 import Source.Language.Morte
-import Source.NewGen
 import System.Environment (getArgs)
 import System.Exit (die)
 import Text.Megaparsec as Megaparsec
@@ -22,11 +21,4 @@ main = do
         Right a -> return (Just a)
     [] -> return Nothing
     _ -> die "Usage: foundry FILE.sd"
-  runSource foundryPlugin mParsedValue
-
-foundryPlugin :: Plugin
-foundryPlugin =
-  Plugin
-    { _pluginSchema = morteSchema,
-      _pluginRecLayouts = morteRecLayouts
-    }
+  runSource mortePlugin mParsedValue

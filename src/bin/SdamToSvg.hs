@@ -37,34 +37,18 @@ main = do
             _lctxValidationResult = mempty,
             _lctxViewport = Extents 0 0,
             _lctxPrecBordersAlways = False,
-            _lctxEditMode = False,
-            _lctxRecLayouts = _pluginRecLayouts plugin,
+            _lctxPrecInfo = pluginPrecInfo plugin,
+            _lctxShapeNames = pluginShapeNames plugin,
             _lctxPlaceholder = Nothing,
+            _lctxPrecPredicate = precAllowAll,
             _lctxWritingDirection = WritingDirectionLTR
           }
       exprCollage :: Collage () El
-      exprCollage =
-        layoutNodeStandalone
-          lctx
-          (fromParsedValue (mkPluginInfo plugin) parsedValue)
+      exprCollage = layoutNodeStandalone lctx (fromParsedValue parsedValue)
       exprExtents = extentsOf exprCollage
       dim f = fromIntegral (f exprExtents)
   withSVGSurface outputFilepath (dim extentsW) (dim extentsH) $ \surface ->
     renderWith surface $ do
       cairoRender
         (getNoAnn $ foldCairoCollage offsetZero exprCollage)
-        withDefaultDrawCtx
-
-haskellPlugin :: Plugin
-haskellPlugin =
-  Plugin
-    { _pluginSchema = haskellSchema,
-      _pluginRecLayouts = haskellRecLayouts
-    }
-
-mortePlugin :: Plugin
-mortePlugin =
-  Plugin
-    { _pluginSchema = morteSchema,
-      _pluginRecLayouts = morteRecLayouts
-    }
+        ($ defaultDrawCtx)

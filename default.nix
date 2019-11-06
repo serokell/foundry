@@ -14,8 +14,8 @@ let
     pkgs.fetchFromGitHub {
       owner = "int-index";
       repo = "sdam";
-      rev = "9e79a6f589921a8a0e05119dcf5711af2dddbca2";
-      sha256 = "0g8kam2fg99frdc27snqpgphc1w0bag3jrxivb6qkxk8pg114zgq";
+      rev = "03baa80d31b3b1f5c84a217a7eb950999b202124";
+      sha256 = "0dxk57p2rjijah1wcx06w2qjad2xrwic8bdf37v5qz83vhsz0j0x";
     };
 
   slay_from_github =
@@ -86,7 +86,6 @@ pkgs.stdenv.mkDerivation rec {
     pkgs.cairo
     pkgs.pango
     pkgs.gtk3
-    pkgs.which # for CI
   ];
   shellHook = ''
     export LD_LIBRARY_PATH=${pkgs.lib.makeLibraryPath buildInputs}:$LD_LIBRARY_PATH
