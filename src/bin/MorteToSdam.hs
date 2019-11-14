@@ -1,12 +1,11 @@
 {-# LANGUAGE LambdaCase #-}
 {-# LANGUAGE OverloadedLists #-}
+{-# LANGUAGE OverloadedStrings #-}
 
 module Main where
 
-import qualified Data.HashMap.Strict as HashMap
+import Data.Sequence as Seq
 import Data.String (fromString)
-import Data.Text (Text)
-import qualified Data.Text as Text
 import qualified Data.Text.Lazy as Text.Lazy
 import Data.Void
 import qualified Morte.Core as M
@@ -14,7 +13,6 @@ import qualified Morte.Import as M.I
 import qualified Morte.Parser as M.P
 import Sdam.Core
 import Sdam.Printer
-import Source.Language.Morte
 import System.Environment (getArgs)
 import System.Exit (die)
 
@@ -40,49 +38,47 @@ convertExpr = \case
 
 convertConst :: M.Const -> RenderValue
 convertConst = \case
-  M.Star -> mkRecValue ty_star []
-  M.Box -> mkRecValue ty_box []
+  M.Star -> mkRecValue "★" []
+  M.Box -> mkRecValue "□" []
+
+convertStr :: Text.Lazy.Text -> SynShape
+convertStr = Syn . Seq.fromList . map TokenChar . Text.Lazy.unpack
 
 convertVar :: M.Var -> RenderValue
 convertVar = \case
-  M.V t 0 -> mkStrValue ty_v (Text.Lazy.toStrict t)
+  M.V t 0 -> mkRecValue (convertStr t) []
   M.V t n ->
     mkRecValue
-      ty_iv
-      [ (fld_var, mkStrValue ty_v (Text.Lazy.toStrict t)),
-        (fld_index, mkStrValue ty_nat (Text.pack (show n)))
+      "_@_"
+      [ mkRecValue (convertStr t) [],
+        mkRecValue (fromString (show n)) []
       ]
 
 convertLam :: Text.Lazy.Text -> M.Expr Void -> M.Expr Void -> RenderValue
 convertLam x _A b =
   mkRecValue
-    ty_lam
-    [ (fld_var, mkStrValue ty_v (Text.Lazy.toStrict x)),
-      (fld_ty, convertExpr _A),
-      (fld_body, convertExpr b)
+    "λ_:_/_"
+    [ mkRecValue (convertStr x) [],
+      convertExpr _A,
+      convertExpr b
     ]
 
 convertPi :: Text.Lazy.Text -> M.Expr Void -> M.Expr Void -> RenderValue
 convertPi x _A _B =
   mkRecValue
-    ty_pi
-    [ (fld_var, mkStrValue ty_v (Text.Lazy.toStrict x)),
-      (fld_ty, convertExpr _A),
-      (fld_body, convertExpr _B)
+    "Π_:_/_"
+    [ mkRecValue (convertStr x) [],
+      convertExpr _A,
+      convertExpr _B
     ]
 
 convertApp :: M.Expr Void -> M.Expr Void -> RenderValue
 convertApp f a =
   mkRecValue
-    ty_a
-    [ (fld_fn, convertExpr f),
-      (fld_arg, convertExpr a)
+    "__"
+    [ convertExpr f,
+      convertExpr a
     ]
 
-mkRecValue :: TyName -> [(FieldName, RenderValue)] -> RenderValue
-mkRecValue tyName fields =
-  RenderValue (ValueRec tyName (HashMap.fromList fields))
-
-mkStrValue :: TyName -> Text -> RenderValue
-mkStrValue tyName str =
-  RenderValue (ValueStr tyName str)
+mkRecValue :: SynShape -> [RenderValue] -> RenderValue
+mkRecValue shape fields = RenderValue (synReconstruct shape fields)

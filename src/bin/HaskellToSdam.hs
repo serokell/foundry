@@ -1,12 +1,11 @@
 {-# LANGUAGE LambdaCase #-}
 {-# LANGUAGE NamedFieldPuns #-}
 {-# LANGUAGE OverloadedLists #-}
+{-# LANGUAGE OverloadedStrings #-}
 
 module Main where
 
 import Data.Foldable (toList)
-import qualified Data.HashMap.Strict as HashMap
-import qualified Data.List.Split as List
 import qualified Data.Sequence as Seq
 import Data.Text (Text)
 import qualified Data.Text as Text
@@ -21,7 +20,6 @@ import qualified Parser as GHC
 import qualified RdrName as GHC
 import Sdam.Core
 import Sdam.Printer
-import Source.Language.Haskell
 import qualified SrcLoc as GHC
 import qualified StringBuffer as GHC
 import System.Environment (getArgs)
@@ -41,33 +39,18 @@ main = do
 convertModule :: GHC.HsModule GhcPs -> RenderValue
 convertModule GHC.HsModule {GHC.hsmodName, GHC.hsmodExports, GHC.hsmodDecls} =
   mkRecValue
-    ty_module
-    [ ( fld_name,
-        case hsmodName of
-          Nothing -> mkStrValue ty_v (Text.pack "Main")
-          Just name -> convertModuleName (GHC.unLoc name)
-      ),
-      ( fld_ex,
-        case hsmodExports of
-          Nothing -> mkRecValue ty_all []
-          Just ex -> convertExports (GHC.unLoc ex)
-      ),
-      (fld_ds, mkSeqValue (convertDecl . GHC.unLoc) hsmodDecls)
+    "module_exports_/_"
+    [ case hsmodName of
+        Nothing -> mkStrValue (Text.pack "Main")
+        Just name -> convertModuleName (GHC.unLoc name),
+      case hsmodExports of
+        Nothing -> mkRecValue "∗" []
+        Just ex -> convertExports (GHC.unLoc ex),
+      mkSeqValue (convertDecl . GHC.unLoc) hsmodDecls
     ]
 
 convertModuleName :: GHC.ModuleName -> RenderValue
-convertModuleName modname =
-  case List.splitOn "." (GHC.moduleNameString modname) of
-    [] -> error "convertModuleName: empty list"
-    s : ss -> toQVs s ss
-  where
-    toQVs s [] = mkStrValue ty_v (Text.pack s)
-    toQVs q (s : ss) =
-      mkRecValue
-        ty_qv
-        [ (fld_q, mkStrValue ty_v (Text.pack q)),
-          (fld_v, toQVs s ss)
-        ]
+convertModuleName modname = mkStrValue (Text.pack (GHC.moduleNameString modname))
 
 convertExports :: [GHC.LIE GhcPs] -> RenderValue
 convertExports = mkSeqValue (convertIE . GHC.unLoc)
@@ -94,14 +77,14 @@ convertFunBind _ _ = error "TODO: convertFunBind"
 convertMatch :: GHC.IdP GhcPs -> GHC.Match GhcPs (GHC.LHsExpr GhcPs) -> RenderValue
 convertMatch name GHC.Match {GHC.m_pats, GHC.m_grhss} =
   mkRecValue
-    ty_bind
-    [ (fld_v, toApps name m_pats),
-      (fld_b, convertGRHSs m_grhss)
+    "_=_"
+    [ toApps name m_pats,
+      convertGRHSs m_grhss
     ]
   where
     toApps n ps =
       foldl
-        (\f p -> mkRecValue ty_a [(fld_f, f), (fld_a, p)])
+        (\f p -> mkRecValue "__" [f, p])
         (convertName n)
         (map convertPat ps)
 convertMatch _ _ = error "TODO: convertMatch"
@@ -121,35 +104,34 @@ convertGRHS _ = error "TODO: convertGRHS"
 convertTypeSig :: [GHC.IdP GhcPs] -> GHC.HsType GhcPs -> RenderValue
 convertTypeSig names ty =
   mkRecValue
-    ty_sig
-    [ (fld_v, mkSeqValue convertName names),
-      (fld_t, convertType ty)
+    "_::_"
+    [ mkSeqValue convertName names,
+      convertType ty
     ]
 
 convertName :: GHC.IdP GhcPs -> RenderValue
 convertName name =
-  mkStrValue ty_v (Text.pack (GHC.occNameString (GHC.rdrNameOcc name)))
+  mkStrValue (Text.pack (GHC.occNameString (GHC.rdrNameOcc name)))
 
 convertType :: GHC.HsType GhcPs -> RenderValue
 convertType (GHC.HsTyVar _ _ name) = convertName (GHC.unLoc name)
 convertType (GHC.HsAppTy _ t1 t2) =
   mkRecValue
-    ty_a
-    [ (fld_f, convertType (GHC.unLoc t1)),
-      (fld_a, convertType (GHC.unLoc t2))
+    "__"
+    [ convertType (GHC.unLoc t1),
+      convertType (GHC.unLoc t2)
     ]
 convertType (GHC.HsTupleTy _ GHC.HsBoxedOrConstraintTuple []) =
-  -- TODO: Unit representation
-  mkStrValue ty_v (Text.pack "Unit")
+  mkRecValue "()" []
 convertType _ = error "TODO: convertType"
 
 convertExpr :: GHC.HsExpr GhcPs -> RenderValue
 convertExpr (GHC.HsVar _ name) = convertName (GHC.unLoc name)
 convertExpr (GHC.HsApp _ e1 e2) =
   mkRecValue
-    ty_a
-    [ (fld_f, convertExpr (GHC.unLoc e1)),
-      (fld_a, convertExpr (GHC.unLoc e2))
+    "__"
+    [ convertExpr (GHC.unLoc e1),
+      convertExpr (GHC.unLoc e2)
     ]
 convertExpr (GHC.HsLit _ lit) =
   convertLit lit
@@ -157,22 +139,22 @@ convertExpr _ = error "TODO: convertExpr"
 
 convertLit :: GHC.HsLit GhcPs -> RenderValue
 convertLit (GHC.HsString _ s) =
-  mkStrValue ty_str (Text.pack (GHC.unpackFS s))
+  mkStrValue (Text.pack ('"' : GHC.unpackFS s))
 convertLit _ = error "TODO: convertLit"
 
-mkRecValue :: TyName -> [(FieldName, RenderValue)] -> RenderValue
-mkRecValue tyName fields =
-  RenderValue (ValueRec tyName (HashMap.fromList fields))
+mkRecValue :: SynShape -> [RenderValue] -> RenderValue
+mkRecValue shape fields = RenderValue (synReconstruct shape fields)
 
-mkStrValue :: TyName -> Text -> RenderValue
-mkStrValue tyName str =
-  RenderValue (ValueStr tyName str)
+mkStrValue :: Text -> RenderValue
+mkStrValue = RenderValue . Syn . Seq.fromList . map TokenChar . Text.unpack
 
 mkSeqValue :: Foldable f => (a -> RenderValue) -> f a -> RenderValue
 mkSeqValue f c =
   case toList c of
     [x] -> f x
-    xs -> RenderValue (ValueSeq (Seq.fromList (map f xs)))
+    xs ->
+      RenderValue . Syn . Seq.fromList $
+        TokenChar '|' : map (TokenNode . f) xs
 
 parseModuleStr :: String -> Maybe (GHC.Located (GHC.HsModule GhcPs))
 parseModuleStr = runGhcParser GHC.parseModule

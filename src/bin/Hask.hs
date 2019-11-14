@@ -7,7 +7,6 @@ module Main where
 import Sdam.Parser (pValue, parse)
 import Source
 import Source.Language.Haskell
-import Source.NewGen
 import System.Environment (getArgs)
 import System.Exit (die)
 import Text.Megaparsec as Megaparsec
@@ -22,11 +21,4 @@ main = do
         Right a -> return (Just a)
     [] -> return Nothing
     _ -> die "Usage: hask FILE.sd"
-  runSource haskPlugin mParsedValue
-
-haskPlugin :: Plugin
-haskPlugin =
-  Plugin
-    { _pluginSchema = haskellSchema,
-      _pluginRecLayouts = haskellRecLayouts
-    }
+  runSource haskellPlugin mParsedValue

@@ -28,7 +28,7 @@ runSource plugin mParsedValue = do
     case mParsedValue of
       Nothing -> NG.initEditorState
       Just a ->
-        let expr = NG.fromParsedValue pluginInfo a
+        let expr = NG.fromParsedValue a
          in NG.initEditorState {NG._esExpr = expr}
   window <- createMainWindow pluginInfo esRef
   Gtk.widgetShowAll window

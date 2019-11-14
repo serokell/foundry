@@ -3,19 +3,6 @@ name:                foundry
 version:             0.1.0.0
 build-type:          Simple
 
-library source-layout
-  exposed-modules:     Source.Layout
-  build-depends:       base >=4.7, unordered-containers,
-                       hashable, text,
-                       sdam
-  hs-source-dirs:      src/layout
-  default-language:    Haskell2010
-  default-extensions:  RankNTypes
-  ghc-options:         -Wall -O2
-  ghc-prof-options:    -fprof-auto
-                       -auto-all
-                       -caf-all
-
 library
 
   exposed-modules:     Source
@@ -28,6 +15,7 @@ library
                ,       containers
                ,       dlist
                ,       unordered-containers
+               ,       primitive
                ,       hashable
                ,       lens >=4.11
                ,       transformers >=0.4
@@ -45,7 +33,8 @@ library
                ,       slay-combinators
                ,       slay-cairo
                ,       sdam
-               ,       source-layout
+               ,       source-plugin
+               ,       num-non-negative
 
   hs-source-dirs:      src/driver
 
@@ -56,11 +45,25 @@ library
                        -auto-all
                        -caf-all
 
+library source-plugin
+  exposed-modules:     Source.Plugin
+                       Source.Plugin.Precedence
+  build-depends:       base >=4.7,
+                       unordered-containers, text, primitive,
+                       hashable, sdam
+  hs-source-dirs:      src/plugin
+  default-language:    Haskell2010
+  ghc-options:         -Wall -O2
+  ghc-prof-options:    -fprof-auto
+                       -auto-all
+                       -caf-all
+
+
 library source-language-haskell
   exposed-modules:     Source.Language.Haskell
-  build-depends:       base >=4.7, regex-applicative,
-                       unordered-containers,
-                       sdam, source-layout
+  build-depends:       base >=4.7,
+                       unordered-containers, text, primitive,
+                       sdam, source-plugin
   hs-source-dirs:      src/lang/haskell
   default-language:    Haskell2010
   ghc-options:         -Wall -O2
@@ -70,9 +73,9 @@ library source-language-haskell
 
 library source-language-morte
   exposed-modules:     Source.Language.Morte
-  build-depends:       base >=4.7, regex-applicative,
-                       unordered-containers,
-                       sdam, source-layout
+  build-depends:       base >=4.7,
+                       unordered-containers, text, primitive,
+                       sdam, source-plugin
   hs-source-dirs:      src/lang/morte
   default-language:    Haskell2010
   ghc-options:         -Wall -O2
@@ -83,8 +86,8 @@ library source-language-morte
 executable foundry
   main-is:             Foundry.hs
 
-  build-depends:       base, unordered-containers, megaparsec, regex-applicative,
-                       sdam, source-language-morte, source-language-haskell, foundry
+  build-depends:       base, unordered-containers, megaparsec,
+                       sdam, source-language-morte, foundry
 
   hs-source-dirs:      src/bin
 
@@ -99,7 +102,7 @@ executable foundry
 executable hask
   main-is:             Hask.hs
 
-  build-depends:       base, unordered-containers, megaparsec, regex-applicative,
+  build-depends:       base, unordered-containers, megaparsec,
                        sdam, source-language-haskell, foundry
 
   hs-source-dirs:      src/bin
@@ -115,16 +118,14 @@ executable hask
 
 executable morte-to-sdam
   main-is:             MorteToSdam.hs
-  build-depends:       base, text, unordered-containers,
-                       morte, sdam, source-language-morte
+  build-depends:       base, text, containers, morte, sdam
   hs-source-dirs:      src/bin
   default-language:    Haskell2010
   ghc-options:         -Wall -threaded -O2
 
 executable haskell-to-sdam
   main-is:             HaskellToSdam.hs
-  build-depends:       base, text, containers, unordered-containers,
-                       split,
+  build-depends:       base, text, containers, unordered-containers, containers,
                        ghc-lib-parser, sdam, source-language-haskell
   hs-source-dirs:      src/bin
   default-language:    Haskell2010

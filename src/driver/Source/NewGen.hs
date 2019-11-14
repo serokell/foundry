@@ -9,23 +9,20 @@
 {-# LANGUAGE RankNTypes #-}
 {-# LANGUAGE TemplateHaskell #-}
 {-# LANGUAGE TypeApplications #-}
+{-# LANGUAGE UndecidableInstances #-}
 {-# LANGUAGE ViewPatterns #-}
 
 module Source.NewGen
   ( -- * Names
-    TyName,
-    FieldName,
+    SynShape,
+    Index,
 
     -- * Types
     Schema (..),
-    TyDefn (..),
-    TyInst (..),
-    TyUnion (..),
+    TyUnion,
 
     -- * Values
     Node (..),
-    Value (..),
-    NodeSel (..),
     RecSel (..),
 
     -- * Path
@@ -48,9 +45,7 @@ module Source.NewGen
     PrecPredicate,
     precAllow,
     precAllowAll,
-    Layout (vsep, field),
     noPrec,
-    ALayoutFn (..),
     WritingDirection (..),
     LayoutCtx (..),
 
@@ -58,7 +53,7 @@ module Source.NewGen
     layoutNodeStandalone,
     foldCairoCollage,
     getNoAnn,
-    withDefaultDrawCtx,
+    defaultDrawCtx,
     cairoRender,
 
     -- * React
@@ -81,7 +76,6 @@ module Source.NewGen
     esPointerPath,
     esJumptags,
     esMode,
-    RecMoveMap,
     selectionOfEditorState,
     reactEditorState,
 
@@ -89,12 +83,6 @@ module Source.NewGen
     Plugin (..),
     PluginInfo,
     mkPluginInfo,
-
-    -- * Schema EDSL
-    uT,
-    uS,
-    uS',
-    (==>),
 
     -- * Utils
     inj,
@@ -115,20 +103,21 @@ import Data.Foldable as Foldable
 import Data.Function (on)
 import Data.HashMap.Strict (HashMap)
 import qualified Data.HashMap.Strict as HashMap
-import qualified Data.HashSet as HashSet
+import Data.HashSet as HashSet
 import Data.List as List
 import Data.List.NonEmpty as NonEmpty
+import Data.Map as Map
 import Data.Maybe
-import Data.Monoid as Monoid
+import Data.Primitive.Array as Array
 import Data.Semigroup
 import Data.Sequence as Seq
-import Data.String
 import Data.Text (Text)
 import qualified Data.Text as Text
 import qualified Graphics.Rendering.Cairo as Cairo (Render)
 import Inj
 import Inj.Base ()
 import Numeric.Natural (Natural)
+import Numeric.NonNegative
 import Sdam.Core
 import Sdam.Parser
 import Sdam.Validator
@@ -140,30 +129,24 @@ import Slay.Combinators
 import Slay.Core
 import Source.Input
 import qualified Source.Input.KeyCode as KeyCode
-import Source.Layout
+import Source.Plugin
+import Prelude hiding (seq)
 
 --------------------------------------------------------------------------------
 -- Values
 --------------------------------------------------------------------------------
 
-data Node = Hole | Node NodeSel (Value Node)
+data Node = Node NodeSel (Syn Node)
 
 data NodeSel
-  = NodeRecSel RecSel
-  | NodeSeqSel SeqSel
-  | NodeStrSel Int
+  = SynSel RecSel
+  | StrSel Int
 
 data RecSel
-  = -- for records without children
+  = -- for records without children (and empty sequences)
     RecSel0
-  | -- for records with children
-    RecSel FieldName SelStatus
-
-data SeqSel
-  = -- for empty sequences
-    SeqSel0
-  | -- for non-empty sequences
-    SeqSel Index SelStatus
+  | -- for records with children (and non-empty sequences)
+    RecSel Index SelStatus
 
 -- The node can be in one of there states:
 --
@@ -186,9 +169,7 @@ newtype Collapsed = Collapsed Bool
 --------------------------------------------------------------------------------
 
 toValidationValue :: Node -> ValidationValue
-toValidationValue Hole = SkipValidation
-toValidationValue (Node _ value) =
-  ValidationValue (fmap toValidationValue value)
+toValidationValue (Node _ syn) = ValidationValue (fmap toValidationValue syn)
 
 validateNode :: Schema -> Node -> ValidationResult
 validateNode schema node = validate schema (toValidationValue node)
@@ -209,15 +190,11 @@ blink = \case
   CursorVisible -> CursorInvisible
   CursorInvisible -> CursorVisible
 
-data SelectionTip
-  = SelectionTipLabeled TyName
-  | SelectionTipSeq
-
 data Selection
   = Selection
       { selectionPath :: Path,
-        selectionTip :: Maybe SelectionTip,
-        selectionStrPos :: Maybe Int
+        selectionTip :: SynShape,
+        selectionTipPos :: Maybe Int
       }
 
 data Paths
@@ -226,27 +203,21 @@ data Paths
         pathsSelection :: Selection
       }
 
-data DrawCtx a = DrawCtx (Paths -> CursorBlink -> a)
-  deriving (Functor)
+data DrawCtx
+  = DrawCtx Selection CursorBlink
+  | NoDrawCtx
 
-instance Inj p a => Inj p (DrawCtx a) where
-  inj p = DrawCtx (\_ _ -> inj p)
-
-withDrawCtx :: Paths -> CursorBlink -> DrawCtx a -> a
-withDrawCtx paths curBlink (DrawCtx f) = f paths curBlink
-
-withDefaultDrawCtx :: DrawCtx a -> a
-withDefaultDrawCtx (DrawCtx f) =
-  f (Paths Nothing (Selection emptyPath Nothing Nothing)) CursorInvisible
+defaultDrawCtx :: DrawCtx
+defaultDrawCtx = NoDrawCtx
 
 textline ::
-  Inj (CairoElement DrawCtx) a =>
+  Inj (CairoElement ((->) DrawCtx)) a =>
   Color ->
   Font ->
   Text ->
-  (Paths -> CursorBlink -> Maybe Natural) ->
+  (DrawCtx -> Maybe Natural) ->
   a
-textline color font str cur = text font (inj color) str (DrawCtx cur)
+textline color font str cur = text font (inj color) str cur
 
 line :: Color -> Natural -> Collage Ann El
 line color w = rect nothing (inj color) (Extents w 1)
@@ -266,53 +237,133 @@ rightOf (Extents vacantWidth _) collage =
 
 data WritingDirection = WritingDirectionLTR | WritingDirectionRTL
 
+newtype TokenCount = TokenCount Natural
+
+addTokenCount :: Int -> TokenCount -> TokenCount
+addTokenCount n (TokenCount k) = TokenCount (fromIntegral n + k)
+
 newtype RecLayoutFn
   = RecLayoutFn
       { appRecLayoutFn ::
           Path ->
-          HashMap FieldName (PrecPredicate -> (PrecUnenclosed, Collage Ann El)) ->
+          TokenCount ->
           WritingDirection ->
-          (PrecUnenclosed, Collage Ann El)
+          (TokenCount, (PrecUnenclosed, Collage Ann El))
       }
-
-instance IsString RecLayoutFn where
-  fromString s =
-    RecLayoutFn $ \path _ _ ->
-      (mempty, if jumptagFits then layoutWithJumptag path a else a)
-    where
-      a = punct (fromString s)
-      jumptagFits = widthOf a >= jumptagLabelMaxWidth
 
 instance Semigroup RecLayoutFn where
   RecLayoutFn a <> RecLayoutFn b =
-    RecLayoutFn $ \path m wd ->
-      let (aUnenclosed, a') = a path m wd
-          (bUnenclosed, b') = b path m wd
+    RecLayoutFn $ \path tc wd ->
+      let (tc', (aUnenclosed, a')) =
+            a path tc wd
+          (tc'', (bUnenclosed, b')) =
+            b path tc' wd
           f = case wd of
             WritingDirectionLTR -> horizBaseline
             WritingDirectionRTL -> flip horizBaseline
-       in (,) (aUnenclosed <> bUnenclosed) $
-            f a' b'
+       in (tc'', (aUnenclosed <> bUnenclosed, f a' b'))
 
-instance Layout RecLayoutFn where
+nefoldr1 :: (a -> a -> a) -> NonEmpty a -> a
+nefoldr1 = List.foldr1 -- safe for non-empty lists
 
-  RecLayoutFn a `vsep` RecLayoutFn b =
-    RecLayoutFn $ \path m wd ->
-      let (aUnenclosed, a') = a path m wd
-          (bUnenclosed, b') = b path m wd
-          f = case wd of
-            WritingDirectionLTR -> vertLeft
-            WritingDirectionRTL -> vertRight
-          maxWidth = (max `on` widthOf) a' b'
-       in (,) (aUnenclosed <> bUnenclosed) $
-            a' `f` line light1 maxWidth `f` b'
+data RecLayoutStyle = RecLayoutStyle {recLayoutEditMode :: Bool}
 
-  field fieldName precPredicate _ =
-    RecLayoutFn $ \_ m _ ->
-      (m HashMap.! fieldName) precPredicate
+data PunctList a
+  = PunctBase Text
+  | PunctCons Text a (PunctList a)
 
-getRecLayoutFn :: ALayoutFn -> RecLayoutFn
-getRecLayoutFn (ALayoutFn recLayoutFn) = recLayoutFn
+splitEither :: (a -> Either sep b) -> [a] -> ([b], Maybe (sep, [a]))
+splitEither _ [] = ([], Nothing)
+splitEither p (a : as) =
+  case p a of
+    Left sep -> ([], Just (sep, as))
+    Right b -> mapFst (b :) (splitEither p as)
+
+mapFst :: (a -> a') -> (a, b) -> (a', b)
+mapFst f (a, b) = (f a, b)
+
+matchTokenNode :: Token a -> Either a Char
+matchTokenNode (TokenChar c) = Right c
+matchTokenNode (TokenNode a) = Left a
+
+parseSynPunctList :: [Token a] -> PunctList a
+parseSynPunctList ts =
+  case splitEither matchTokenNode ts of
+    (s, Nothing) -> PunctBase (Text.pack s)
+    (s, Just (node, ts')) -> PunctCons (Text.pack s) node (parseSynPunctList ts')
+
+synRows :: PunctList a -> NonEmpty (PunctList a)
+synRows (PunctBase "/") = PunctBase "" :| [PunctBase ""]
+synRows (PunctBase p) = PunctBase p :| []
+synRows (PunctCons "/" a ps) =
+  let p' :| ps' = synRows ps
+   in PunctBase "" :| PunctCons "" a p' : ps'
+synRows (PunctCons p a ps) =
+  let p' :| ps' = synRows ps
+   in PunctCons p a p' :| ps'
+
+synToLayout :: RecLayoutStyle -> Syn (PrecUnenclosed, Collage Ann El) -> RecLayoutFn
+synToLayout rs syn =
+  nefoldr1 vsep $ fmap (shapeRowToLayout rs) rows
+  where
+    rows = synRows (parseSynPunctList (Foldable.toList (synTokens syn)))
+    RecLayoutFn a `vsep` RecLayoutFn b =
+      RecLayoutFn $ \path tc wd ->
+        let (tc', (aUnenclosed, a')) =
+              a path tc wd
+            (tc'', (bUnenclosed, b')) =
+              b path (addTokenCount 1 tc') wd
+            f = case wd of
+              WritingDirectionLTR -> vertLeft
+              WritingDirectionRTL -> vertRight
+            maxWidth = (max `on` widthOf) a' b'
+         in (tc'', (aUnenclosed <> bUnenclosed, a' `f` line light1 maxWidth `f` b'))
+
+shapeRowToLayout :: RecLayoutStyle -> PunctList (PrecUnenclosed, Collage Ann El) -> RecLayoutFn
+shapeRowToLayout rs row =
+  case nonEmpty (shapeRowToLayouts rs row) of
+    Nothing -> punctToLayout ""
+    Just row' -> sconcat row'
+
+shapeRowToLayouts :: RecLayoutStyle -> PunctList (PrecUnenclosed, Collage Ann El) -> [RecLayoutFn]
+shapeRowToLayouts rs (PunctBase p) = punctToLayouts rs p
+shapeRowToLayouts rs (PunctCons p fld l) =
+  punctToLayouts rs p <> [fieldToLayout fld] <> shapeRowToLayouts rs l
+
+fieldToLayout :: (PrecUnenclosed, Collage Ann El) -> RecLayoutFn
+fieldToLayout fld = RecLayoutFn $ \_ tc _ -> (addTokenCount 1 tc, fld)
+
+punctToLayouts :: RecLayoutStyle -> Text -> [RecLayoutFn]
+punctToLayouts rs "" | not (recLayoutEditMode rs) = []
+punctToLayouts _ p = [punctToLayout p]
+
+punctToLayout :: Text -> RecLayoutFn
+punctToLayout s =
+  RecLayoutFn $ \path tc _ ->
+    let tc' = addTokenCount (Text.length s) tc
+        a =
+          textline
+            light1
+            ubuntuFont
+            s
+            (\drawCtx -> blinkingCursorPos path drawCtx >>= adjustByTokenCount tc)
+        a' = if jumptagFits then layoutWithJumptag path a else a
+        jumptagFits = widthOf a >= jumptagLabelMaxWidth
+     in (tc', (mempty, a'))
+  where
+    adjustByTokenCount (TokenCount k) pos
+      | pos >= k,
+        let pos' = pos - k,
+        pos' <= fromIntegral (Text.length s) =
+        Just pos'
+    adjustByTokenCount _ _ = Nothing
+
+blinkingCursorPos :: Path -> DrawCtx -> Maybe Natural
+blinkingCursorPos path (DrawCtx selection CursorVisible)
+  | selectionPath selection == path,
+    Just pos <- selectionTipPos selection =
+    Just (fromIntegral pos)
+blinkingCursorPos _ _ = Nothing
 
 layoutWithJumptag :: Path -> Collage Ann El -> Collage Ann El
 layoutWithJumptag path =
@@ -336,7 +387,7 @@ type FindZone = Find Path (Offset, Extents)
 data Jumptag = Jumptag Offset Path
 
 -- Collage elements:
-type El = CairoElement DrawCtx
+type El = CairoElement ((->) DrawCtx)
 
 -- Collage annotations:
 type Ann = (FindPath, FindZone, DList Jumptag)
@@ -344,16 +395,34 @@ type Ann = (FindPath, FindZone, DList Jumptag)
 getNoAnn :: ((), a) -> a
 getNoAnn = snd
 
-renderSelectionBorder :: Paths -> FindZone -> CairoRender DrawCtx
+renderStackNodes :: Offset -> Collage () (CairoElement g) -> Paths -> FindZone -> CairoRender g
+renderStackNodes fallbackOffset stackLayout Paths {pathsSelection} (Find findZone) =
+  getNoAnn $ foldCairoCollage offset stackLayout
+  where
+    offset =
+      case findZone (selectionPath pathsSelection) of
+        Just (o, e) ->
+          Offset
+            { offsetX = offsetX o + toInteger (marginLeft (collageMargin stackLayout) + extentsW e),
+              offsetY = offsetY o
+            }
+        Nothing -> fallbackOffset
+
+renderSelectionBorder :: Paths -> FindZone -> CairoRender Identity
 renderSelectionBorder Paths {pathsSelection} (Find findZone) =
   case findZone (selectionPath pathsSelection) of
     Just (o, e) ->
       getNoAnn
         $ foldCairoCollage o
-        $ outline 2 selectionBorderColor e
+        $ outline 2 color e
     Nothing -> mempty
+  where
+    color =
+      case selectionTipPos pathsSelection of
+        Nothing -> selectionBorderColor
+        Just _ -> inputBorderColor
 
-renderHoverBorder :: Paths -> FindZone -> CairoRender DrawCtx
+renderHoverBorder :: Paths -> FindZone -> CairoRender Identity
 renderHoverBorder Paths {pathsCursor} (Find findZone) =
   case pathsCursor of
     Just p
@@ -363,17 +432,17 @@ renderHoverBorder Paths {pathsCursor} (Find findZone) =
           $ outline 2 hoverBorderColor e
     _ -> mempty
 
-renderJumptagLabels :: NonEmpty (Char, Jumptag) -> CairoRender DrawCtx
+renderJumptagLabels :: NonEmpty (Char, Jumptag) -> CairoRender Identity
 renderJumptagLabels = foldMap renderJumptagLabel
 
-renderJumptagLabel :: (Char, Jumptag) -> CairoRender DrawCtx
+renderJumptagLabel :: (Char, Jumptag) -> CairoRender Identity
 renderJumptagLabel (c, Jumptag o _) =
   getNoAnn $ foldCairoCollage o $ layoutJumptagLabel c
 
-layoutJumptagLabel :: Monoid n => Char -> Collage n El
+layoutJumptagLabel :: Monoid n => Char -> Collage n (CairoElement Identity)
 layoutJumptagLabel c =
   substrate 1 (rect nothing dark2) $
-    textline (rgb 255 127 80) ubuntuMonoFont label nothing
+    text ubuntuMonoFont (rgb 255 127 80) label nothing
   where
     label = Text.toUpper (Text.singleton c)
 
@@ -407,29 +476,37 @@ red = rgb 255 0 0
 selectionBorderColor,
   hoverBorderColor,
   stackBorderColor,
-  motionBorderColor ::
+  inputBorderColor ::
     Inj Color a => a
 selectionBorderColor = rgb 94 80 134
 hoverBorderColor = rgb 255 127 80
 stackBorderColor = rgb 45 134 108
-motionBorderColor = rgb 45 134 108
+inputBorderColor = rgb 45 134 108
 
-textWithCursor :: Text -> (Paths -> CursorBlink -> Maybe Natural) -> Collage Ann El
+textWithCursor :: Text -> (DrawCtx -> Maybe Natural) -> Collage Ann El
 textWithCursor = textline white ubuntuFont
 
 textWithoutCursor :: Text -> Collage Ann El
 textWithoutCursor t = textWithCursor t nothing
 
+class Inj t (f t) => Inj1 f t
+
+instance Inj t (f t) => Inj1 f t
+
 outline ::
-  Inj (CairoElement DrawCtx) a =>
+  Inj (CairoElement f) a =>
+  Inj1 f (Maybe (LRTB (NonNegative Double))) =>
   Natural ->
-  DrawCtx (Maybe Color) ->
+  f (Maybe Color) ->
   Extents ->
   a
-outline width = rect (inj (pure width :: LRTB Natural))
+outline width = rect (inj (Just outlineWidth))
+  where
+    outlineWidth :: LRTB (NonNegative Double)
+    outlineWidth = pure (fromIntegral width)
 
 punct ::
-  Inj (CairoElement DrawCtx) a =>
+  Inj (CairoElement ((->) DrawCtx)) a =>
   Text ->
   a
 punct t = textline light1 ubuntuFont t nothing
@@ -476,13 +553,55 @@ alwaysSucceed :: Alternative f => f () -> f ()
 alwaysSucceed f = f <|> pure ()
 
 --------------------------------------------------------------------------------
+---- Input Mode
+--------------------------------------------------------------------------------
+
+newtype InputTrie = InputTrie (Map Char (Either InputTrie Char))
+
+instance Semigroup InputTrie where
+  InputTrie m1 <> InputTrie m2 =
+    InputTrie $ Map.unionWith f m1 m2
+    where
+      f (Right c) _ = Right c
+      f _ (Right c) = Right c
+      f (Left t1) (Left t2) = Left (t1 <> t2)
+
+instance Monoid InputTrie where
+  mempty = InputTrie Map.empty
+
+buildInputTrie :: [(String, Char)] -> InputTrie
+buildInputTrie = foldMap pairToInputTrie
+  where
+    pairToInputTrie (s, c) = go c s
+    go _ [] = error "buildInputTrie: bad input"
+    go c [k] = InputTrie (Map.singleton k (Right c))
+    go c (k : ks) = InputTrie (Map.singleton k (Left (go c ks)))
+
+initialInputTrie :: InputTrie
+initialInputTrie =
+  buildInputTrie
+    [ ("_", '_'),
+      ("\\", '\\'),
+      ("lam", 'λ'),
+      ("forall", '∀'),
+      ("Pi", 'Π'),
+      ("star", '★'),
+      ("all", '∗'),
+      ("box", '□'),
+      ("->", '→'),
+      ("<-", '←'),
+      ("not", '¬')
+    ]
+
+--------------------------------------------------------------------------------
 ---- Editor
 --------------------------------------------------------------------------------
 
-data MotionAction
-  = MotionNoOp
-  | MotionToggleEditMode
-  | MotionPopSwap Node
+defaultHole :: Node
+defaultHole = Node (SynSel RecSel0) (Syn Seq.empty)
+
+isHole :: Node -> Bool
+isHole (Node _ syn) = Seq.null (synTokens syn)
 
 data JumpAction
   = JumpSelect
@@ -492,16 +611,12 @@ data Mode
   = ModeNormal
   | ModeStack
   | ModeJump (NonEmpty (Char, Jumptag)) JumpAction
-  | ModeMotion Bool Text MotionAction
-  | ModeEdit
+  | ModeInput Text InputTrie
+  | ModeStackInput
 
 quitStackMode :: Mode -> Mode
 quitStackMode ModeStack = ModeNormal
 quitStackMode mode = mode
-
-isEditMode :: Mode -> Bool
-isEditMode ModeEdit = True
-isEditMode _ = False
 
 data EditorState
   = EditorState
@@ -521,7 +636,7 @@ data EditorState
 initEditorState :: EditorState
 initEditorState =
   EditorState
-    { _esExpr = Hole,
+    { _esExpr = defaultHole,
       _esPointer = offsetZero,
       _esPrecBordersAlways = False,
       _esWritingDirection = WritingDirectionLTR,
@@ -540,24 +655,16 @@ data LayoutCtx
         _lctxValidationResult :: ValidationResult,
         _lctxViewport :: Extents,
         _lctxPrecBordersAlways :: Bool,
-        _lctxEditMode :: Bool,
-        _lctxRecLayouts :: HashMap TyName ALayoutFn,
+        _lctxPrecInfo :: HashMap SynShape (Array PrecPredicate),
+        _lctxShapeNames :: HashMap SynShape ShapeName,
         _lctxPlaceholder :: Maybe Text,
+        _lctxPrecPredicate :: PrecPredicate,
         _lctxWritingDirection :: WritingDirection
       }
 
 data ReactCtx
   = ReactCtx
-      { _rctxDefaultNodes :: HashMap TyName Node,
-        _rctxRecMoveMaps :: HashMap TyName RecMoveMap,
-        _rctxJumptags :: [Jumptag]
-      }
-
-data RecMoveMap
-  = RecMoveMap
-      { rmmFieldOrder :: [FieldName],
-        rmmForward :: HashMap FieldName FieldName,
-        rmmBackward :: HashMap FieldName FieldName
+      { _rctxJumptags :: [Jumptag]
       }
 
 data ReactState
@@ -603,7 +710,7 @@ redrawUI ::
 redrawUI pluginInfo viewport es =
   es
     & esRenderUI .~ renderUI
-    & esPointerPath .~ pathsCursor
+    & esPointerPath .~ cursor
     & esJumptags .~ jumptags
   where
     lctx =
@@ -612,15 +719,16 @@ redrawUI pluginInfo viewport es =
           _lctxValidationResult = mempty,
           _lctxViewport = viewport,
           _lctxPrecBordersAlways = es ^. esPrecBordersAlways,
-          _lctxEditMode = isEditMode (es ^. esMode),
-          _lctxRecLayouts = pluginInfoRecLayouts pluginInfo,
+          _lctxPrecInfo = pluginInfoPrecInfo pluginInfo,
+          _lctxShapeNames = pluginInfoShapeNames pluginInfo,
           _lctxPlaceholder = Nothing,
+          _lctxPrecPredicate = precAllowAll,
           _lctxWritingDirection = es ^. esWritingDirection
         }
     schema = pluginInfoSchema pluginInfo
     pointer = es ^. esPointer
     infoBarLayout = layoutInfoBar lctx es
-    stackLayout = layoutNodeStack lctx (es ^. esStack)
+    stackLayout = layoutNodesStack lctx (es ^. esStack)
     mainLayout = layoutMainExpr schema lctx (es ^. esExpr)
     hOff :: Collage n a -> Integer
     hOff c =
@@ -632,75 +740,42 @@ redrawUI pluginInfo viewport es =
         { offsetX = leftOf mainLayout + 10,
           offsetY = hOff mainLayout
         }
-    stackOffset =
+    stackFallbackOffset =
       Offset
         { offsetX = rightOf (lctx ^. lctxViewport) stackLayout,
           offsetY = hOff stackLayout
         }
-    ((), backgroundRdr) =
-      foldCairoCollage offsetZero $
-        rect nothing dark1 (lctx ^. lctxViewport)
+    backgroundRdr =
+      getNoAnn
+        $ foldCairoCollage offsetZero
+        $ rect nothing dark1 (lctx ^. lctxViewport)
     ((Find findPath, findZone, jumptags'), mainRdr) =
       foldCairoCollage mainOffset mainLayout
-    ((), stackRdr') =
-      foldCairoCollage stackOffset stackLayout
-    ((), infoBarRdr) =
-      foldCairoCollage offsetZero infoBarLayout
+    infoBarRdr = getNoAnn $ foldCairoCollage offsetZero infoBarLayout
     jumptags = DList.toList jumptags'
-    stackRdr = case es ^. esMode of
-      ModeStack -> stackRdr'
-      _ -> mempty
+    stackNodesVisible =
+      case es ^. esMode of
+        ModeStack -> True
+        ModeStackInput -> True
+        _ -> False
+    stackRdr =
+      if stackNodesVisible
+        then renderStackNodes stackFallbackOffset stackLayout paths findZone
+        else mempty
     jumptagsRdr = case es ^. esMode of
       ModeJump activeJumptags _ -> renderJumptagLabels activeJumptags
       _ -> mempty
-    selectionOrMotionRdr = case es ^. esMode of
-      ModeMotion _ _ action -> renderMotion lctx action paths findZone
-      _ -> renderSelectionBorder paths findZone
-    pathsCursor = findPath pointer
-    pathsSelection = selectionOfEditorState es
-    paths = Paths {pathsCursor, pathsSelection}
-    renderUI cursorBlink =
-      cairoRender
-        ( backgroundRdr
-            <> mainRdr
-            <> selectionOrMotionRdr
-            <> renderHoverBorder paths findZone
-            <> jumptagsRdr
-            <> stackRdr
-            <> infoBarRdr
-        )
-        (withDrawCtx paths cursorBlink)
-
-renderMotion ::
-  LayoutCtx ->
-  MotionAction ->
-  Paths ->
-  FindZone ->
-  CairoRender DrawCtx
-renderMotion lctx action Paths {pathsSelection} (Find findZone) =
-  case findZone (selectionPath pathsSelection) of
-    Nothing -> error "renderMotion: no selection"
-    Just (o, e) ->
-      getNoAnn
-        $ foldCairoCollage o
-        $ mapCollageAnnotation (const mempty)
-        $ motionPreview e
-  where
-    motionPreview :: Extents -> Collage Ann El
-    motionPreview e =
-      case action of
-        MotionNoOp ->
-          substrateMargin (outline 2 motionBorderColor . extentsMax e) $
-            rect nothing nothing e
-        MotionToggleEditMode ->
-          substrateMargin (outline 2 motionBorderColor . extentsMax e) $
-            rect nothing nothing e
-        MotionPopSwap n ->
-          substrate 0 (rect nothing dark1')
-            $ substrateMargin (outline 2 motionBorderColor . extentsMax e)
-            $ collageWithMargin (Margin 4 4 4 4)
-            $ snd (layoutNode lctx' n precAllowAll)
-    lctx' = lctx {_lctxValidationResult = mempty}
+    cursor = findPath pointer
+    selection = selectionOfEditorState es
+    paths = Paths {pathsCursor = cursor, pathsSelection = selection}
+    renderUI cursorBlink = do
+      cairoRender backgroundRdr runIdentity
+      cairoRender mainRdr ($ DrawCtx selection cursorBlink)
+      cairoRender (renderSelectionBorder paths findZone) runIdentity
+      cairoRender (renderHoverBorder paths findZone) runIdentity
+      cairoRender jumptagsRdr runIdentity
+      cairoRender stackRdr ($ defaultDrawCtx)
+      cairoRender infoBarRdr ($ DrawCtx selection cursorBlink)
 
 layoutMainExpr ::
   Schema ->
@@ -710,18 +785,28 @@ layoutMainExpr ::
 layoutMainExpr schema lctx expr = collage
   where
     lctx' n = lctx {_lctxValidationResult = validateNode schema n}
-    (_, collage) = layoutNode (lctx' expr) expr precAllowAll
+    (_, collage) = layoutNode (lctx' expr) expr
 
-layoutNodeStack :: Monoid n => LayoutCtx -> [Node] -> Collage n El
-layoutNodeStack lctx nodes =
+layoutNodesStack :: Monoid n => LayoutCtx -> [Node] -> Collage n El
+layoutNodesStack lctx nodes =
+  case nonEmpty nodes of
+    Nothing -> layoutStackDecoration $ punct "end of stack"
+    Just ns -> nefoldr1 vertLeft (NonEmpty.map (layoutNodeStack lctx) ns)
+
+layoutNodeStack :: Monoid n => LayoutCtx -> Node -> Collage n El
+layoutNodeStack lctx node =
   mapCollageAnnotation (const mempty)
-    $ substrate 0 backgroundRect
-    $ substrate 4 (outline 2 stackBorderColor)
-    $ case nodes of
-      [] -> punct "end of stack"
-      n : _ -> snd (layoutNode lctx' n precAllowAll)
+    $ layoutStackDecoration
+    $ snd (layoutNode lctx' node)
   where
     lctx' = lctx {_lctxValidationResult = mempty}
+
+layoutStackDecoration :: Monoid n => Collage n El -> Collage n El
+layoutStackDecoration =
+  collageWithMargin (Margin 4 4 4 4)
+    . substrate 0 backgroundRect
+    . substrate 4 (outline 2 stackBorderColor)
+  where
     backgroundRect = rect nothing dark1'
 
 layoutNodeStandalone :: Monoid n => LayoutCtx -> Node -> Collage n El
@@ -729,7 +814,7 @@ layoutNodeStandalone lctx node =
   mapCollageAnnotation (const mempty)
     $ substrate 0 backgroundRect
     $ substrate 4 (outline 2 stackBorderColor)
-    $ snd (layoutNode lctx' node precAllowAll)
+    $ snd (layoutNode lctx' node)
   where
     lctx' = lctx {_lctxValidationResult = mempty}
     backgroundRect = rect nothing dark1'
@@ -741,48 +826,77 @@ layoutInfoBar ::
   Collage n El
 layoutInfoBar lctx es =
   case es ^. esMode of
-    ModeMotion _ s _ ->
+    ModeInput acc (InputTrie t) ->
       mapCollageAnnotation (const mempty)
-        $ substrate 0 (rect nothing motionBorderColor . extentsMax e)
-        $ textWithoutCursor s
+        $ substrate 0 (rect nothing inputBorderColor . extentsMax e)
+        $ textWithoutCursor ("\\" <> acc <> "[" <> Text.pack (Map.keys t) <> "]")
     _ ->
       mapCollageAnnotation (const mempty)
         $ substrate 0 (rect nothing selectionBorderColor . extentsMax e)
-        $ textWithoutCursor (pprSelection (selectionOfEditorState es))
+        $ textWithoutCursor (pprSelection (lctx ^. lctxShapeNames) (selectionOfEditorState es))
   where
     e = Extents
       { extentsW = extentsW (lctx ^. lctxViewport),
         extentsH = 15
       }
 
-pprSelection :: Selection -> Text
-pprSelection selection = Text.pack (goPath selectionPath "")
+pprSelection :: HashMap SynShape ShapeName -> Selection -> Text
+pprSelection shapeNames selection = Text.pack (goPath selectionPath "")
   where
-    Selection {selectionPath, selectionTip, selectionStrPos} = selection
+    Selection {selectionPath, selectionTip, selectionTipPos} = selection
     goPath p =
       case unconsPath p of
-        Nothing -> goTip selectionTip
-        Just (ps, p') -> goPathSegment ps . ('→' :) . goPath p'
-    goTip Nothing = ('_' :)
-    goTip (Just (SelectionTipLabeled tyName)) =
-      (tyNameStr tyName ++) . goStrPos selectionStrPos
-    goTip (Just SelectionTipSeq) = ("[]" ++)
-    goPathSegment ps =
-      case ps of
-        PathSegmentRec tyName fieldName ->
-          (tyNameStr tyName ++) . ('.' :) . (fieldNameStr fieldName ++)
-        PathSegmentSeq i ->
-          shows (indexToInt i)
-    goStrPos Nothing = id
-    goStrPos (Just i) = ('[' :) . shows i . (']' :)
+        Nothing -> goTip selectionTip . goTipPos selectionTipPos
+        Just (ps, p') -> goPathSegment ps . (" → " ++) . goPath p'
+    goTip shape =
+      case HashMap.lookup shape shapeNames of
+        Nothing -> (pprShape shape ++)
+        Just a -> (Text.unpack (shapeName a) ++)
+    goTipPos Nothing = id
+    goTipPos (Just pos) = (" [" ++) . shows pos . (']' :)
+    goPathSegment (PathSegment shape i) =
+      case HashMap.lookup shape shapeNames of
+        Nothing -> (pprShape shape ++) . (" [" ++) . shows (indexToInt i) . (']' :)
+        Just a -> (Text.unpack (pprNamedShape a i) ++)
+    pprNamedShape a i =
+      shapeName a
+        <> " ["
+        <> Array.indexArray (shapeFieldNames a) (indexToInt i)
+        <> "]"
+    pprShape = concatMap escape . flattenSynShape
+    escape '\n' = "\\n"
+    escape c = [c]
 
-layoutNode :: LayoutCtx -> Node -> PrecPredicate -> (PrecUnenclosed, Collage Ann El)
-layoutNode lctx = \case
-  Hole -> \_precPredicate -> layoutHole lctx
-  Node nodeSel value ->
-    if isNodeCollapsed nodeSel
-      then \_precPredicate -> layoutCollapsed lctx
-      else layoutValue lctx value
+layoutNode :: LayoutCtx -> Node -> (PrecUnenclosed, Collage Ann El)
+layoutNode lctx (Node (SynSel synSel) _)
+  | isNodeCollapsed synSel = layoutCollapsed lctx
+layoutNode lctx (Node sel syn)
+  | Just seq <- to_seq lfields = layoutSeq recLayoutStyle lctx seq
+  | Just str <- to_str lfields = layoutStr lctx str
+  | otherwise = layoutRec recLayoutStyle lctx lfields
+  where
+    lfields = layoutFields recLayoutStyle lctx syn
+    recLayoutStyle =
+      case sel of
+        StrSel _ -> RecLayoutStyle {recLayoutEditMode = True}
+        SynSel _ -> RecLayoutStyle {recLayoutEditMode = False}
+
+layoutFields ::
+  RecLayoutStyle ->
+  LayoutCtx ->
+  Syn Node ->
+  Syn (PrecUnenclosed, Collage Ann El)
+layoutFields rs lctx syn =
+  syn & traversed %@~ \(intToIndex -> i) ->
+    layoutNode
+      $ lctxResetPrecEditMode
+      $ lctxDescent (PathSegment shape i)
+      $ lctx
+  where
+    shape = synShape syn
+    lctxResetPrecEditMode
+      | recLayoutEditMode rs = lctxPrecPredicate .~ noPrec
+      | otherwise = id
 
 layoutCollapsed :: LayoutCtx -> (PrecUnenclosed, Collage Ann El)
 layoutCollapsed lctx =
@@ -794,30 +908,6 @@ layoutCollapsed lctx =
     precBorder = PrecBorder (lctx ^. lctxPrecBordersAlways)
     path = buildPath (lctx ^. lctxPath)
 
-layoutHole :: LayoutCtx -> (PrecUnenclosed, Collage Ann El)
-layoutHole lctx =
-  (,) (mempty @PrecUnenclosed)
-    $ layoutSel (BorderValid precBorder) path
-    $ layoutWithJumptag path
-    $ hole (fromMaybe "" (lctx ^. lctxPlaceholder))
-  where
-    hole t = textline dark2 ubuntuFont ("_" <> t) nothing
-    precBorder = PrecBorder (lctx ^. lctxPrecBordersAlways)
-    path = buildPath (lctx ^. lctxPath)
-
-layoutValue ::
-  LayoutCtx ->
-  Value Node ->
-  PrecPredicate ->
-  (PrecUnenclosed, Collage Ann El)
-layoutValue lctx = \case
-  ValueRec tyName fields ->
-    layoutRec lctx tyName fields
-  ValueSeq items ->
-    layoutSeq lctx items
-  ValueStr _ str -> \_precPredicate ->
-    layoutStr lctx str
-
 layoutStr ::
   LayoutCtx ->
   Text ->
@@ -826,126 +916,120 @@ layoutStr lctx str =
   (,) (mempty @PrecUnenclosed)
     $ layoutSel (toBorder lctx precBorder) path
     $ layoutWithJumptag path
-    $ textWithCursor
-      str
-      ( \Paths {pathsSelection} ->
-          \case
-            CursorVisible
-              | lctx ^. lctxEditMode,
-                selectionPath pathsSelection == path,
-                Just pos <- selectionStrPos pathsSelection ->
-                Just (fromIntegral pos)
-            _ -> Nothing
-      )
+    $ holeOverlay
+    $ textWithCursor str (blinkingCursorPos path)
   where
     precBorder =
       PrecBorder (lctx ^. lctxPrecBordersAlways)
         <> PrecBorder (Text.any Char.isSpace str)
     path = buildPath (lctx ^. lctxPath)
+    hole = textline dark2 ubuntuFont ("_" <> fromMaybe "" (lctx ^. lctxPlaceholder)) nothing
+    holeOverlay
+      | Text.null str = collageCompose offsetZero hole
+      | otherwise = id
 
-lctxDescent :: PathSegment -> Maybe Text -> LayoutCtx -> LayoutCtx
-lctxDescent pathSegment placeholder lctx =
+lctxDescent :: PathSegment -> LayoutCtx -> LayoutCtx
+lctxDescent pathSegment lctx =
   lctx
     & lctxPath %~ (<> mkPathBuilder pathSegment)
     & lctxValidationResult %~ pathTrieLookup pathSegment
     & lctxPlaceholder .~ placeholder
+    & lctxPrecPredicate .~ precPredicate
+  where
+    PathSegment shape i = pathSegment
+    placeholder =
+      case HashMap.lookup shape (lctx ^. lctxShapeNames) of
+        Nothing -> Nothing
+        Just a -> Just (Array.indexArray (shapeFieldNames a) (indexToInt i))
+    precPredicate =
+      case HashMap.lookup shape (lctx ^. lctxPrecInfo) of
+        Nothing -> noPrec
+        Just precInfo -> Array.indexArray precInfo (indexToInt i)
 
 layoutRec ::
+  RecLayoutStyle ->
   LayoutCtx ->
-  TyName ->
-  HashMap FieldName Node ->
-  PrecPredicate ->
+  Syn (PrecUnenclosed, Collage Ann El) ->
   (PrecUnenclosed, Collage Ann El)
-layoutRec lctx tyName fields precPredicate =
+layoutRec rs lctx syn =
   (,) (guardUnenclosed precBorder precUnenclosed')
     $ layoutSel (toBorder lctx precBorder) path
     $ collage
   where
-    layoutFields :: RecLayoutFn
-    fieldPlaceholder :: FieldName -> Maybe Text
-    (layoutFields, fieldPlaceholder) =
-      case HashMap.lookup tyName (lctx ^. lctxRecLayouts) of
-        Nothing -> (fromString (show tyName), mempty)
-        Just fn -> (getRecLayoutFn fn, getFieldPlaceholder fn)
-    drawnFields :: HashMap FieldName (PrecPredicate -> (PrecUnenclosed, Collage Ann El))
-    drawnFields =
-      HashMap.mapWithKey
-        ( \fieldName node ->
-            let lctx' =
-                  lctxDescent
-                    (PathSegmentRec tyName fieldName)
-                    (fieldPlaceholder fieldName)
-                    lctx
-             in layoutNode lctx' node
-        )
-        fields
+    shape = synShape syn
     (precUnenclosed, collage) =
-      appRecLayoutFn layoutFields path drawnFields wd
-    precUnenclosed' = addUnenclosed tyName precUnenclosed
+      snd $ appRecLayoutFn (synToLayout rs syn) path (TokenCount 0) wd
+    precUnenclosed' = addUnenclosed shape precUnenclosed
     precBorder =
       PrecBorder (lctx ^. lctxPrecBordersAlways)
-        <> appPrecPredicate precPredicate precUnenclosed'
+        <> appPrecPredicate (lctx ^. lctxPrecPredicate) precUnenclosed'
     path = buildPath (lctx ^. lctxPath)
     wd = lctx ^. lctxWritingDirection
 
 layoutSeq ::
+  RecLayoutStyle ->
   LayoutCtx ->
-  Seq Node ->
-  PrecPredicate ->
+  [(PrecUnenclosed, Collage Ann El)] ->
   (PrecUnenclosed, Collage Ann El)
-layoutSeq lctx items precPredicate =
-  (,) (guardUnenclosed precBorder precUnenclosed')
+layoutSeq rs lctx seq =
+  (,) (guardUnenclosed precBorder precUnenclosed)
     $ layoutSel (toBorder lctx precBorder) path
     $ collage
   where
-    drawnItems :: [PrecPredicate -> (PrecUnenclosed, Collage Ann El)]
-    drawnItems =
-      List.zipWith
-        ( \i node ->
-            let lctx' = lctxDescent (PathSegmentSeq i) (indexPlaceholder i) lctx
-             in layoutNode lctx' node
-        )
-        (List.map intToIndex [0 ..])
-        (Foldable.toList items)
     (precUnenclosed, collage) =
-      layoutSeqItems path drawnItems wd
-    precUnenclosed' =
-      -- TODO (int-index): add a sequence marker when non-empty
-      precUnenclosed
+      snd $ appRecLayoutFn layoutFn path (TokenCount 0) wd
     precBorder =
       PrecBorder (lctx ^. lctxPrecBordersAlways)
-        <> appPrecPredicate precPredicate precUnenclosed'
+    layoutFn =
+      case nonEmpty seq of
+        Nothing -> punctToLayout "|"
+        Just seq' ->
+          if recLayoutEditMode rs
+            then punctToLayout "|" <> rowsLayout seq'
+            else nefoldr1 vcat (fmap (addB . fieldToLayout) seq')
+    rowsLayout (h :| hs) =
+      case nonEmpty hs of
+        Nothing -> fieldToLayout h <> emptyPunctLayout
+        Just hs' -> vcat (fieldToLayout h <> emptyPunctLayout) (rowsLayout hs')
+    emptyPunctLayout = punctToLayout ""
     path = buildPath (lctx ^. lctxPath)
     wd = lctx ^. lctxWritingDirection
 
-layoutSeqItems ::
-  Path ->
-  [PrecPredicate -> (PrecUnenclosed, Collage Ann El)] ->
-  WritingDirection ->
-  (PrecUnenclosed, Collage Ann El)
-layoutSeqItems path xs =
-  case nonEmpty xs of
-    Nothing -> \_wd -> (mempty, layoutWithJumptag path (punct "∅"))
-    Just xs' -> layoutSeqItems' xs'
+addB :: RecLayoutFn -> RecLayoutFn
+addB (RecLayoutFn x) =
+  RecLayoutFn $ \path tc wd ->
+    let (tc', (xUnenclosed, x')) =
+          x path tc wd
+        g = case wd of
+          WritingDirectionLTR -> horizTop
+          WritingDirectionRTL -> flip horizTop
+     in (tc', (xUnenclosed, vline dark2 (heightOf x') `g` x'))
 
-layoutSeqItems' ::
-  NonEmpty (PrecPredicate -> (PrecUnenclosed, Collage Ann El)) ->
-  WritingDirection ->
-  (PrecUnenclosed, Collage Ann El)
-layoutSeqItems' xs wd =
-  let f = case wd of
-        WritingDirectionLTR -> vertLeft
-        WritingDirectionRTL -> vertRight
-      g = case wd of
-        WritingDirectionLTR -> horizTop
-        WritingDirectionRTL -> flip horizTop
-      addB x = vline dark2 (heightOf x) `g` x
-      (xsUnenclosed, xs') = NonEmpty.unzip (fmap ($ precAllowAll) xs)
-   in (,) (sconcat xsUnenclosed) $
-        nefoldr1 f (fmap addB xs')
+vcat :: RecLayoutFn -> RecLayoutFn -> RecLayoutFn
+RecLayoutFn a `vcat` RecLayoutFn b =
+  RecLayoutFn $ \path tc wd ->
+    let (tc', (aUnenclosed, a')) =
+          a path tc wd
+        (tc'', (bUnenclosed, b')) =
+          b path tc' wd
+        f = case wd of
+          WritingDirectionLTR -> vertLeft
+          WritingDirectionRTL -> vertRight
+     in (tc'', (aUnenclosed <> bUnenclosed, a' `f` b'))
 
-nefoldr1 :: (a -> a -> a) -> NonEmpty a -> a
-nefoldr1 = List.foldr1 -- safe for non-empty lists
+to_str :: Syn a -> Maybe Text
+to_str syn
+  | Foldable.null syn =
+    Just (Text.pack [c | TokenChar c <- Foldable.toList (synTokens syn)])
+to_str _ = Nothing
+
+to_seq :: Syn a -> Maybe [a]
+to_seq (synTokens -> Foldable.toList -> TokenChar '|' : init_ts) = to_seq' init_ts
+  where
+    to_seq' [] = Just []
+    to_seq' (TokenChar _ : _) = Nothing
+    to_seq' (TokenNode n : ts) = (n :) <$> to_seq' ts
+to_seq _ = Nothing
 
 data Border = BorderValid PrecBorder | BorderInvalid
 
@@ -977,8 +1061,11 @@ toBorder lctx
   | validChild = BorderValid
   | otherwise = const BorderInvalid
   where
+    allowUnknownShapes = HashSet.filter (not . isUnknownShapeError)
+    isUnknownShapeError (UnknownShape _) = True
+    isUnknownShapeError _ = False
     validChild =
-      HashSet.null (pathTrieRoot (lctx ^. lctxValidationResult))
+      HashSet.null (allowUnknownShapes (pathTrieRoot (lctx ^. lctxValidationResult)))
 
 --------------------------------------------------------------------------------
 ---- Editor - Selection
@@ -989,88 +1076,40 @@ selectionOfEditorState es = selectionOfNode (es ^. esExpr)
 
 selectionOfNode :: Node -> Selection
 selectionOfNode = \case
-  Hole -> Selection emptyPath Nothing Nothing
-  Node nodeSel (ValueStr tyName _) ->
-    let NodeStrSel pos = nodeSel
-     in Selection
-          emptyPath
-          (Just (SelectionTipLabeled tyName))
-          (Just pos)
-  Node nodeSel (ValueSeq items) ->
-    let NodeSeqSel seqSel = nodeSel
-     in case seqSel of
-          SeqSel0 ->
-            Selection emptyPath (Just SelectionTipSeq) Nothing
-          SeqSel _ (SelSelf _) ->
-            Selection emptyPath (Just SelectionTipSeq) Nothing
-          SeqSel i SelChild ->
-            let pathSegment = PathSegmentSeq i
-                seqItem = Seq.index items (indexToInt i)
-                Selection pathTail tip' strPos =
-                  selectionOfNode seqItem
-             in Selection (consPath pathSegment pathTail) tip' strPos
-  Node nodeSel (ValueRec tyName fields) ->
-    let NodeRecSel recSel = nodeSel
-     in case recSel of
-          RecSel0 ->
-            Selection emptyPath (Just (SelectionTipLabeled tyName)) Nothing
-          RecSel _ (SelSelf _) ->
-            Selection emptyPath (Just (SelectionTipLabeled tyName)) Nothing
-          RecSel fieldName SelChild ->
-            let pathSegment = PathSegmentRec tyName fieldName
-                recField = fields HashMap.! fieldName
-                Selection pathTail tip' strPos =
-                  selectionOfNode recField
-             in Selection (consPath pathSegment pathTail) tip' strPos
+  Node (StrSel pos) syn -> Selection emptyPath (synShape syn) (Just pos)
+  Node (SynSel recSel) syn ->
+    case recSel of
+      RecSel0 -> Selection emptyPath (synShape syn) Nothing
+      RecSel _ (SelSelf _) -> Selection emptyPath (synShape syn) Nothing
+      RecSel i SelChild ->
+        let pathSegment = PathSegment (synShape syn) i
+            recField = syn ^?! synIx i
+            Selection pathTail tip tipPos = selectionOfNode recField
+         in Selection (consPath pathSegment pathTail) tip tipPos
 
 -- | Set self-selection for all nodes.
 resetPathNode :: Node -> Node
-resetPathNode node =
-  case node of
-    Hole -> node
-    Node sel value -> Node (resetSel sel) (fmap resetPathNode value)
+resetPathNode (Node nodeSel syn) =
+  Node nodeSel' (fmap resetPathNode syn)
   where
-    resetSel (NodeRecSel recSel) = NodeRecSel (toRecSelSelf recSel)
-    resetSel (NodeSeqSel seqSel) = NodeSeqSel (toSeqSelSelf seqSel)
-    resetSel s@(NodeStrSel _) = s
+    nodeSel' =
+      case nodeSel of
+        SynSel sel -> SynSel (toRecSelSelf sel)
+        StrSel _ -> doneEditing syn
 
 updatePathNode :: Path -> Node -> Node
 updatePathNode path node = case node of
-  Hole -> node
-  Node _ (ValueStr _ _) -> node
-  Node nodeSel (ValueSeq items) ->
-    let NodeSeqSel seqSel = nodeSel
-     in case unconsPath path of
-          Nothing ->
-            let seqSel' = toSeqSelSelf seqSel
-             in Node (NodeSeqSel seqSel') (ValueSeq items)
-          Just (PathSegmentRec _ _, _) -> node
-          Just (PathSegmentSeq i, path') ->
-            let i' = indexToInt i
-             in case Seq.lookup i' items of
-                  Nothing -> node
-                  Just a ->
-                    let a' = updatePathNode path' a
-                        items' = Seq.update i' a' items
-                        seqSel' = SeqSel i SelChild
-                     in Node (NodeSeqSel seqSel') (ValueSeq items')
-  Node nodeSel (ValueRec tyName fields) ->
-    let NodeRecSel recSel = nodeSel
-     in case unconsPath path of
-          Nothing ->
-            let recSel' = toRecSelSelf recSel
-             in Node (NodeRecSel recSel') (ValueRec tyName fields)
-          Just (PathSegmentSeq _, _) -> node
-          Just (PathSegmentRec tyName' fieldName, path') ->
-            if tyName' /= tyName
-              then node
-              else case fields ^. at fieldName of
-                Nothing -> node
-                Just a ->
-                  let a' = updatePathNode path' a
-                      fields' = HashMap.insert fieldName a' fields
-                      recSel' = RecSel fieldName SelChild
-                   in Node (NodeRecSel recSel') (ValueRec tyName fields')
+  Node (StrSel _) _ -> node
+  Node (SynSel sel) syn ->
+    case unconsPath path of
+      Nothing -> Node (SynSel (toRecSelSelf sel)) syn
+      Just (PathSegment shape i, path') ->
+        if shape /= synShape syn || hasn't (synIx i) syn
+          then node
+          else
+            Node
+              (SynSel (RecSel i SelChild))
+              (over (synIx i) (updatePathNode path') syn)
 
 setPathNode :: Path -> Node -> Node
 setPathNode path node = updatePathNode path (resetPathNode node)
@@ -1081,38 +1120,16 @@ toSelSelf selStatus@(SelSelf _collapsed) = selStatus
 
 toRecSelSelf :: RecSel -> RecSel
 toRecSelSelf RecSel0 = RecSel0
-toRecSelSelf (RecSel fieldName selStatus) =
-  RecSel fieldName (toSelSelf selStatus)
+toRecSelSelf (RecSel i selStatus) = RecSel i (toSelSelf selStatus)
 
 toRecSelChild :: RecSel -> Maybe RecSel
 toRecSelChild RecSel0 = Nothing
-toRecSelChild (RecSel fieldName _) = Just (RecSel fieldName SelChild)
+toRecSelChild (RecSel i _) = Just (RecSel i SelChild)
 
-toSeqSelSelf :: SeqSel -> SeqSel
-toSeqSelSelf SeqSel0 = SeqSel0
-toSeqSelSelf (SeqSel i selStatus) = SeqSel i (toSelSelf selStatus)
-
-toSeqSelChild :: SeqSel -> Maybe SeqSel
-toSeqSelChild SeqSel0 = Nothing
-toSeqSelChild (SeqSel i _) = Just (SeqSel i SelChild)
-
-toNodeSelSelf :: NodeSel -> Maybe NodeSel
-toNodeSelSelf (NodeRecSel recSel) = Just (NodeRecSel (toRecSelSelf recSel))
-toNodeSelSelf (NodeSeqSel seqSel) = Just (NodeSeqSel (toSeqSelSelf seqSel))
-toNodeSelSelf (NodeStrSel _) = Nothing
-
-toNodeSelChild :: NodeSel -> Maybe NodeSel
-toNodeSelChild (NodeRecSel recSel) = NodeRecSel <$> toRecSelChild recSel
-toNodeSelChild (NodeSeqSel seqSel) = NodeSeqSel <$> toSeqSelChild seqSel
-toNodeSelChild (NodeStrSel _) = Nothing
-
-toggleNodeCollapse :: NodeSel -> Maybe NodeSel
-toggleNodeCollapse (NodeRecSel (RecSel fieldName selStatus)) =
+toggleNodeCollapse :: RecSel -> Maybe RecSel
+toggleNodeCollapse (RecSel i selStatus) =
   toggleSelStatusCollapse selStatus <&> \selStatus' ->
-    NodeRecSel (RecSel fieldName selStatus')
-toggleNodeCollapse (NodeSeqSel (SeqSel i selStatus)) =
-  toggleSelStatusCollapse selStatus <&> \selStatus' ->
-    NodeSeqSel (SeqSel i selStatus')
+    RecSel i selStatus'
 toggleNodeCollapse _ = Nothing
 
 toggleSelStatusCollapse :: SelStatus -> Maybe SelStatus
@@ -1123,9 +1140,8 @@ toggleSelStatusCollapse (SelSelf collapsed) =
 toggleCollapsed :: Collapsed -> Collapsed
 toggleCollapsed (Collapsed c) = Collapsed (not c)
 
-isNodeCollapsed :: NodeSel -> Bool
-isNodeCollapsed (NodeRecSel (RecSel _ selStatus)) = isSelStatusCollapsed selStatus
-isNodeCollapsed (NodeSeqSel (SeqSel _ selStatus)) = isSelStatusCollapsed selStatus
+isNodeCollapsed :: RecSel -> Bool
+isNodeCollapsed (RecSel _ selStatus) = isSelStatusCollapsed selStatus
 isNodeCollapsed _ = False
 
 isSelStatusCollapsed :: SelStatus -> Bool
@@ -1196,7 +1212,6 @@ reactEditorState _ (KeyPress [Control] keyCode) es
 reactEditorState pluginInfo inputEvent es
   | Just act <-
       getAction
-        (pluginInfoSchema pluginInfo)
         (es ^. esWritingDirection)
         (selectionOfNode (es ^. esExpr))
         (es ^. esMode)
@@ -1210,7 +1225,7 @@ runReactM_EditorState ::
   ReactM ReactState ->
   EditorState ->
   Maybe EditorState
-runReactM_EditorState pluginInfo act editorState =
+runReactM_EditorState _ act editorState =
   case runReactM_ReactState act rctx rst of
     Nothing -> Nothing
     Just (UndoFlag undoFlag, rst') ->
@@ -1235,9 +1250,7 @@ runReactM_EditorState pluginInfo act editorState =
         }
     rctx =
       ReactCtx
-        { _rctxDefaultNodes = pluginInfoDefaultNodes pluginInfo,
-          _rctxRecMoveMaps = pluginInfoRecMoveMaps pluginInfo,
-          _rctxJumptags = editorState ^. esJumptags
+        { _rctxJumptags = editorState ^. esJumptags
         }
 
 data Action
@@ -1251,113 +1264,110 @@ data Action
   | ActionDeleteCharForward Path
   | ActionMoveStrCursorBackward Path
   | ActionMoveStrCursorForward Path
-  | ActionInsertLetter Path Char
-  | ActionAppendSeqItem Path
-  | ActionMergeSeqItem Path
+  | ActionInsertToken Path (Token Node)
   | ActionSelectParent Path
   | ActionSelectChild Path
   | ActionSelectSiblingBackward Path
   | ActionSelectSiblingForward Path
   | ActionActivateJumptags JumpAction
   | ActionJumptagLookup Char
-  | ActionStartMotion Bool
-  | ActionAppendMotion Char
-  | ActionCommitMotion Path
   | ActionToggleCollapse Path
+  | ActionToggleEditMode Path
+  | ActionEnterInputMode
+  | ActionInputSelectSymbol Path Char
+  | ActionInsertTokenFromStack Path
+  | ActionEnterStackInputMode
 
 getAction ::
-  Schema ->
   WritingDirection ->
   Selection ->
   Mode ->
   InputEvent ->
   Maybe Action
-getAction
-  Schema {schemaTypes}
+getAction _ _ _ inputEvent
+  -- Escape transient modes (enter normal mode)
+  | KeyPress [] KeyCode.Escape <- inputEvent =
+    Just ActionEscapeTransientMode
+getAction wd selection ModeNormal inputEvent =
+  getActionInModeNormal wd selection inputEvent
+getAction _ selection ModeStack inputEvent =
+  getActionInModeStack selection inputEvent
+getAction _ _ (ModeJump _ _) inputEvent =
+  case inputEvent of
+    KeyPress [] (keyChar -> Just c) ->
+      Just $ ActionJumptagLookup c
+    _ -> Nothing
+getAction _ Selection {selectionPath} ModeStackInput inputEvent =
+  case inputEvent of
+    -- Rotate the stack in input mode.
+    KeyPress [] keyCode
+      | keyLetter 'r' keyCode ->
+        Just $ ActionRotateStack
+    -- Pop a node from the stack in input mode.
+    KeyPress [] keyCode
+      | keyLetter 'p' keyCode ->
+        Just $ ActionInsertTokenFromStack selectionPath
+    _ -> Nothing
+getAction _ Selection {selectionPath} (ModeInput acc _) inputEvent =
+  case inputEvent of
+    -- Enter stack input mode.
+    KeyPress [] keyCode
+      | keyLetter 'r' keyCode,
+        Text.null acc ->
+        Just $ ActionEnterStackInputMode
+    -- Select symbol in input mode.
+    KeyPress mods (keyChar -> Just c)
+      | Control `notElem` mods ->
+        Just $ ActionInputSelectSymbol selectionPath c
+    _ -> Nothing
+
+getActionInModeNormal ::
+  WritingDirection ->
+  Selection ->
+  InputEvent ->
+  Maybe Action
+getActionInModeNormal
   wd
-  Selection {selectionPath, selectionTip}
-  mode
+  Selection {selectionPath, selectionTipPos}
   inputEvent
-    -- Escape transient modes (enter normal mode)
-    | KeyPress [] KeyCode.Escape <- inputEvent =
-      Just ActionEscapeTransientMode
-    -- Enter motion mode from normal mode.
-    | ModeNormal <- mode,
-      KeyPress [] KeyCode.Space <- inputEvent =
-      return (ActionStartMotion False)
-    -- Enter motion mode from stack mode.
-    | ModeStack <- mode,
-      KeyPress [] KeyCode.Space <- inputEvent =
-      return (ActionStartMotion False)
+    -- Enter edit mode from normal mode.
+    | KeyPress [] KeyCode.Space <- inputEvent =
+      Just (ActionToggleEditMode selectionPath)
     -- Quit from edit mode with a Space.
     -- Use Shift-Space to enter a space character.
-    | ModeEdit <- mode,
+    | Just _ <- selectionTipPos,
       KeyPress [] KeyCode.Space <- inputEvent =
-      return ActionEscapeTransientMode
-    -- Commit a motion.
-    | ModeMotion _ _ _ <- mode,
-      KeyPress [] KeyCode.Space <- inputEvent =
-      Just $ ActionCommitMotion selectionPath
-    -- Append a letter to the motion.
-    | ModeMotion _ _ _ <- mode,
-      KeyPress mods keyCode <- inputEvent,
-      Control `notElem` mods,
-      Just c <- keyChar keyCode =
-      Just $ ActionAppendMotion c
-    -- Jumptag lookup.
-    | ModeJump _ _ <- mode,
-      KeyPress [] keyCode <- inputEvent,
-      Just c <- keyChar keyCode =
-      Just $ ActionJumptagLookup c
+      Just (ActionToggleEditMode selectionPath)
     -- Delete character backward.
-    | ModeEdit <- mode,
-      Just (SelectionTipLabeled tyName) <- selectionTip,
-      Just TyDefnStr <- HashMap.lookup tyName schemaTypes,
+    | Just _ <- selectionTipPos,
       KeyPress [] KeyCode.Backspace <- inputEvent =
       Just $ ActionDeleteCharBackward selectionPath
     -- Delete character forward.
-    | ModeEdit <- mode,
-      Just (SelectionTipLabeled tyName) <- selectionTip,
-      Just TyDefnStr <- HashMap.lookup tyName schemaTypes,
+    | Just _ <- selectionTipPos,
       KeyPress [] KeyCode.Delete <- inputEvent =
       Just $ ActionDeleteCharForward selectionPath
     -- Move string cursor backward.
-    | ModeEdit <- mode,
-      Just (SelectionTipLabeled tyName) <- selectionTip,
-      Just TyDefnStr <- HashMap.lookup tyName schemaTypes,
+    | Just _ <- selectionTipPos,
       KeyPress [] KeyCode.ArrowLeft <- inputEvent =
       Just $ ActionMoveStrCursorBackward selectionPath
     -- Move string cursor forward.
-    | ModeEdit <- mode,
-      Just (SelectionTipLabeled tyName) <- selectionTip,
-      Just TyDefnStr <- HashMap.lookup tyName schemaTypes,
+    | Just _ <- selectionTipPos,
       KeyPress [] KeyCode.ArrowRight <- inputEvent =
       Just $ ActionMoveStrCursorForward selectionPath
-    -- Insert letter.
-    | ModeEdit <- mode,
-      Just (SelectionTipLabeled tyName) <- selectionTip,
-      Just TyDefnStr <- HashMap.lookup tyName schemaTypes,
+    -- Insert token.
+    | Just _ <- selectionTipPos,
       KeyPress mods keyCode <- inputEvent,
       Control `notElem` mods,
       Just c <- keyChar keyCode =
-      Just $ ActionInsertLetter selectionPath c
+      Just $
+        case c of
+          '\\' -> ActionEnterInputMode
+          '_' -> ActionInsertToken selectionPath (TokenNode defaultHole)
+          _ -> ActionInsertToken selectionPath (TokenChar c)
     -- Toggle node collapse.
     | KeyPress [] keyCode <- inputEvent,
       keyLetter 'c' keyCode =
       Just $ ActionToggleCollapse selectionPath
-    -- Append a list item.
-    | KeyPress [] keyCode <- inputEvent,
-      keyLetter ',' keyCode =
-      Just $ ActionAppendSeqItem selectionPath
-    -- Merge a sequence with the parent sequence.
-    | KeyPress [] keyCode <- inputEvent,
-      keyLetter 'm' keyCode =
-      Just $ ActionMergeSeqItem selectionPath
-    -- Drop a node from the stack.
-    | ModeStack <- mode,
-      KeyPress [] keyCode <- inputEvent,
-      keyLetter 'x' keyCode =
-      Just ActionDropStack
     -- Enter jumptag mode to select a node.
     | KeyPress [] keyCode <- inputEvent,
       keyLetter 'g' keyCode =
@@ -1397,8 +1407,21 @@ getAction
       Just $ case wd of
         WritingDirectionLTR -> ActionSelectSiblingForward selectionPath
         WritingDirectionRTL -> ActionSelectSiblingBackward selectionPath
-    | otherwise =
-      Nothing
+getActionInModeNormal _ _ _ = Nothing
+
+getActionInModeStack ::
+  Selection ->
+  InputEvent ->
+  Maybe Action
+getActionInModeStack Selection {selectionPath} inputEvent
+  -- Enter edit mode from stack mode.
+  | KeyPress [] KeyCode.Space <- inputEvent =
+    Just (ActionToggleEditMode selectionPath)
+  -- Drop a node from the stack.
+  | KeyPress [] keyCode <- inputEvent,
+    keyLetter 'x' keyCode =
+    Just ActionDropStack
+getActionInModeStack _ _ = Nothing
 
 type ReactM s = WriterT UndoFlag (ReaderT ReactCtx (StateT s Maybe)) ()
 
@@ -1410,14 +1433,16 @@ runReactM_ReactState act rctx rst =
     $ act
 
 applyActionM :: Action -> ReactM ReactState
-applyActionM ActionEscapeTransientMode =
+applyActionM ActionEscapeTransientMode = do
   rstMode .= ModeNormal
+  rstNode %= quitEditMode
 applyActionM (ActionDeleteNode path) = do
   rstMode .= ModeStack
   nodes <-
     zoom (rstNode . atPath path) $ do
-      node@Node {} <- get
-      put Hole
+      node <- get
+      guard (not (isHole node))
+      put defaultHole
       return [node]
   forM_ nodes $ \node ->
     rstStack %= (node :)
@@ -1425,7 +1450,7 @@ applyActionM (ActionDeleteNode path) = do
 applyActionM (ActionPushStack path) = do
   rstMode .= ModeStack
   parent <- use rstNode
-  let nodes = parent ^.. atPath path
+  let nodes = List.filter (not . isHole) (parent ^.. atPath path)
   forM_ nodes $ \node ->
     rstStack %= (node :)
 applyActionM (ActionPopSwapStack path) = do
@@ -1437,152 +1462,99 @@ applyActionM ActionRotateStack = do
   mode <- use rstMode
   case mode of
     ModeStack -> rstStack %= rotate
+    ModeStackInput -> rstStack %= rotate
     _ -> rstMode .= ModeStack
 applyActionM ActionDropStack = do
   rstStack %= List.drop 1
-applyActionM (ActionDeleteCharBackward path) =
-  zoom (rstNode . atPath path) $ do
-    Node nodeSel (ValueStr tyName str) <- get
-    let NodeStrSel pos = nodeSel
-    guard (pos > 0)
-    let pos' = pos - 1
-    let (before, after) = Text.splitAt pos' str
-        str' = before <> Text.drop 1 after
-    put $ Node (NodeStrSel pos') (ValueStr tyName str')
-    setUndoFlag
-applyActionM (ActionDeleteCharForward path) =
-  zoom (rstNode . atPath path) $ do
-    Node nodeSel (ValueStr tyName str) <- get
-    let NodeStrSel pos = nodeSel
-    guard (pos < Text.length str)
-    let (before, after) = Text.splitAt pos str
-        str' = before <> Text.drop 1 after
-    put $ Node nodeSel (ValueStr tyName str')
-    setUndoFlag
+applyActionM (ActionDeleteCharBackward path) = do
+  nodes <-
+    zoom (rstNode . atPath path) $ do
+      Node (StrSel pos) (Syn tokens) <- get
+      guard (pos > 0)
+      let pos' = pos - 1
+      let (before, after) = Seq.splitAt pos' tokens
+      (tokens', deleted) <-
+        case Seq.viewl after of
+          Seq.EmptyL -> A.empty
+          deleted Seq.:< after' ->
+            return (before <> after', deleted)
+      put $ Node (StrSel pos') (Syn tokens')
+      case deleted of
+        TokenNode node | not (isHole node) -> return [node]
+        _ -> return []
+  forM_ nodes $ \node ->
+    rstStack %= (node :)
+  setUndoFlag
+applyActionM (ActionDeleteCharForward path) = do
+  nodes <-
+    zoom (rstNode . atPath path) $ do
+      Node (StrSel pos) (Syn tokens) <- get
+      guard (pos < Seq.length tokens)
+      let (before, after) = Seq.splitAt pos tokens
+      (tokens', deleted) <-
+        case Seq.viewl after of
+          Seq.EmptyL -> A.empty
+          deleted Seq.:< after' ->
+            return (before <> after', deleted)
+      put $ Node (StrSel pos) (Syn tokens')
+      case deleted of
+        TokenNode node | not (isHole node) -> return [node]
+        _ -> return []
+  forM_ nodes $ \node ->
+    rstStack %= (node :)
+  setUndoFlag
 applyActionM (ActionMoveStrCursorBackward path) =
   zoom (rstNode . atPath path) $ do
-    Node nodeSel (ValueStr tyName str) <- get
-    let NodeStrSel pos = nodeSel
+    Node (StrSel pos) syn <- get
     guard (pos > 0)
     let pos' = pos - 1
-    put $ Node (NodeStrSel pos') (ValueStr tyName str)
+    put $ Node (StrSel pos') syn
 applyActionM (ActionMoveStrCursorForward path) =
   zoom (rstNode . atPath path) $ do
-    Node nodeSel (ValueStr tyName str) <- get
-    let NodeStrSel pos = nodeSel
-    guard (pos < Text.length str)
+    Node (StrSel pos) syn <- get
+    guard (pos < Seq.length (synTokens syn))
     let pos' = pos + 1
-    put $ Node (NodeStrSel pos') (ValueStr tyName str)
-applyActionM (ActionAppendSeqItem path) = do
-  path' <- maybeA (pathParent path)
-  zoom (rstNode . atPath path') $ do
-    Node nodeSel (ValueSeq items) <- get
-    let NodeSeqSel seqSel = nodeSel
-    SeqSel i SelChild <- pure seqSel
-    let i' = indexToInt i + 1
-        items' = Seq.insertAt i' Hole items
-        seqSel' = SeqSel (intToIndex i') SelChild
-        nodeSel' = NodeSeqSel seqSel'
-        value' = ValueSeq items'
-    put $ Node nodeSel' value'
-    setUndoFlag
-applyActionM (ActionMergeSeqItem path) = do
-  path' <- maybeA (pathParent path)
-  zoom (rstNode . atPath path') $ do
-    Node nodeSel (ValueSeq items) <- get
-    let NodeSeqSel seqSel = nodeSel
-    SeqSel i SelChild <- pure seqSel
-    let (preItems, midItems) = Seq.splitAt (indexToInt i) items
-    (subItems, postItems) <-
-      maybeA $ case Seq.viewl midItems of
-        Seq.EmptyL -> Nothing
-        subNode Seq.:< postItems ->
-          case subNode of
-            Hole -> Just (Seq.empty, postItems)
-            Node _ (ValueSeq subItems) -> Just (subItems, postItems)
-            _ -> Nothing
-    let postItems' = subItems <> postItems
-        items' = preItems <> postItems'
-        seqSel'
-          | Seq.null items' = SeqSel0
-          | Seq.null postItems' = SeqSel (intToIndex (Seq.length items' - 1)) SelChild
-          | otherwise = SeqSel (intToIndex (Seq.length preItems)) SelChild
-        nodeSel' = NodeSeqSel seqSel'
-        value' = ValueSeq items'
-    put $ Node nodeSel' value'
-    setUndoFlag
-applyActionM (ActionInsertLetter path c) =
+    put $ Node (StrSel pos') syn
+applyActionM (ActionInsertToken path t) =
   zoom (rstNode . atPath path) $ do
-    Node nodeSel (ValueStr tyName str) <- get
-    let NodeStrSel pos = nodeSel
-    let (before, after) = Text.splitAt pos str
-        str' = before <> Text.singleton c <> after
+    Node (StrSel pos) (Syn tokens) <- get
+    let tokens' = Seq.insertAt pos t tokens
         pos' = pos + 1
-    put $ Node (NodeStrSel pos') (ValueStr tyName str')
+    put $ Node (StrSel pos') (Syn tokens')
     setUndoFlag
 applyActionM (ActionSelectParent path) = do
   rstMode %= quitStackMode
   path' <- maybeA (pathParent path)
   zoom (rstNode . atPath path') $ do
-    Node nodeSel value <- get
-    nodeSel' <- maybeA (toNodeSelSelf nodeSel)
-    put $ Node nodeSel' value
+    Node (SynSel sel) syn <- get
+    put $ Node (SynSel (toRecSelSelf sel)) syn
 applyActionM (ActionSelectChild path) = do
   rstMode %= quitStackMode
   zoom (rstNode . atPath path) $ do
-    Node nodeSel value <- get
-    nodeSel' <- maybeA (toNodeSelChild nodeSel)
-    put $ Node nodeSel' value
+    Node (SynSel sel) syn <- get
+    sel' <- maybeA (toRecSelChild sel)
+    put $ Node (SynSel sel') syn
 applyActionM (ActionToggleCollapse path) = do
   rstMode %= quitStackMode
   zoom (rstNode . atPath path) $ do
-    Node nodeSel value <- get
-    nodeSel' <- maybeA (toggleNodeCollapse nodeSel)
-    put $ Node nodeSel' value
+    Node (SynSel sel) syn <- get
+    sel' <- maybeA (toggleNodeCollapse sel)
+    put $ Node (SynSel sel') syn
 applyActionM (ActionSelectSiblingBackward path) = do
   rstMode %= quitStackMode
   path' <- maybeA (pathParent path)
   zoom rstNode $ zoomPathPrefix path' $ do
-    Node nodeSel value <- get
-    nodeSel' <- case value of
-      ValueRec tyName _ -> do
-        let NodeRecSel recSel = nodeSel
-        RecSel fieldName SelChild <- pure recSel
-        recMoveMaps <- view rctxRecMoveMaps
-        let moveMap = rmmBackward (recMoveMaps HashMap.! tyName)
-        fieldName' <- maybeA (HashMap.lookup fieldName moveMap)
-        let recSel' = RecSel fieldName' SelChild
-        return (NodeRecSel recSel')
-      ValueSeq _ -> do
-        let NodeSeqSel seqSel = nodeSel
-        SeqSel i SelChild <- pure seqSel
-        i' <- maybeA (indexPred i)
-        let seqSel' = SeqSel i' SelChild
-        return (NodeSeqSel seqSel')
-      _ -> A.empty
-    put $ Node nodeSel' value
+    Node (SynSel (RecSel i SelChild)) syn <- get
+    i' <- maybeA (indexPred i)
+    put $ Node (SynSel (RecSel i' SelChild)) syn
 applyActionM (ActionSelectSiblingForward path) = do
   rstMode %= quitStackMode
   path' <- maybeA (pathParent path)
   zoom rstNode $ zoomPathPrefix path' $ do
-    Node nodeSel value <- get
-    nodeSel' <- case value of
-      ValueRec tyName _ -> do
-        let NodeRecSel recSel = nodeSel
-        RecSel fieldName SelChild <- pure recSel
-        recMoveMaps <- view rctxRecMoveMaps
-        let moveMap = rmmForward (recMoveMaps HashMap.! tyName)
-        fieldName' <- maybeA (HashMap.lookup fieldName moveMap)
-        let recSel' = RecSel fieldName' SelChild
-        return (NodeRecSel recSel')
-      ValueSeq items -> do
-        let NodeSeqSel seqSel = nodeSel
-        SeqSel i SelChild <- pure seqSel
-        i' <- maybeA (indexSucc items i)
-        let seqSel' = SeqSel i' SelChild
-        return (NodeSeqSel seqSel')
-      _ -> A.empty
-    put $ Node nodeSel' value
+    Node (SynSel (RecSel i SelChild)) syn <- get
+    let n = Foldable.length syn
+    i' <- maybeA (indexSucc n i)
+    put $ Node (SynSel (RecSel i' SelChild)) syn
 applyActionM (ActionActivateJumptags jumpAction) = do
   Just jumptags <- views rctxJumptags nonEmpty
   rstMode .= ModeJump (withJumptagLabels jumptags) jumpAction
@@ -1597,30 +1569,49 @@ applyActionM (ActionJumptagLookup c) = do
   case activeJumptags' of
     Jumptag _ path :| [] -> commitJumpAction path jumpAction
     jumptags -> rstMode .= ModeJump (withJumptagLabels jumptags) jumpAction
-applyActionM (ActionStartMotion fromEditMode) = do
-  rctx <- ask
-  rstMode .= mkModeMotion rctx fromEditMode ""
-applyActionM (ActionAppendMotion c) = do
-  guard (not (Char.isSpace c))
-  ModeMotion fromEditMode s _ <- use rstMode
-  rctx <- ask
-  rstMode .= mkModeMotion rctx fromEditMode (s <> Text.singleton c)
-applyActionM (ActionCommitMotion path) = do
-  ModeMotion fromEditMode _ action <- use rstMode
+applyActionM (ActionToggleEditMode path) = do
   rstMode .= ModeNormal
-  alwaysSucceed $ case action of
-    MotionNoOp -> return ()
-    MotionToggleEditMode -> do
-      -- Enter/Exit edit mode with Space.
-      Monoid.First (Just (Node _ (ValueStr _ _))) <-
-        use (rstNode . atPath path . to (Monoid.First . Just))
-      unless fromEditMode $
-        rstMode .= ModeEdit
-    MotionPopSwap node -> do
-      popSwapNode path node
-      case node of
-        Node _ (ValueStr _ _) -> rstMode .= ModeEdit
-        _ -> return ()
+  rstNode . atPath path
+    %= \(Node nodeSel syn) ->
+      let nodeSel' =
+            case nodeSel of
+              StrSel _ -> doneEditing syn
+              SynSel _ -> StrSel (Seq.length (synTokens syn))
+       in Node nodeSel' syn
+applyActionM ActionEnterInputMode = do
+  rstMode .= ModeInput "" initialInputTrie
+applyActionM ActionEnterStackInputMode = do
+  rstMode .= ModeStackInput
+applyActionM (ActionInputSelectSymbol path c) = do
+  ModeInput acc (InputTrie t) <- use rstMode
+  case Map.lookup c t of
+    Nothing -> rstMode .= ModeNormal
+    Just (Left t') -> rstMode .= ModeInput (acc <> Text.singleton c) t'
+    Just (Right c') -> do
+      rstMode .= ModeNormal
+      applyActionM (ActionInsertToken path (TokenChar c'))
+applyActionM (ActionInsertTokenFromStack path) = do
+  rstMode .= ModeNormal
+  alwaysSucceed $ do
+    n : ns <- use rstStack
+    rstStack .= ns
+    applyActionM (ActionInsertToken path (TokenNode n))
+
+quitEditMode :: Node -> Node
+quitEditMode (Node (StrSel _) syn) = Node (doneEditing syn) syn
+quitEditMode (Node nodeSel@(SynSel (RecSel i SelChild)) syn) =
+  Node nodeSel (over (synIx i) quitEditMode syn)
+quitEditMode node = node
+
+synIx :: Index -> Traversal' (Syn a) a
+synIx i = traversed . Lens.index (indexToInt i)
+
+doneEditing :: Syn Node -> NodeSel
+doneEditing syn =
+  SynSel $
+    if Foldable.null syn
+      then RecSel0
+      else RecSel (intToIndex 0) SelChild
 
 withJumptagLabels :: NonEmpty b -> NonEmpty (Char, b)
 withJumptagLabels = NonEmpty.zip (NonEmpty.cycle jumptagLabels)
@@ -1630,31 +1621,17 @@ commitJumpAction path jumpAction = do
   alwaysSucceed $
     case jumpAction of
       JumpSelect -> do
+        rstNode %= quitEditMode
         rstNode %= setPathNode path
       JumpCopyTo destinationPath -> do
-        Just sourceNode@Node {} <- uses rstNode (preview (atPath path))
+        Just sourceNode <- uses rstNode (preview (atPath path))
+        guard (not (isHole sourceNode))
         zoom (rstNode . atPath destinationPath) $ do
-          Hole <- get
+          node <- get
+          guard (isHole node)
           setUndoFlag
           put sourceNode
   rstMode .= ModeNormal
-
-parseMotionAction :: ReactCtx -> Text -> MotionAction
-parseMotionAction rctx motion =
-  case motion of
-    "" -> MotionToggleEditMode
-    (insertSeqMotion -> Just n) ->
-      MotionPopSwap (defaultSeqNode n)
-    _ ->
-      let defaultNodes = rctx ^. rctxDefaultNodes
-          nodes = filterByMotion motion (HashMap.toList defaultNodes)
-       in case nodes of
-            [node] -> MotionPopSwap node
-            _ -> MotionNoOp
-
-mkModeMotion :: ReactCtx -> Bool -> Text -> Mode
-mkModeMotion rctx fromEditMode motion =
-  ModeMotion fromEditMode motion (parseMotionAction rctx motion)
 
 popSwapNode :: Path -> Node -> ReactM ReactState
 popSwapNode path n = do
@@ -1663,9 +1640,9 @@ popSwapNode path n = do
       node <- get
       put n
       setUndoFlag
-      case node of
-        Hole -> return []
-        Node {} -> return [node]
+      if isHole node
+        then return []
+        else return [node]
   for_ nodes $ \node -> do
     rstMode .= ModeStack
     rstStack %= (node :)
@@ -1687,25 +1664,10 @@ atPath p =
     Just (ps, p') -> atPathSegment ps . atPath p'
 
 atPathSegment :: PathSegment -> Traversal' Node Node
-atPathSegment (PathSegmentSeq i) =
+atPathSegment (PathSegment shape i) =
   \f node ->
     case node of
-      Node nodeSel (ValueSeq items)
-        | let i' = indexToInt i,
-          Just a <- Seq.lookup i' items ->
-          f a <&> \a' ->
-            let items' = Seq.update i' a' items
-             in Node nodeSel (ValueSeq items')
-      _ -> pure node
-atPathSegment (PathSegmentRec tyName fieldName) =
-  \f node ->
-    case node of
-      Node nodeSel (ValueRec tyName' fields)
-        | tyName == tyName',
-          Just a <- HashMap.lookup fieldName fields ->
-          f a <&> \a' ->
-            let fields' = HashMap.insert fieldName a' fields
-             in Node nodeSel (ValueRec tyName' fields')
+      Node sel syn | shape == synShape syn -> Node sel <$> synIx i f syn
       _ -> pure node
 
 zoomPathPrefix :: Path -> ReactM Node -> ReactM Node
@@ -1715,205 +1677,47 @@ zoomPathPrefix p m =
     Just (ps, p') ->
       zoom (atPathSegment ps) (zoomPathPrefix p' m) <|> m
 
-matchMotion :: Text -> TyName -> Bool
-matchMotion motionStr tyName =
-  ((==) `on` Text.toCaseFold) tyNameStr' motionStr
-  where
-    -- Why not 'isPrefixOf'? It causes two issues:
-    --
-    -- 1. Need disambiguation between "aa" and "aab"
-    -- 2. Adding a new syntactic construct would affect editing experience and
-    --    thus discourage innovation.
-
-    tyNameStr' = Text.pack (tyNameStr tyName)
-
-filterByMotion :: Text -> [(TyName, a)] -> [a]
-filterByMotion motion =
-  List.map snd . List.filter (matchMotion motion . fst)
-
-insertSeqMotion :: Text -> Maybe Int
-insertSeqMotion "0" = Just 0
-insertSeqMotion "1" = Just 1
-insertSeqMotion s
-  | Text.null s = Nothing
-  | Text.all (== ',') s = Just (Text.length s + 1)
-  | otherwise = Nothing
-
-defaultSeqNode :: Int -> Node
-defaultSeqNode 0 =
-  Node (NodeSeqSel SeqSel0) (ValueSeq Seq.empty)
-defaultSeqNode n =
-  Node
-    (NodeSeqSel (SeqSel (intToIndex 0) SelChild))
-    (ValueSeq (Seq.replicate n Hole))
-
 indexPred :: Index -> Maybe Index
 indexPred i =
   let i' = indexToInt i
    in if i' > 0 then Just (intToIndex (i' - 1)) else Nothing
 
-indexSucc :: Seq a -> Index -> Maybe Index
-indexSucc xs i =
+indexSucc :: Int -> Index -> Maybe Index
+indexSucc n i =
   let i' = indexToInt i + 1
-   in if i' < Seq.length xs then Just (intToIndex i') else Nothing
-
-mkDefaultNodes :: Schema -> HashMap TyName RecMoveMap -> HashMap TyName Node
-mkDefaultNodes schema recMoveMaps =
-  HashMap.mapWithKey mkDefNode (schemaTypes schema)
-  where
-    mkDefNode :: TyName -> TyDefn -> Node
-    mkDefNode tyName = \case
-      TyDefnStr -> Node (NodeStrSel 0) (ValueStr tyName "")
-      TyDefnRec fieldNames ->
-        let fields = HashMap.map (const Hole) (HashSet.toMap fieldNames)
-            recMoveMap = recMoveMaps HashMap.! tyName
-            recSel =
-              case rmmFieldOrder recMoveMap of
-                [] -> RecSel0
-                fieldName : _ -> RecSel fieldName SelChild
-         in Node (NodeRecSel recSel) (ValueRec tyName fields)
-
-mkRecMoveMaps :: HashMap TyName ALayoutFn -> HashMap TyName RecMoveMap
-mkRecMoveMaps = HashMap.map mkRecMoveMap
-
-mkRecMoveMap :: ALayoutFn -> RecMoveMap
-mkRecMoveMap recLayoutFn =
-  RecMoveMap
-    { rmmFieldOrder = sortedFieldNames,
-      rmmForward = seqToMoveMap sortedFieldNames,
-      rmmBackward = seqToMoveMap (List.reverse sortedFieldNames)
-    }
-  where
-    seqToMoveMap xs =
-      case xs of
-        [] -> HashMap.empty
-        _ : xs' -> HashMap.fromList (List.zip xs xs')
-    sortedFieldNames =
-      sortByVisualOrder recLayoutFn
-
-newtype VisualFieldList = VisualFieldList [FieldName]
-
-instance IsString VisualFieldList where
-  fromString _ = VisualFieldList []
-
-instance Semigroup VisualFieldList where
-  VisualFieldList a <> VisualFieldList b =
-    VisualFieldList (a <> b)
-
-instance Layout VisualFieldList where
-
-  VisualFieldList a `vsep` VisualFieldList b =
-    VisualFieldList (a <> b)
-
-  field fieldName _ _ = VisualFieldList [fieldName]
-
-sortByVisualOrder :: ALayoutFn -> [FieldName]
-sortByVisualOrder recLayoutFn = sortedFields
-  where
-    sortedFields :: [FieldName]
-    ALayoutFn (VisualFieldList sortedFields) = recLayoutFn
-
-newtype FieldPlaceholders = FieldPlaceholders (HashMap FieldName Text)
-
-instance IsString FieldPlaceholders where
-  fromString _ = mempty
-
-instance Semigroup FieldPlaceholders where
-  FieldPlaceholders a <> FieldPlaceholders b =
-    FieldPlaceholders (a <> b)
-
-instance Monoid FieldPlaceholders where
-  mempty = FieldPlaceholders HashMap.empty
-
-instance Layout FieldPlaceholders where
-
-  FieldPlaceholders a `vsep` FieldPlaceholders b =
-    FieldPlaceholders (a <> b)
-
-  field fieldName _ placeholder = FieldPlaceholders (HashMap.singleton fieldName placeholder)
-
-getFieldPlaceholder :: ALayoutFn -> FieldName -> Maybe Text
-getFieldPlaceholder (ALayoutFn (FieldPlaceholders m)) k =
-  HashMap.lookup k m
-
-indexPlaceholder :: Index -> Maybe Text
-indexPlaceholder i =
-  Just (Text.pack (show (indexToInt i)))
+   in if i' < n then Just (intToIndex i') else Nothing
 
 --------------------------------------------------------------------------------
----- Plugin
+---- PluginInfo
 --------------------------------------------------------------------------------
-
--- | A plugin as specified by the user.
-data Plugin
-  = Plugin
-      { _pluginSchema :: Schema,
-        _pluginRecLayouts :: HashMap TyName ALayoutFn
-      }
 
 -- | A plugin as consumed by the editor, with additional information
 -- derived from the user specification.
 data PluginInfo
   = PluginInfo
       { pluginInfoSchema :: Schema,
-        pluginInfoRecLayouts :: HashMap TyName ALayoutFn,
-        pluginInfoRecMoveMaps :: HashMap TyName RecMoveMap,
-        pluginInfoDefaultNodes :: HashMap TyName Node
+        pluginInfoPrecInfo :: HashMap SynShape (Array PrecPredicate),
+        pluginInfoShapeNames :: HashMap SynShape ShapeName
       }
-
-makeLenses ''Plugin
 
 mkPluginInfo :: Plugin -> PluginInfo
 mkPluginInfo plugin =
   PluginInfo
-    { pluginInfoSchema = schema,
-      pluginInfoRecLayouts = recLayouts,
-      pluginInfoRecMoveMaps = recMoveMaps,
-      pluginInfoDefaultNodes = defaultNodes
+    { pluginInfoSchema = pluginSchema plugin,
+      pluginInfoPrecInfo = pluginPrecInfo plugin,
+      pluginInfoShapeNames = pluginShapeNames plugin
     }
-  where
-    schema = plugin ^. pluginSchema
-    recLayouts = plugin ^. pluginRecLayouts
-    recMoveMaps = mkRecMoveMaps recLayouts
-    defaultNodes = mkDefaultNodes schema recMoveMaps
 
 --------------------------------------------------------------------------------
 ---- Parsing
 --------------------------------------------------------------------------------
 
-fromParsedValue :: PluginInfo -> ParsedValue -> Node
-fromParsedValue pluginInfo = go
+fromParsedValue :: ParsedValue -> Node
+fromParsedValue = go
   where
-    go (ParsedValue value) =
-      Node (mkNodeSel value) (fmap go value)
-    mkNodeSel (ValueStr _ str) =
-      NodeStrSel (Text.length str)
-    mkNodeSel (ValueSeq items) =
-      NodeSeqSel $
-        if Seq.null items
-          then SeqSel0
-          else SeqSel (intToIndex 0) (SelSelf (Collapsed False))
-    mkNodeSel (ValueRec tyName _) =
-      NodeRecSel $
-        case rmmFieldOrder (recMoveMaps HashMap.! tyName) of
-          [] -> RecSel0
-          fieldName : _ -> RecSel fieldName (SelSelf (Collapsed False))
-    recMoveMaps = pluginInfoRecMoveMaps pluginInfo
-
---------------------------------------------------------------------------------
----- Schema EDSL
---------------------------------------------------------------------------------
-
-uT :: TyName -> TyInst -> TyUnion
-uT = tyUnionSingleton
-
-uS :: TyUnion -> TyUnion
-uS = tyUnionSequence
-
-uS' :: TyUnion -> TyUnion
-uS' = tyUnionRecursiveSequence
-
-(==>) :: a -> b -> (a, b)
-(==>) = (,)
-
-infix 0 ==>
+    go (ParsedValue syn) = Node (mkNodeSel syn) (fmap go syn)
+    mkNodeSel syn =
+      SynSel $
+        if Foldable.null syn
+          then RecSel0
+          else RecSel (intToIndex 0) (SelSelf (Collapsed False))
