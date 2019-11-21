@@ -941,10 +941,11 @@ lctxDescent pathSegment lctx =
       case HashMap.lookup shape (lctx ^. lctxShapeNames) of
         Nothing -> Nothing
         Just a -> Just (Array.indexArray (shapeFieldNames a) (indexToInt i))
-    precPredicate =
-      case HashMap.lookup shape (lctx ^. lctxPrecInfo) of
-        Nothing -> noPrec
-        Just precInfo -> Array.indexArray precInfo (indexToInt i)
+    precPredicate
+      | Just _ <- to_seq shape = precAllowAll
+      | Just precInfo <- HashMap.lookup shape (lctx ^. lctxPrecInfo) =
+          Array.indexArray precInfo (indexToInt i)
+      | otherwise = noPrec
 
 layoutRec ::
   RecLayoutStyle ->
