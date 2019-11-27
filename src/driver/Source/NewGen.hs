@@ -871,6 +871,7 @@ layoutNode :: LayoutCtx -> Node -> (PrecUnenclosed, Collage Ann El)
 layoutNode lctx (Node (SynSel synSel) _)
   | isNodeCollapsed synSel = layoutCollapsed lctx
 layoutNode lctx (Node sel syn)
+  | Just lit <- to_lit lfields = layoutLit recLayoutStyle lctx lit
   | Just seq <- to_seq lfields = layoutSeq recLayoutStyle lctx seq
   | Just str <- to_str lfields = layoutStr lctx str
   | otherwise = layoutRec recLayoutStyle lctx lfields
@@ -908,6 +909,28 @@ layoutCollapsed lctx =
     precBorder = PrecBorder (lctx ^. lctxPrecBordersAlways)
     path = buildPath (lctx ^. lctxPath)
 
+layoutLit ::
+  RecLayoutStyle ->
+  LayoutCtx ->
+  Seq (Token (PrecUnenclosed, Collage Ann El)) ->
+  (PrecUnenclosed, Collage Ann El)
+layoutLit rs lctx lit =
+  (,) (guardUnenclosed precBorder precUnenclosed)
+    $ layoutSel (toBorder lctx precBorder) path
+    $ collage
+  where
+    (precUnenclosed, collage) =
+      snd $ appRecLayoutFn layoutFn path (TokenCount 0) wd
+    precBorder =
+      PrecBorder (lctx ^. lctxPrecBordersAlways)
+        <> appPrecPredicate (lctx ^. lctxPrecPredicate) precUnenclosed
+    layoutFn =
+      punctToLayout "“" <> shapeRowToLayout rs pl <> punctToLayout "”"
+      where
+        pl = parseSynPunctList (Foldable.toList lit)
+    path = buildPath (lctx ^. lctxPath)
+    wd = lctx ^. lctxWritingDirection
+
 layoutStr ::
   LayoutCtx ->
   Text ->
@@ -944,7 +967,7 @@ lctxDescent pathSegment lctx =
     precPredicate
       | Just _ <- to_seq shape = precAllowAll
       | Just precInfo <- HashMap.lookup shape (lctx ^. lctxPrecInfo) =
-          Array.indexArray precInfo (indexToInt i)
+        Array.indexArray precInfo (indexToInt i)
       | otherwise = noPrec
 
 layoutRec ::
@@ -981,6 +1004,7 @@ layoutSeq rs lctx seq =
       snd $ appRecLayoutFn layoutFn path (TokenCount 0) wd
     precBorder =
       PrecBorder (lctx ^. lctxPrecBordersAlways)
+        <> appPrecPredicate (lctx ^. lctxPrecPredicate) precUnenclosed
     layoutFn =
       case nonEmpty seq of
         Nothing -> punctToLayout "|"
@@ -1017,6 +1041,10 @@ RecLayoutFn a `vcat` RecLayoutFn b =
           WritingDirectionLTR -> vertLeft
           WritingDirectionRTL -> vertRight
      in (tc'', (aUnenclosed <> bUnenclosed, a' `f` b'))
+
+to_lit :: Syn a -> Maybe (Seq (Token a))
+to_lit (synTokens -> Seq.viewl -> TokenChar '"' Seq.:< ts) = Just ts
+to_lit _ = Nothing
 
 to_str :: Syn a -> Maybe Text
 to_str syn
