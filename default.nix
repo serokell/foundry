@@ -14,8 +14,8 @@ let
     pkgs.fetchFromGitHub {
       owner = "int-index";
       repo = "sdam";
-      rev = "03baa80d31b3b1f5c84a217a7eb950999b202124";
-      sha256 = "0dxk57p2rjijah1wcx06w2qjad2xrwic8bdf37v5qz83vhsz0j0x";
+      rev = "3c552c36090363f3f2d11d63b1c808b5437c6e2a";
+      sha256 = "0g370qjsa4brxl54pzkg2078yja4dgqzs51bmm5lx05qiz98x4mi";
     };
 
   slay_from_github =
