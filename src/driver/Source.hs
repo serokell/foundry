@@ -14,6 +14,7 @@ import Control.Monad.State
 import Data.IORef
 import Data.Tuple
 import qualified Graphics.UI.Gtk as Gtk
+import qualified Graphics.Rendering.Cairo as Cairo
 import Sdam.Parser (ParsedValue)
 import Slay.Core
 import Source.Input (InputEvent (..), Modifier (..))
@@ -37,21 +38,21 @@ runSource plugin mParsedValue = do
 createMainWindow :: NG.PluginInfo -> IORef NG.EditorState -> IO Gtk.Window
 createMainWindow pluginInfo esRef = do
   window <- Gtk.windowNew
+  Gtk.widgetSetAppPaintable window True
   _ <- Gtk.on window Gtk.objectDestroy Gtk.mainQuit
-  canvas <- createMainCanvas
   -- TODO: PointerMotionHintMask; eventRequestMotions
   Gtk.widgetAddEvents
-    canvas
+    window
     [ Gtk.PointerMotionMask,
       Gtk.ButtonPressMask
     ]
   cursorPhaser <- newPhaser 530000 NG.CursorVisible NG.blink $
-    \_ -> Gtk.postGUIAsync (Gtk.widgetQueueDraw canvas)
+    \_ -> Gtk.postGUIAsync (Gtk.widgetQueueDraw window)
   stackPhaser <- newPhaser 530000 () id $
     \_ -> Gtk.postGUIAsync $ do
       atomicRunStateIORef' esRef $ do
         NG.esMode %= NG.quitStackMode
-      Gtk.widgetQueueDraw canvas
+      Gtk.widgetQueueDraw window
   let updateCanvas viewport = do
         es <- liftIO
           $ atomicRunStateIORef' esRef
@@ -69,29 +70,28 @@ createMainWindow pluginInfo esRef = do
             return False
           NG.ReactOk es' -> do
             atomicWriteIORef esRef es'
-            Gtk.widgetQueueDraw canvas
+            Gtk.widgetQueueDraw window
             phaserReset stackPhaser ()
             return True
-  void $ Gtk.on canvas Gtk.draw $ do
-    w <- liftIO $ Gtk.widgetGetAllocatedWidth canvas
-    h <- liftIO $ Gtk.widgetGetAllocatedHeight canvas
-    let viewport = Extents (fromIntegral w) (fromIntegral h)
+  void $ Gtk.on window Gtk.draw $ do
+    (x1, y1, x2, y2) <- Cairo.clipExtents
+    let (w, h) = (x2 - x1, y2 - y1)
+    let viewport = Extents (floor w) (floor h)
     updateCanvas viewport
-  void $ Gtk.on canvas Gtk.keyPressEvent $ do
+  void $ Gtk.on window Gtk.keyPressEvent $ do
     modifier <- Gtk.eventModifier
     keyVal <- Gtk.eventKeyVal
     let event = KeyPress (modifier >>= gtkMod) keyVal
     liftIO $ do
       phaserReset cursorPhaser NG.CursorVisible
       handleInputEvent event
-  void $ Gtk.on canvas Gtk.motionNotifyEvent $ do
+  void $ Gtk.on window Gtk.motionNotifyEvent $ do
     (x, y) <- Gtk.eventCoordinates
     let (x', y') = (round x, round y)
     let event = PointerMotion (fromInteger x') (fromInteger y')
     liftIO (handleInputEvent event)
-  void $ Gtk.on canvas Gtk.buttonPressEvent $ do
+  void $ Gtk.on window Gtk.buttonPressEvent $ do
     liftIO (handleInputEvent ButtonPress)
-  Gtk.containerAdd window canvas
   Gtk.windowMaximize window
   return window
 
@@ -101,17 +101,6 @@ gtkMod = \case
   Gtk.Shift -> [Shift]
   Gtk.Alt -> [Alt]
   _ -> []
-
-createMainCanvas :: IO Gtk.DrawingArea
-createMainCanvas = do
-  canvas <- Gtk.drawingAreaNew
-  Gtk.set
-    canvas
-    [ Gtk.widgetExpand Gtk.:= True,
-      Gtk.widgetCanFocus Gtk.:= True,
-      Gtk.widgetHasFocus Gtk.:= True
-    ]
-  return canvas
 
 -- | Atomically modifies the contents of an 'IORef' using the provided 'State'
 -- action. Forces both the value stored in the 'IORef' as well as the value
