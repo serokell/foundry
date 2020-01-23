@@ -39,6 +39,7 @@ createMainWindow :: NG.PluginInfo -> IORef NG.EditorState -> IO Gtk.Window
 createMainWindow pluginInfo esRef = do
   window <- Gtk.windowNew
   Gtk.widgetSetAppPaintable window True
+  Gtk.windowSetDefaultSize window 800 500
   _ <- Gtk.on window Gtk.objectDestroy Gtk.mainQuit
   -- TODO: PointerMotionHintMask; eventRequestMotions
   Gtk.widgetAddEvents
