@@ -6,20 +6,24 @@ source-repository-package
   location: https://github.com/int-index/slay
   tag: 69b533004637319c2f210dfb17f44acfce3f59d2
   subdir: core
+  --sha256: 1bdh7p81a1w4y8c4rmq3knwjm10zxclx5lif4bs407ahfrsfi600
 
 source-repository-package
   type: git
   location: https://github.com/int-index/slay
   tag: 69b533004637319c2f210dfb17f44acfce3f59d2
   subdir: combinators
+  --sha256: 1bdh7p81a1w4y8c4rmq3knwjm10zxclx5lif4bs407ahfrsfi600
 
 source-repository-package
   type: git
   location: https://github.com/int-index/slay
   tag: 69b533004637319c2f210dfb17f44acfce3f59d2
   subdir: cairo
+  --sha256: 1bdh7p81a1w4y8c4rmq3knwjm10zxclx5lif4bs407ahfrsfi600
 
 source-repository-package
   type: git
   location: https://github.com/int-index/sdam
   tag: 3c552c36090363f3f2d11d63b1c808b5437c6e2a
+  --sha256: 0g370qjsa4brxl54pzkg2078yja4dgqzs51bmm5lx05qiz98x4mi
