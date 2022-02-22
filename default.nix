@@ -5,7 +5,7 @@ let
 in
 
 { pkgs ? import (builtins.fetchTarball nixpkgsPin) {},
-  hc ? "ghc865"
+  hc ? "ghc8107"
 }:
 
 let
@@ -14,24 +14,16 @@ let
     pkgs.fetchFromGitHub {
       owner = "int-index";
       repo = "sdam";
-      rev = "3c552c36090363f3f2d11d63b1c808b5437c6e2a";
-      sha256 = "0g370qjsa4brxl54pzkg2078yja4dgqzs51bmm5lx05qiz98x4mi";
+      rev = "3943cd2662eff11e1a36bc629ac832652ec43a6e";
+      sha256 = "05p43wvmx41rlnj5nwlcngr8rxhms5dxlh210ag2r04gxwra2mrv";
     };
 
   slay_from_github =
     pkgs.fetchFromGitHub {
       owner = "int-index";
       repo = "slay";
-      rev = "69b533004637319c2f210dfb17f44acfce3f59d2";
-      sha256 = "1bdh7p81a1w4y8c4rmq3knwjm10zxclx5lif4bs407ahfrsfi600";
-    };
-
-  morte_1_7_2 =
-    pkgs.fetchFromGitHub {
-      owner = "Gabriel439";
-      repo = "Haskell-Morte-Library";
-      rev = "f7a459c7ec1d69f71c389f5693a26a94c1854636";
-      sha256 = "186mysp5f3mpd2mzgba2rfs5hlccf5whdi4gcr317zk82aqlzwrz";
+      rev = "1c9d39b8cb4f32f0b4778677c21ebb85cc1cddf7";
+      sha256 = "0x9xqaykdw5z3ggi7mkm7f5605c7z4jalhydvf9p1asdi5i34f8j";
     };
 
   haskell_inputs = p: [
@@ -49,7 +41,6 @@ let
     p.slay-core
     p.slay-combinators
     p.slay-cairo
-    p.morte
   ];
 
   haskellPackages =
@@ -59,7 +50,6 @@ let
         slay-core = self.callCabal2nix "slay-core" "${slay_from_github}/core" {};
         slay-combinators = self.callCabal2nix "slay-combinators" "${slay_from_github}/combinators" {};
         slay-cairo = self.callCabal2nix "slay-cairo" "${slay_from_github}/cairo" {};
-        morte = self.callCabal2nix "morte" morte_1_7_2 {};
       };
     };
 

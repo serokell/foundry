@@ -97,6 +97,7 @@ import Control.Monad
 import Control.Monad.Reader
 import Control.Monad.State
 import Control.Monad.Writer
+import Data.Void
 import qualified Data.Char as Char
 import Data.DList as DList
 import Data.Foldable as Foldable
@@ -535,16 +536,17 @@ foldCairoCollage = foldMapCollage cairoPositionedElementRender
 ---- Utils
 --------------------------------------------------------------------------------
 
-data EmptyMaybe = EmptyMaybe
+nothing :: Inj (Maybe Void) a => a
+nothing = inj (Nothing @Void)
 
-nothing :: Inj EmptyMaybe a => a
-nothing = inj EmptyMaybe
-
--- This overlapping instance should make it into inj-base in a better
+-- These overlapping instances should make it upstream in a better
 -- form (no overlapping).
 
-instance {-# OVERLAPPING #-} Inj EmptyMaybe (Maybe a) where
-  inj EmptyMaybe = Nothing
+instance {-# OVERLAPPING #-} Inj Void Natural where
+  inj = absurd
+
+instance {-# OVERLAPPING #-} Inj Void (LRTB a) where
+  inj = absurd
 
 maybeA :: Alternative f => Maybe a -> f a
 maybeA = maybe A.empty A.pure

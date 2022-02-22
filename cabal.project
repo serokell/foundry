@@ -3,26 +3,3 @@ packages:
 
 allow-newer:
   morte:optparse-applicative
-
-source-repository-package
-  type: git
-  location: https://github.com/int-index/slay
-  tag: 1c9d39b8cb4f32f0b4778677c21ebb85cc1cddf7
-  subdir: core
-
-source-repository-package
-  type: git
-  location: https://github.com/int-index/slay
-  tag: 1c9d39b8cb4f32f0b4778677c21ebb85cc1cddf7
-  subdir: combinators
-
-source-repository-package
-  type: git
-  location: https://github.com/int-index/slay
-  tag: 1c9d39b8cb4f32f0b4778677c21ebb85cc1cddf7
-  subdir: cairo
-
-source-repository-package
-  type: git
-  location: https://github.com/int-index/sdam
-  tag: 3943cd2662eff11e1a36bc629ac832652ec43a6e
