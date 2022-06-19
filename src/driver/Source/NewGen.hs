@@ -1502,14 +1502,13 @@ applyActionM (ActionDeleteCharBackward path) = do
     zoom (rstNode . atPath path) $ do
       Node (StrSel pos) (Syn tokens) <- get
       guard (pos > 0)
-      let pos' = pos - 1
-      let (before, after) = Seq.splitAt pos' tokens
+      let (before, after) = Seq.splitAt pos tokens
       (tokens', deleted) <-
-        case Seq.viewl after of
-          Seq.EmptyL -> A.empty
-          deleted Seq.:< after' ->
-            return (before <> after', deleted)
-      put $ Node (StrSel pos') (Syn tokens')
+        case Seq.viewr before of
+          Seq.EmptyR -> A.empty
+          before' Seq.:> deleted ->
+            return (before' <> after, deleted)
+      put $ Node (StrSel (pos - 1)) (Syn tokens')
       case deleted of
         TokenNode node | not (isHole node) -> return [node]
         _ -> return []
