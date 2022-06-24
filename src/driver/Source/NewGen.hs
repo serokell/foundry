@@ -1321,8 +1321,8 @@ getAction _ _ _ inputEvent
     Just ActionEscapeTransientMode
 getAction wd selection ModeNormal inputEvent =
   getActionInModeNormal wd selection inputEvent
-getAction _ selection ModeStack inputEvent =
-  getActionInModeStack selection inputEvent
+getAction wd selection ModeStack inputEvent =
+  getActionInModeStack selection inputEvent <|> getActionInModeNormal wd selection inputEvent
 getAction _ _ (ModeJump _ _) inputEvent =
   case inputEvent of
     KeyPress [] (keyChar -> Just c) ->
