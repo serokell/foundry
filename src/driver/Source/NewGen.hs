@@ -149,7 +149,7 @@ data RecSel
   | -- for records with children (and non-empty sequences)
     RecSel Index SelStatus
 
--- The node can be in one of there states:
+-- The node can be in one of three states:
 --
 
 -- * Self-selection, collapsed.
