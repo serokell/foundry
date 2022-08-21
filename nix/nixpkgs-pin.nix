@@ -1,7 +1,7 @@
 {
   # Commit hash source: https://nixos.org/channels/
-  url = https://github.com/nixos/nixpkgs/archive/1882c6b7368fd284ad01b0a5b5601ef136321292.tar.gz;
+  url = https://github.com/nixos/nixpkgs/archive/97b8d9459f7922ce0e666113a1e8e6071424ae16.tar.gz;
 
   # Hash obtained using `nix-prefetch-url --unpack <url>`
-  sha256 = "0zg7ak2mcmwzi2kg29g4v9fvbvs0viykjsg2pwaphm1fi13s7s0i";
+  sha256 = "0nhmvgy2w4d9dxx4jvsy5hhzk29h8bb5z0850bdh82a3k157dnxc";
 }

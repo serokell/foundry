@@ -9,21 +9,23 @@ import Data.Foldable (toList)
 import qualified Data.Sequence as Seq
 import Data.Text (Text)
 import qualified Data.Text as Text
-import qualified EnumSet as GHC.EnumSet
-import qualified FastString as GHC
-import qualified HsSyn as GHC
-import HsSyn (GhcPs)
-import qualified Lexer as GHC
-import qualified Module as GHC
-import qualified OccName as GHC
-import qualified Parser as GHC
-import qualified RdrName as GHC
+
 import Sdam.Core
 import Sdam.Printer
-import qualified SrcLoc as GHC
-import qualified StringBuffer as GHC
 import System.Environment (getArgs)
 import System.Exit (die)
+
+import GHC.Hs (GhcPs)
+import qualified GHC.Hs as GHC
+import qualified GHC.Parser as GHC
+import qualified GHC.Parser.Lexer as GHC
+import qualified GHC.Types.SrcLoc as GHC
+import qualified GHC.Types.Name as GHC
+import qualified GHC.Types.Name.Reader as GHC
+import qualified GHC.Data.StringBuffer as GHC
+import qualified GHC.Data.FastString as GHC
+import qualified GHC.Unit.Module as GHC
+import qualified GHC.Data.EnumSet as GHC.EnumSet
 
 main :: IO ()
 main = do
@@ -36,7 +38,7 @@ main = do
       Just e -> return e
   putStrLn $ render (rValue (convertModule (GHC.unLoc hs_mod)))
 
-convertModule :: GHC.HsModule GhcPs -> RenderValue
+convertModule :: GHC.HsModule -> RenderValue
 convertModule GHC.HsModule {GHC.hsmodName, GHC.hsmodExports, GHC.hsmodDecls} =
   mkRecValue
     "module_exports_/_"
@@ -62,7 +64,7 @@ convertDecl :: GHC.HsDecl GhcPs -> RenderValue
 convertDecl (GHC.SigD _ (GHC.TypeSig _ names ty)) =
   convertTypeSig
     (map GHC.unLoc names)
-    (GHC.unLoc (GHC.hsib_body (GHC.hswc_body ty)))
+    (GHC.unLoc (GHC.sig_body (GHC.unLoc (GHC.hswc_body ty))))
 convertDecl (GHC.ValD _ GHC.FunBind {GHC.fun_id, GHC.fun_matches}) =
   convertFunBind
     (GHC.unLoc fun_id)
@@ -72,7 +74,6 @@ convertDecl _ = error "TODO: convertDecl"
 convertFunBind :: GHC.IdP GhcPs -> GHC.MatchGroup GhcPs (GHC.LHsExpr GhcPs) -> RenderValue
 convertFunBind name GHC.MG {GHC.mg_alts} =
   mkSeqValue (convertMatch name . GHC.unLoc) (GHC.unLoc mg_alts)
-convertFunBind _ _ = error "TODO: convertFunBind"
 
 convertMatch :: GHC.IdP GhcPs -> GHC.Match GhcPs (GHC.LHsExpr GhcPs) -> RenderValue
 convertMatch name GHC.Match {GHC.m_pats, GHC.m_grhss} =
@@ -86,8 +87,7 @@ convertMatch name GHC.Match {GHC.m_pats, GHC.m_grhss} =
       foldl
         (\f p -> mkRecValue "__" [f, p])
         (convertName n)
-        (map convertPat ps)
-convertMatch _ _ = error "TODO: convertMatch"
+        (map (convertPat . GHC.unLoc) ps)
 
 convertPat :: GHC.Pat GhcPs -> RenderValue
 convertPat _ = error "TODO: convertPat"
@@ -95,7 +95,6 @@ convertPat _ = error "TODO: convertPat"
 convertGRHSs :: GHC.GRHSs GhcPs (GHC.LHsExpr GhcPs) -> RenderValue
 convertGRHSs GHC.GRHSs {GHC.grhssGRHSs} =
   mkSeqValue (convertGRHS . GHC.unLoc) grhssGRHSs
-convertGRHSs _ = error "TODO: convertGRHSs"
 
 convertGRHS :: GHC.GRHS GhcPs (GHC.LHsExpr GhcPs) -> RenderValue
 convertGRHS (GHC.GRHS _ [] b) = convertExpr (GHC.unLoc b)
@@ -156,27 +155,19 @@ mkSeqValue f c =
       RenderValue . Syn . Seq.fromList $
         TokenChar '|' : map (TokenNode . f) xs
 
-parseModuleStr :: String -> Maybe (GHC.Located (GHC.HsModule GhcPs))
+parseModuleStr :: String -> Maybe (GHC.Located GHC.HsModule)
 parseModuleStr = runGhcParser GHC.parseModule
 
 runGhcParser :: GHC.P a -> String -> Maybe a
 runGhcParser p s =
   case GHC.unP p initPState of
-    GHC.PFailed _ _ _ -> Nothing
+    GHC.PFailed _ -> Nothing
     GHC.POk _ a -> Just a
   where
     initPState :: GHC.PState
-    initPState = GHC.mkPStatePure flags buffer location
-    flags :: GHC.ParserFlags
-    flags =
-      GHC.mkParserFlags'
-        GHC.EnumSet.empty
-        GHC.EnumSet.empty
-        GHC.mainUnitId
-        False
-        False
-        False
-        False
+    initPState = GHC.initParserState opts buffer location
+    opts :: GHC.ParserOpts
+    opts = GHC.mkParserOpts GHC.EnumSet.empty GHC.EnumSet.empty False False False False
     buffer :: GHC.StringBuffer
     buffer = GHC.stringToStringBuffer s
     location :: GHC.RealSrcLoc

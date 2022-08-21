@@ -5,7 +5,7 @@ let
 in
 
 { pkgs ? import (builtins.fetchTarball nixpkgsPin) {},
-  hc ? "ghc8107"
+  hc ? "ghc925"
 }:
 
 let
@@ -26,6 +26,14 @@ let
       sha256 = "0x9xqaykdw5z3ggi7mkm7f5605c7z4jalhydvf9p1asdi5i34f8j";
     };
 
+  morte_from_github =
+    pkgs.fetchFromGitHub {
+      owner = "Gabriella439";
+      repo = "Haskell-Morte-Library";
+      rev = "b7ebbcbea21e3894b889ebd882856ffcdb154160";
+      hash = "sha256-jO4EpCA+Xm7+oo0Xa8TIN+TX/bAjvQIcVYfQfbtAC5k=";
+    };
+
   haskell_inputs = p: [
     p.gtk3
     p.lens
@@ -41,11 +49,16 @@ let
     p.slay-core
     p.slay-combinators
     p.slay-cairo
+    p.morte
   ];
 
   haskellPackages =
     pkgs.haskell.packages.${hc}.override {
       overrides = self: super: rec {
+        inj-base = pkgs.haskell.lib.appendPatch (self.callHackage "inj-base" "0.2.0.0" {}) ./patches/inj-base.patch;
+        morte = pkgs.haskell.lib.doJailbreak (self.callCabal2nix "morte" "${morte_from_github}" {});
+        lrucaching = pkgs.haskell.lib.dontCheck (self.callHackage "lrucaching" "0.3.3" {});
+        ListLike = pkgs.haskell.lib.dontCheck super.ListLike;
         sdam = self.callCabal2nix "sdam" sdam_from_github {};
         slay-core = self.callCabal2nix "slay-core" "${slay_from_github}/core" {};
         slay-combinators = self.callCabal2nix "slay-combinators" "${slay_from_github}/combinators" {};
