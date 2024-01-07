@@ -1,5 +1,5 @@
 packages:
-  foundry.cabal
+  src/foundry.cabal
 
 allow-newer:
   morte:optparse-applicative

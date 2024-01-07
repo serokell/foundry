@@ -14,7 +14,7 @@ import Source.NewGen
 import System.Environment (getArgs)
 import System.Exit (die)
 import System.FilePath
-import Text.Megaparsec as Megaparsec
+import Text.Megaparsec as Megaparsec (errorBundlePretty)
 
 main :: IO ()
 main = do

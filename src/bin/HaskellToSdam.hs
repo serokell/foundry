@@ -26,6 +26,8 @@ import qualified GHC.Data.StringBuffer as GHC
 import qualified GHC.Data.FastString as GHC
 import qualified GHC.Unit.Module as GHC
 import qualified GHC.Data.EnumSet as GHC.EnumSet
+import qualified GHC.Utils.Outputable as GHC
+import qualified GHC.Utils.Error as GHC
 
 main :: IO ()
 main = do
@@ -167,7 +169,7 @@ runGhcParser p s =
     initPState :: GHC.PState
     initPState = GHC.initParserState opts buffer location
     opts :: GHC.ParserOpts
-    opts = GHC.mkParserOpts GHC.EnumSet.empty GHC.EnumSet.empty False False False False
+    opts = GHC.mkParserOpts GHC.EnumSet.empty (GHC.DiagOpts GHC.EnumSet.empty GHC.EnumSet.empty False False Nothing GHC.defaultSDocContext) [] False False False False
     buffer :: GHC.StringBuffer
     buffer = GHC.stringToStringBuffer s
     location :: GHC.RealSrcLoc
