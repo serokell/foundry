@@ -9,7 +9,7 @@ import Source
 import Source.Language.Haskell
 import System.Environment (getArgs)
 import System.Exit (die)
-import Text.Megaparsec as Megaparsec
+import Text.Megaparsec as Megaparsec (errorBundlePretty)
 
 main :: IO ()
 main = do

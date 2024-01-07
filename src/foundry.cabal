@@ -36,7 +36,7 @@ library
                ,       source-plugin
                ,       num-non-negative
 
-  hs-source-dirs:      src/driver
+  hs-source-dirs:      driver
 
   default-language:    Haskell2010
 
@@ -51,7 +51,7 @@ library source-plugin
   build-depends:       base >=4.7,
                        unordered-containers, text, primitive,
                        hashable, sdam
-  hs-source-dirs:      src/plugin
+  hs-source-dirs:      plugin
   default-language:    Haskell2010
   ghc-options:         -Wall -O2
   ghc-prof-options:    -fprof-auto
@@ -64,7 +64,7 @@ library source-language-haskell
   build-depends:       base >=4.7,
                        unordered-containers, text, primitive,
                        sdam, source-plugin
-  hs-source-dirs:      src/lang/haskell
+  hs-source-dirs:      lang/haskell
   default-language:    Haskell2010
   ghc-options:         -Wall -O2
   ghc-prof-options:    -fprof-auto
@@ -76,7 +76,7 @@ library source-language-morte
   build-depends:       base >=4.7,
                        unordered-containers, text, primitive,
                        sdam, source-plugin
-  hs-source-dirs:      src/lang/morte
+  hs-source-dirs:      lang/morte
   default-language:    Haskell2010
   ghc-options:         -Wall -O2
   ghc-prof-options:    -fprof-auto
@@ -89,7 +89,7 @@ executable foundry
   build-depends:       base, unordered-containers, megaparsec,
                        sdam, source-language-morte, foundry
 
-  hs-source-dirs:      src/bin
+  hs-source-dirs:      bin
 
   default-language:    Haskell2010
 
@@ -105,7 +105,7 @@ executable hask
   build-depends:       base, unordered-containers, megaparsec,
                        sdam, source-language-haskell, foundry
 
-  hs-source-dirs:      src/bin
+  hs-source-dirs:      bin
 
   default-language:    Haskell2010
 
@@ -119,7 +119,7 @@ executable hask
 executable morte-to-sdam
   main-is:             MorteToSdam.hs
   build-depends:       base, text, containers, morte, sdam
-  hs-source-dirs:      src/bin
+  hs-source-dirs:      bin
   default-language:    Haskell2010
   ghc-options:         -Wall -threaded -O2
 
@@ -127,7 +127,7 @@ executable haskell-to-sdam
   main-is:             HaskellToSdam.hs
   build-depends:       base, text, containers, unordered-containers, containers,
                        ghc-lib-parser, sdam, source-language-haskell
-  hs-source-dirs:      src/bin
+  hs-source-dirs:      bin
   default-language:    Haskell2010
   ghc-options:         -Wall -threaded -O2
 
@@ -137,6 +137,6 @@ executable sdam-to-svg
                        slay-core, sdam, foundry,
                        source-language-haskell,
                        source-language-morte
-  hs-source-dirs:      src/bin
+  hs-source-dirs:      bin
   default-language:    Haskell2010
   ghc-options:         -Wall -threaded -O2
