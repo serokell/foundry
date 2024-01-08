@@ -38,22 +38,23 @@ runSource plugin mParsedValue = do
 createMainWindow :: NG.PluginInfo -> IORef NG.EditorState -> IO Gtk.Window
 createMainWindow pluginInfo esRef = do
   window <- Gtk.windowNew
-  Gtk.widgetSetAppPaintable window True  -- FIXME: broken on Wayland, use a drawing area
+  drawingArea <- Gtk.drawingAreaNew
+  Gtk.containerAdd window drawingArea
   Gtk.windowSetDefaultSize window 800 500
   _ <- Gtk.on window Gtk.objectDestroy Gtk.mainQuit
   -- TODO: PointerMotionHintMask; eventRequestMotions
   Gtk.widgetAddEvents
-    window
+    drawingArea
     [ Gtk.PointerMotionMask,
       Gtk.ButtonPressMask
     ]
   cursorPhaser <- newPhaser 530000 NG.CursorVisible NG.blink $
-    \_ -> Gtk.postGUIAsync (Gtk.widgetQueueDraw window)
+    \_ -> Gtk.postGUIAsync (Gtk.widgetQueueDraw drawingArea)
   stackPhaser <- newPhaser 530000 () id $
     \_ -> Gtk.postGUIAsync $ do
       atomicRunStateIORef' esRef $ do
         NG.esMode %= NG.quitStackMode
-      Gtk.widgetQueueDraw window
+      Gtk.widgetQueueDraw drawingArea
   let updateCanvas viewport = do
         es <- liftIO
           $ atomicRunStateIORef' esRef
@@ -71,10 +72,10 @@ createMainWindow pluginInfo esRef = do
             return False
           NG.ReactOk es' -> do
             atomicWriteIORef esRef es'
-            Gtk.widgetQueueDraw window
+            Gtk.widgetQueueDraw drawingArea
             phaserReset stackPhaser ()
             return True
-  void $ Gtk.on window Gtk.draw $ do
+  void $ Gtk.on drawingArea Gtk.draw $ do
     (x1, y1, x2, y2) <- Cairo.clipExtents
     let (w, h) = (x2 - x1, y2 - y1)
     let viewport = Extents (floor w) (floor h)
@@ -86,12 +87,12 @@ createMainWindow pluginInfo esRef = do
     liftIO $ do
       phaserReset cursorPhaser NG.CursorVisible
       handleInputEvent event
-  void $ Gtk.on window Gtk.motionNotifyEvent $ do
+  void $ Gtk.on drawingArea Gtk.motionNotifyEvent $ do
     (x, y) <- Gtk.eventCoordinates
     let (x', y') = (round x, round y)
     let event = PointerMotion (fromInteger x') (fromInteger y')
     liftIO (handleInputEvent event)
-  void $ Gtk.on window Gtk.buttonPressEvent $ do
+  void $ Gtk.on drawingArea Gtk.buttonPressEvent $ do
     liftIO (handleInputEvent ButtonPress)
   Gtk.windowMaximize window
   return window
