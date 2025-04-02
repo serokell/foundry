@@ -1,6 +1,6 @@
-# Godsmen Foundry
+# Foundry
 
-Godsmen Foundry is a Morte IDE based on Source.
+Foundry is a Morte IDE based on Source.
 
 Implementation status:
 
@@ -9,8 +9,6 @@ Implementation status:
 * [x] editing expressions
 * [ ] interactive evaluation
 * [ ] auto-completion
-* [ ] local storage
-* [ ] browsing Sigil
 
 ![Rendering Morte](examples/expr.svg)
 

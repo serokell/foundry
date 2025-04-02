@@ -2,14 +2,15 @@
   description = "foundry - a structure for Morte";
 
   inputs = {
-    nixpkgs.url = "github:NixOS/nixpkgs";
+    nixpkgs.url = "github:NixOS/nixpkgs/nixpkgs-unstable";
+    flake-utils.url = "github:numtide/flake-utils";
   };
 
   outputs =
-    { self, nixpkgs }:
+    { self, nixpkgs, flake-utils }:
+    flake-utils.lib.eachDefaultSystem (system:
     let
-      system = "x86_64-linux";
-      ghc = "ghc92";
+      ghc = "ghc96";
       pkgs = nixpkgs.legacyPackages.${system};
       sdam-git =
         pkgs.fetchFromGitHub {
@@ -35,6 +36,9 @@
       haskellPackages =
         pkgs.haskell.packages.${ghc}.extend(hself: hsuper: {
           foundry = hself.callCabal2nix "foundry" "${self}/src/" {};
+          gi-gdk = pkgs.haskell.lib.dontCheck (hself.callHackage "gi-gdk" "4.0.9" {});
+          gi-gsk = pkgs.haskell.lib.dontCheck (hself.callHackage "gi-gsk" "4.0.8" {});
+          gi-gtk = pkgs.haskell.lib.dontCheck (hself.callHackage "gi-gtk" "4.0.11" {});
           inj-base = pkgs.haskell.lib.appendPatch (hself.callHackage "inj-base" "0.2.0.0" {}) ./patches/inj-base.patch;
           morte = pkgs.haskell.lib.doJailbreak (hself.callCabal2nix "morte" "${morte-git}" {});
           lrucaching = pkgs.haskell.lib.doJailbreak (hself.callHackage "lrucaching" "0.3.3" {});
@@ -46,12 +50,12 @@
         });
     in
     {
-      packages.${system} = {
+      packages = {
         foundry = haskellPackages.foundry;
         default = self.packages.${system}.foundry;
       };
 
-      devShells.${system}.default = pkgs.mkShell {
+      devShells.default = pkgs.mkShell {
         buildInputs = [
           (haskellPackages.ghcWithPackages(p:
             p.foundry.getCabalDeps.libraryHaskellDepends ++
@@ -65,5 +69,5 @@
           haskellPackages.ormolu
         ];
       };
-    };
+    });
 }

@@ -24,7 +24,6 @@ import qualified GHC.Types.Name as GHC
 import qualified GHC.Types.Name.Reader as GHC
 import qualified GHC.Data.StringBuffer as GHC
 import qualified GHC.Data.FastString as GHC
-import qualified GHC.Unit.Module as GHC
 import qualified GHC.Data.EnumSet as GHC.EnumSet
 import qualified GHC.Utils.Outputable as GHC
 import qualified GHC.Utils.Error as GHC
@@ -40,7 +39,7 @@ main = do
       Just e -> return e
   putStrLn $ render (rValue (convertModule (GHC.unLoc hs_mod)))
 
-convertModule :: GHC.HsModule -> RenderValue
+convertModule :: GHC.HsModule GhcPs -> RenderValue
 convertModule GHC.HsModule {GHC.hsmodName, GHC.hsmodExports, GHC.hsmodDecls} =
   mkRecValue
     "module_exports_/_"
@@ -157,7 +156,7 @@ mkSeqValue f c =
       RenderValue . Syn . Seq.fromList $
         TokenChar '|' : map (TokenNode . f) xs
 
-parseModuleStr :: String -> Maybe (GHC.Located GHC.HsModule)
+parseModuleStr :: String -> Maybe (GHC.Located (GHC.HsModule GhcPs))
 parseModuleStr = runGhcParser GHC.parseModule
 
 runGhcParser :: GHC.P a -> String -> Maybe a
