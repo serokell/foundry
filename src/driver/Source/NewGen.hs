@@ -151,12 +151,9 @@ data RecSel
 
 -- The node can be in one of three states:
 --
-
--- * Self-selection, collapsed.
-
--- * Self-selection, not collapsed.
-
--- * Child selection.
+--   * Self-selection, collapsed.
+--   * Self-selection, not collapsed.
+--   * Child selection.
 --
 -- Note that a node with a child selected cannot be collapsed.
 -- This way we can be certain that the selected node is visible.
