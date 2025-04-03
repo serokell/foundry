@@ -1,17 +1,3 @@
-{-# LANGUAGE DeriveFunctor #-}
-{-# LANGUAGE FlexibleContexts #-}
-{-# LANGUAGE FlexibleInstances #-}
-{-# LANGUAGE GADTs #-}
-{-# LANGUAGE LambdaCase #-}
-{-# LANGUAGE MultiParamTypeClasses #-}
-{-# LANGUAGE NamedFieldPuns #-}
-{-# LANGUAGE OverloadedStrings #-}
-{-# LANGUAGE RankNTypes #-}
-{-# LANGUAGE TemplateHaskell #-}
-{-# LANGUAGE TypeApplications #-}
-{-# LANGUAGE UndecidableInstances #-}
-{-# LANGUAGE ViewPatterns #-}
-
 module Source.NewGen
   ( -- * Names
     SynShape,
@@ -85,8 +71,6 @@ module Source.NewGen
     mkPluginInfo,
 
     -- * Utils
-    inj,
-    nothing,
     maybeA,
   )
 where
@@ -97,7 +81,6 @@ import Control.Monad
 import Control.Monad.Reader
 import Control.Monad.State
 import Control.Monad.Writer
-import Data.Void
 import qualified Data.Char as Char
 import Data.DList as DList
 import Data.Foldable as Foldable
@@ -115,19 +98,18 @@ import Data.Sequence as Seq
 import Data.Text (Text)
 import qualified Data.Text as Text
 import qualified Graphics.Rendering.Cairo as Cairo (Render)
-import Inj
-import Inj.Base ()
+import Source.Layout.Inj
+import Source.Layout.NonNegative
 import Numeric.Natural (Natural)
-import Numeric.NonNegative
 import Sdam.Core
 import Sdam.Parser
 import Sdam.Validator
-import Slay.Cairo.Element
-import Slay.Cairo.Prim.Color
-import Slay.Cairo.Prim.Rect
-import Slay.Cairo.Prim.Text
-import Slay.Combinators
-import Slay.Core
+import Source.Layout.Cairo.Element
+import Source.Layout.Cairo.Prim.Color
+import Source.Layout.Cairo.Prim.Rect
+import Source.Layout.Cairo.Prim.Text
+import Source.Layout.Combinators
+import Source.Layout.Core
 import Source.Input
 import qualified Source.Input.KeyCode as KeyCode
 import Source.Plugin
@@ -487,10 +469,6 @@ textWithCursor = textline white ubuntuFont
 textWithoutCursor :: Text -> Collage Ann El
 textWithoutCursor t = textWithCursor t nothing
 
-class Inj t (f t) => Inj1 f t
-
-instance Inj t (f t) => Inj1 f t
-
 outline ::
   Inj (CairoElement f) a =>
   Inj1 f (Maybe (LRTB (NonNegative Double))) =>
@@ -532,18 +510,6 @@ foldCairoCollage = foldMapCollage cairoPositionedElementRender
 --------------------------------------------------------------------------------
 ---- Utils
 --------------------------------------------------------------------------------
-
-nothing :: Inj (Maybe Void) a => a
-nothing = inj (Nothing @Void)
-
--- These overlapping instances should make it upstream in a better
--- form (no overlapping).
-
-instance {-# OVERLAPPING #-} Inj Void Natural where
-  inj = absurd
-
-instance {-# OVERLAPPING #-} Inj Void (LRTB a) where
-  inj = absurd
 
 maybeA :: Alternative f => Maybe a -> f a
 maybeA = maybe A.empty A.pure

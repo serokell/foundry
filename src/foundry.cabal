@@ -3,7 +3,47 @@ name:                foundry
 version:             0.1.0.0
 build-type:          Simple
 
+common language
+  default-language: GHC2021
+  default-extensions:
+    BangPatterns
+    ConstraintKinds
+    DataKinds
+    DefaultSignatures
+    DeriveGeneric
+    DeriveFunctor
+    DeriveFoldable
+    DeriveTraversable
+    DerivingStrategies
+    FlexibleContexts
+    FlexibleInstances
+    FunctionalDependencies
+    GADTs
+    GeneralizedNewtypeDeriving
+    LambdaCase
+    MultiWayIf
+    NegativeLiterals
+    OverloadedStrings
+    PatternSynonyms
+    PolyKinds
+    RankNTypes
+    RecordWildCards
+    RecursiveDo
+    ScopedTypeVariables
+    StandaloneDeriving
+    TemplateHaskell
+    TupleSections
+    TypeApplications
+    TypeFamilies
+    TypeOperators
+    UndecidableInstances
+    ViewPatterns
+  ghc-options:
+    -Wall
+
+
 library
+  import:              language
 
   exposed-modules:     Source
                        Source.Input
@@ -27,10 +67,6 @@ library
                ,       semigroups >=0.16
                ,       mtl >= 2.2.1
                ,       bifunctors
-               ,       inj
-               ,       inj-base
-               ,       slay-core
-               ,       slay-combinators
                ,       slay-cairo
                ,       sdam
                ,       source-plugin
@@ -38,52 +74,95 @@ library
 
   hs-source-dirs:      driver
 
-  default-language:    Haskell2010
-
-  ghc-options:         -Wall -O2
+  ghc-options:         -O2
   ghc-prof-options:    -fprof-auto
                        -auto-all
                        -caf-all
 
 library source-plugin
+  import:              language
   exposed-modules:     Source.Plugin
                        Source.Plugin.Precedence
   build-depends:       base >=4.7,
                        unordered-containers, text, primitive,
                        hashable, sdam
   hs-source-dirs:      plugin
-  default-language:    Haskell2010
-  ghc-options:         -Wall -O2
+  ghc-options:         -O2
   ghc-prof-options:    -fprof-auto
                        -auto-all
                        -caf-all
 
 
 library source-language-haskell
+  import:              language
   exposed-modules:     Source.Language.Haskell
   build-depends:       base >=4.7,
                        unordered-containers, text, primitive,
                        sdam, source-plugin
   hs-source-dirs:      lang/haskell
-  default-language:    Haskell2010
-  ghc-options:         -Wall -O2
+  ghc-options:         -O2
   ghc-prof-options:    -fprof-auto
                        -auto-all
                        -caf-all
 
 library source-language-morte
+  import:              language
   exposed-modules:     Source.Language.Morte
   build-depends:       base >=4.7,
                        unordered-containers, text, primitive,
                        sdam, source-plugin
   hs-source-dirs:      lang/morte
-  default-language:    Haskell2010
-  ghc-options:         -Wall -O2
+  ghc-options:         -O2
   ghc-prof-options:    -fprof-auto
                        -auto-all
                        -caf-all
 
+library sdam
+  import: language
+  exposed-modules:
+    Sdam.Syn
+    Sdam.Core
+    Sdam.Parser
+    Sdam.Printer
+    Sdam.Validator
+  build-depends:
+    base, containers, unordered-containers, hashable, text, transformers,
+    megaparsec, parser-combinators, pretty
+  hs-source-dirs: sdam
+  ghc-options: -Wno-partial-type-signatures
+
+library slay-cairo
+  import: language
+
+  exposed-modules:
+    Source.Layout.Inj
+    Source.Layout.NonNegative
+    Source.Layout.Core
+    Source.Layout.Combinators
+    Source.Layout.Cairo
+    Source.Layout.Cairo.Element
+    Source.Layout.Cairo.Prim
+    Source.Layout.Cairo.Prim.Color
+    Source.Layout.Cairo.Prim.Rect
+    Source.Layout.Cairo.Prim.Text
+    Source.Layout.Cairo.Prim.Curve
+    Source.Layout.Cairo.Prim.Circle
+
+  build-depends:
+    base,
+    text,
+    cairo,
+    pango,
+    hashable,
+    lrucaching,
+    num-non-negative
+
+  hs-source-dirs:
+    layout
+
 executable foundry
+  import:              language
+
   main-is:             Foundry.hs
 
   build-depends:       base, unordered-containers, megaparsec,
@@ -91,15 +170,15 @@ executable foundry
 
   hs-source-dirs:      bin
 
-  default-language:    Haskell2010
-
-  ghc-options:         -Wall -threaded -O2
+  ghc-options:         -threaded -O2
   ghc-prof-options:    -fprof-auto
                        -rtsopts
                        -auto-all
                        -caf-all
 
 executable hask
+  import:              language
+
   main-is:             Hask.hs
 
   build-depends:       base, unordered-containers, megaparsec,
@@ -107,9 +186,7 @@ executable hask
 
   hs-source-dirs:      bin
 
-  default-language:    Haskell2010
-
-  ghc-options:         -Wall -threaded -O2
+  ghc-options:         -threaded -O2
 
   ghc-prof-options:    -fprof-auto
                        -rtsopts
@@ -117,26 +194,29 @@ executable hask
                        -caf-all
 
 executable morte-to-sdam
+  import:              language
+
   main-is:             MorteToSdam.hs
   build-depends:       base, text, containers, morte, sdam
   hs-source-dirs:      bin
-  default-language:    Haskell2010
-  ghc-options:         -Wall -threaded -O2
+  ghc-options:         -threaded -O2
 
 executable haskell-to-sdam
+  import:              language
+
   main-is:             HaskellToSdam.hs
   build-depends:       base, text, containers, unordered-containers, containers,
                        ghc-lib-parser, sdam, source-language-haskell
   hs-source-dirs:      bin
-  default-language:    Haskell2010
-  ghc-options:         -Wall -threaded -O2
+  ghc-options:         -threaded -O2
 
 executable sdam-to-svg
+  import:              language
+
   main-is:             SdamToSvg.hs
   build-depends:       base, megaparsec, cairo, filepath,
-                       slay-core, sdam, foundry,
+                       slay-cairo, sdam, foundry,
                        source-language-haskell,
                        source-language-morte
   hs-source-dirs:      bin
-  default-language:    Haskell2010
-  ghc-options:         -Wall -threaded -O2
+  ghc-options:         -threaded -O2

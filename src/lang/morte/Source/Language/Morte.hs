@@ -1,6 +1,4 @@
-{-# LANGUAGE MonoLocalBinds #-}
 {-# LANGUAGE OverloadedLists #-}
-{-# LANGUAGE OverloadedStrings #-}
 
 module Source.Language.Morte where
 
