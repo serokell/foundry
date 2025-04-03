@@ -1,8 +1,3 @@
-{-# LANGUAGE LambdaCase #-}
-{-# LANGUAGE NamedFieldPuns #-}
-{-# LANGUAGE ScopedTypeVariables #-}
-{-# LANGUAGE TypeApplications #-}
-
 module Source
   ( runSource,
   )
@@ -16,7 +11,7 @@ import Data.Tuple
 import qualified Graphics.UI.Gtk as Gtk
 import qualified Graphics.Rendering.Cairo as Cairo
 import Sdam.Parser (ParsedValue)
-import Slay.Core
+import Source.Layout.Core
 import Source.Input (InputEvent (..), Modifier (..))
 import qualified Source.NewGen as NG
 import Source.Phaser

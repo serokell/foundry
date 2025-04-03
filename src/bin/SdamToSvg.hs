@@ -1,13 +1,8 @@
-{-# LANGUAGE LambdaCase #-}
-{-# LANGUAGE OverloadedLists #-}
-{-# LANGUAGE OverloadedStrings #-}
-{-# LANGUAGE TypeApplications #-}
-
 module Main where
 
 import Graphics.Rendering.Cairo
 import Sdam.Parser (pValue, parse)
-import Slay.Core
+import Source.Layout.Core
 import Source.Language.Haskell
 import Source.Language.Morte
 import Source.NewGen
